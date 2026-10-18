@@ -46,6 +46,57 @@ internal sealed partial class UnityUiRuntime
         /// <summary>A game window drawn wider than the kit frame (centered unless docked; height capped at 70%).</summary>
         private bool WideGameWindow => _gameWindow && WideAsk > PanelWidth;
 
+        /// <summary>
+        /// The narrow strip's frame width for this pass (0: not a narrow strip). Read once at the start of each layout pass
+        /// (<see cref="UpdateStripWidth"/>), so the per-row width and column reads do not measure the canvas again.
+        /// </summary>
+        private float _stripWidth;
+
+        /// <summary>The title was hidden because this panel became a narrow strip (given back when it stops being one).</summary>
+        private bool _titleHiddenByStrip;
+
+        /// <summary>The narrow-strip state changed since the last pass: the viewport insets are written again.</summary>
+        private bool _stripChanged;
+
+        /// <summary>
+        /// Start of a layout pass: is this a narrow top or bottom strip (<see cref="UiDockLayout.IsNarrowStrip"/>)? A narrow
+        /// strip draws at its dock width with no title band; leaving that state shows the title again.
+        /// </summary>
+        private void UpdateStripWidth()
+        {
+            float next = 0f;
+            if (Docked && !IsStandardWindow && !_strip && !_sidebar && _dock!.Value.Horizontal)
+            {
+                float canvas = AvailableWidth();
+                if (UiDockLayout.IsNarrowStrip(_dock.Value, canvas)) next = UiDockLayout.FrameWidth(_dock.Value, canvas);
+            }
+
+            if (Math.Abs(next - _stripWidth) > 0.5f || (next > 0f) != (_stripWidth > 0f)) _stripChanged = true;
+            _stripWidth = next;
+            try
+            {
+                if (next > 0f && Title != null && Title.activeSelf)
+                {
+                    Title.SetActive(false);
+                    _titleHiddenByStrip = true;
+                }
+                else if (next <= 0f && _titleHiddenByStrip)
+                {
+                    _titleHiddenByStrip = false;
+                    if (Title != null && !_hideTitle && !_dialog) Title.SetActive(true);
+                }
+            }
+            catch { /* the title keeps its state; the frame is still laid out */ }
+        }
+
+        /// <summary>Consume <see cref="_stripChanged"/>: true once after the narrow-strip state changed.</summary>
+        private bool TakeStripChanged()
+        {
+            bool changed = _stripChanged;
+            _stripChanged = false;
+            return changed;
+        }
+
         internal void SetDock(UiDockSpec? dock)
         {
             if (Released) return;

@@ -421,7 +421,7 @@ internal sealed partial class UnityUiRuntime
         private void NoteRoom(float viewH, float screen, float footerBand, float topChrome, float content)
         {
             _roomContent = content;
-            if (_menuPane || _embeddedHeight > 0 || DialogSized || _sidebar || _strip)
+            if (_menuPane || _embeddedHeight > 0 || DialogSized || _sidebar || _strip || _stripWidth > 0f)
             {
                 _roomViewport = viewH;
                 return;

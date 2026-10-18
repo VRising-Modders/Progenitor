@@ -419,6 +419,144 @@ public sealed class UiDockTests : IDisposable
         Assert.Equal(0f, UiDockLayout.PlaceAlone(Bottom(margin: 24f), w, h).X, 3);
     }
 
+    // ---- narrow strips ---------------------------------------------------------------------------------------------------
+
+    /// <summary>The game's container menu: two 620-unit halves 448 apart in one centered row (the shipped layout).</summary>
+    private const float ContainerGap = 448f;
+
+    private static UiDockSpec TopFraction(float fraction) => new(UiDock.Top, UiDockAlign.Center, 16f, 0f, fraction);
+
+    [Fact]
+    public void A_strip_may_be_narrower_than_the_kit_frame_a_side_dock_may_not()
+    {
+        Assert.Equal(300f, UiDockLayout.FrameWidth(Top(width: 300f), 1920f), 3);
+        Assert.Equal(420f, UiDockLayout.FrameWidth(Bottom(width: 420f), 3840f), 3);
+        Assert.Equal(UiDockLayout.MinStripWidth, UiDockLayout.FrameWidth(Top(width: 100f), 1920f), 3);
+        Assert.True(UiDockLayout.IsNarrowStrip(Top(width: 300f), 1920f));
+        // No ask, or 640 and more: the ordinary frame rules.
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(Top(), 1920f), 3);
+        Assert.False(UiDockLayout.IsNarrowStrip(Top(), 1920f));
+        Assert.Equal(800f, UiDockLayout.FrameWidth(Top(width: 800f), 1920f), 3);
+        Assert.False(UiDockLayout.IsNarrowStrip(Top(width: 640f), 1920f));
+        // A share of the canvas is narrow only while it comes to less than 640 units.
+        Assert.Equal(384f, UiDockLayout.FrameWidth(TopFraction(0.2f), 1920f), 2);
+        Assert.True(UiDockLayout.IsNarrowStrip(TopFraction(0.2f), 1920f));
+        Assert.Equal(768f, UiDockLayout.FrameWidth(TopFraction(0.2f), 3840f), 2);
+        Assert.False(UiDockLayout.IsNarrowStrip(TopFraction(0.2f), 3840f));
+        // Left and right keep the 640 floor.
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(Left(width: 300f), 1920f), 3);
+        Assert.False(UiDockLayout.IsNarrowStrip(Left(width: 300f), 1920f));
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(Right(fraction: 0.1f), 1920f), 3);
+    }
+
+    [Fact]
+    public void A_narrow_strip_is_as_tall_as_its_content_down_to_48()
+    {
+        Assert.Equal(UiDockLayout.MinStripHeight, UiDockLayout.StripFrameHeight(20f, 0f), 3);
+        // One button row: the content's top pad, the row and the bottom pad.
+        float oneRow = PanelLayout.PadTop + 40f + PanelLayout.PadBottom;
+        Assert.Equal(oneRow, UiDockLayout.StripFrameHeight(oneRow, 0f), 3);
+        Assert.Equal(oneRow + 24f, UiDockLayout.StripFrameHeight(oneRow, 24f), 3);
+        Assert.Equal(UiDockLayout.MinStripHeight, UiDockLayout.StripFrameHeight(float.NaN, -3f), 3);
+        // Far below the kit's 200 floor, and the dock's area cap still holds.
+        Assert.True(oneRow < PanelLayout.MinPanelHeight);
+        var place = UiDockLayout.PlaceAlone(Top(width: 300f), 1920f, 1080f);
+        Assert.Equal(1080f * 0.5f - 16f, place.CenterFor(oneRow).Y + oneRow * 0.5f, 3);
+    }
+
+    [Theory]
+    [InlineData(240f, 200f)]
+    [InlineData(448f, 408f)]
+    [InlineData(600f, 560f)]
+    public void A_narrow_strip_rows_keep_the_kit_side_insets_and_its_columns_fit(float frame, float row)
+    {
+        Assert.Equal(row, UiDockLayout.StripRowWidth(frame), 3);
+        var columns = MenuPanelLayout.Columns(row, hasControl: true);
+        Assert.True(columns.LabelWidth > 0f && columns.ControlWidth > 0f);
+        Assert.True(columns.LabelWidth + columns.ControlWidth <= row + 0.01f);
+    }
+
+    public static IEnumerable<object[]> GapStrips()
+    {
+        foreach (var screen in Aspects())
+            foreach (float width in new[] { UiDockLayout.MinStripWidth, 320f, 420f, ContainerGap })
+                yield return new object[] { screen[0], screen[1], width };
+    }
+
+    [Theory]
+    [MemberData(nameof(GapStrips))]
+    public void A_centered_strip_no_wider_than_the_gap_sits_entirely_within_it(float w, float h, float width)
+    {
+        // The gap is the screen's middle 448 units at every aspect: the menu row is centered on the canvas.
+        float gapLeft = -ContainerGap * 0.5f, gapRight = ContainerGap * 0.5f;
+        foreach (var spec in new[] { Top(margin: 24f, width: width), Bottom(margin: 24f, width: width) })
+        {
+            float fw = UiDockLayout.FrameWidth(spec, w);
+            var place = UiDockLayout.PlaceAlone(spec, w, h, fw);
+            Assert.Equal(width, fw, 3);
+            Assert.True(place.X - fw * 0.5f >= gapLeft - 0.01f, spec.Side + " " + width + " on " + w + "x" + h + ": past the gap's left edge");
+            Assert.True(place.X + fw * 0.5f <= gapRight + 0.01f, spec.Side + " " + width + " on " + w + "x" + h + ": past the gap's right edge");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Aspects))]
+    public void A_strip_wider_than_the_gap_does_not_fit_it(float w, float h)
+    {
+        var spec = Top(width: ContainerGap + 20f);
+        float fw = UiDockLayout.FrameWidth(spec, w);
+        var place = UiDockLayout.PlaceAlone(spec, w, h, fw);
+        Assert.True(place.X - fw * 0.5f < -ContainerGap * 0.5f);
+    }
+
+    [Fact]
+    public void Narrow_strips_line_up_at_their_own_widths()
+    {
+        var row = new[] { Top(width: 300f), Top(width: 240f) };
+        var a = UiDockLayout.Place(row, 0, 1920f, 1080f, 300f);
+        var b = UiDockLayout.Place(row, 1, 1920f, 1080f, 240f);
+        Assert.Equal(PanelFlow.ColumnGap, (b.X - 120f) - (a.X + 150f), 3);
+        Assert.Equal(0f, ((a.X - 150f) + (b.X + 120f)) * 0.5f, 3);
+    }
+
+    [Fact]
+    public void A_panel_docked_as_a_narrow_strip_reports_its_width()
+    {
+        var strip = (UiPanelHandle)UiApi.Panel("Gap strip", _owner, "example.mod").GameWindow();
+        strip.Dock(UiDock.Top, new UiDockOptions { Align = UiDockAlign.Center, Width = 420f });
+        Assert.Equal(420f, UiDockLayout.FrameWidth(strip.EffectiveDock!.Value, 1920f), 3);
+        Assert.True(UiDockLayout.IsNarrowStrip(strip.EffectiveDock!.Value, 3840f));
+        // The same width on a side dock is the 640 frame.
+        strip.Dock(UiDock.Left, new UiDockOptions { Width = 420f });
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(strip.EffectiveDock!.Value, 1920f), 3);
+    }
+
+    [Fact]
+    public void The_gallery_docked_panel_walks_the_edges_and_is_a_narrow_strip_on_top_and_bottom()
+    {
+        var lines = new List<string>();
+        using var demo = new Progenitor.ControlsSample.GalleryDocked(() => UiApi.Panel("Docked panel", _owner, "example.mod"), lines.Add);
+        demo.Toggle();
+        var window = (UiPanelHandle)demo.Window!;
+        Assert.Equal(UiDock.Left, window.DockSide());
+        demo.NextEdge();
+        demo.NextEdge();
+        Assert.Equal((UiDock.Top, UiDockAlign.Center), demo.Placement);
+        Assert.Equal(Progenitor.ControlsSample.GalleryDocked.StripWidth, UiDockLayout.FrameWidth(window.EffectiveDock!.Value, 1920f), 3);
+        Assert.True(Progenitor.ControlsSample.GalleryDocked.StripWidth <= ContainerGap);
+        demo.NextAlign();
+        Assert.Equal(UiDockAlign.End, demo.Placement.Align);
+        demo.ToggleWidth();
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(window.EffectiveDock!.Value, 1920f), 3);
+        demo.ToggleWidth();
+        demo.NextEdge();
+        Assert.Equal((UiDock.Bottom, UiDockAlign.End), demo.Placement);
+        demo.NextEdge();
+        Assert.Equal((UiDock.Left, UiDockAlign.Center), demo.Placement);
+        Assert.Equal(0f, demo.AskedWidth);
+        Assert.Contains(lines, l => l.Contains("Top, center, 420 wide"));
+    }
+
     [Fact]
     public void Side_docks_keep_their_alignments_and_gain_start_and_end()
     {

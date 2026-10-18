@@ -11647,7 +11647,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
 
         private float TitleBand =>
-            _embeddedWidth > 0 ? 8f : _dialog ? DialogLayout.FrameTopPad
+            _embeddedWidth > 0 ? 8f : _stripWidth > 0f ? 0f : _dialog ? DialogLayout.FrameTopPad
             // P7b: a game window that draws its own title row (the tip card's dialog rows) keeps only the dialog's top pad.
             : _gameWindow && _hideTitle && !_menuPane ? DialogLayout.FrameTopPad
             : _menuPane && (MenuPaneModes.Titleless(_mode) || _hideTitle) ? 0f : PanelLayout.HeaderHeight;
@@ -11866,7 +11866,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         /// <summary>The content's row width, whatever row is being placed (MENUKIT2: the description column's ruler).</summary>
         internal float FullRowWidth =>
-            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || WideGameWindow) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;
+            _embeddedWidth > 0 ? _embeddedWidth - 44 : _stripWidth > 0f ? UiDockLayout.StripRowWidth(_stripWidth) : _menuPane ? _menuGeometry.RowWidth : (_dialog || WideGameWindow) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;
 
         /// <summary>
         /// MENUKIT2 round D: while a row below the first settings row is placed beside the description
@@ -11876,7 +11876,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         public RowColumns Columns(bool hasControl) =>
             _grid
                 ? RowGrid.Columns(hasControl)
-                : _menuPane || _embeddedWidth > 0
+                : _menuPane || _embeddedWidth > 0 || _stripWidth > 0f
                     ? MenuPanelLayout.Columns(ContentRowWidth, hasControl)
                     : PanelLayout.Columns(hasControl);
 
@@ -12650,7 +12650,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// WIDEDIALOG1: this panel's frame width: a menu pane's geometry, a wide dialog's asked width capped to the
         /// canvas (<see cref="DialogLayout.FrameWidthFor"/>), else the constant <see cref="PanelWidth"/>.
         /// </summary>
-        internal float FrameWidth => _embeddedWidth > 0 ? _embeddedWidth : _menuPane ? _menuGeometry.Width
+        internal float FrameWidth => _embeddedWidth > 0 ? _embeddedWidth : _stripWidth > 0f ? _stripWidth : _menuPane ? _menuGeometry.Width
             : _dialog && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
             : WideGameWindow ? DialogLayout.FrameWidthFor(WideAsk, AvailableWidth())
             : IsStandardWindow ? StandardFrameWidth
@@ -14066,6 +14066,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // Job FUI32, and it belongs to the pass rather than to ApplyLayout: `firstShow` is
                 // the one condition that means "this panel has a canvas it has never measured".
                 if (firstShow) ResetSettleBudget();
+                // DOCK1: whether this is a narrow top or bottom strip (its width, no title band) is decided once per pass.
+                UpdateStripWidth();
 
                 if (_menuPane) UpdateMenuGeometry(AvailableWidth(), AvailableHeight());
 
@@ -14112,7 +14114,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         : 0f;
                     refitTop = MenuPanelLayout.TopChromeHeight(topHeights) + headerChrome;
                     refitBottom = bottomChrome;
-                    refitForce = _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized || IsStandardWindow);
+                    // DOCK1: a narrow strip (no title band) writes its insets each pass, and once more when it stops being one.
+                    refitForce = TakeStripChanged() | _stripWidth > 0f
+                        || _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized || IsStandardWindow);
                     FitChromeInsets(refitTop, refitBottom, force: refitForce);
                     _footerInset = footerBand;
                     EnsureHeaderBand(headerChrome, MenuPanelLayout.TopChromeHeight(topHeights));
@@ -14156,11 +14160,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // DIALOGS1: a dialog is exactly as tall as its content, its top pad and its footer -
                 // no title band and no 200 px floor (the empty band above the live dialog's title).
                 float panelHeight = _embeddedHeight > 0 ? _embeddedHeight : _menuPane ? _menuGeometry.Height
+                    // DOCK1: a narrow strip is as tall as its content (no title band, no 200 floor; at least 48).
+                    : _stripWidth > 0f ? UiDockLayout.StripFrameHeight(contentHeight, footerBand)
                     : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
                     : IsStandardWindow ? PanelLayout.PanelHeightFor(StandardBodyHeight(contentHeight, refitTop) + footerBand, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
                 // HUB1: a window with tabs may ask a least content height (UiTabsOptions.MinContentHeight), capped like the rest.
-                if (_minContentHeight > contentHeight && _embeddedHeight <= 0 && !_menuPane && !DialogSized)
+                if (_minContentHeight > contentHeight && _embeddedHeight <= 0 && !_menuPane && !DialogSized && _stripWidth <= 0f)
                     panelHeight = Math.Max(panelHeight, IsStandardWindow
                         ? PanelLayout.PanelHeightFor(StandardBodyHeight(_minContentHeight, refitTop) + footerBand, available.Value)
                         : PanelLayout.PanelHeightFor(_minContentHeight + footerBand, available.Value));
@@ -14191,6 +14197,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         rt.sizeDelta = new Vector2(0f, contentHeight);
                         float viewH = _sidebar
                             ? MenuPanelLayout.ListViewportHeight(panelHeight)
+                            : _stripWidth > 0f ? Math.Max(0f, panelHeight - footerBand)
                             : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
                             : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
                         // HUB1: the room a table that fills the panel reads (its tallest viewport, the content now).
@@ -14289,6 +14296,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // could never report because it had no idea it was overflowing.
                 float viewport = _sidebar
                     ? MenuPanelLayout.ListViewportHeight(panelHeight)
+                    : _stripWidth > 0f ? Math.Max(0f, panelHeight - footerBand)
                     : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand)
                     : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
                 bool scrolls = PanelLayout.Scrolls(contentHeight, viewport);

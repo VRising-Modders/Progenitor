@@ -52,13 +52,16 @@ public sealed class UiDockOptions
 
     /// <summary>
     /// The frame width in panel units, for a game window (<see cref="UiLook.GameWindow(IUiPanel)"/>); 0 keeps the window's own
-    /// width. The frame is never narrower than the kit's 640 frame and never wider than 90% of the screen.
+    /// width. On a left or right edge the frame is never narrower than the kit's 640 frame; on a top or bottom edge a
+    /// width under 640 makes a narrow strip (any floating panel): drawn that wide, at least 240, with no title band and
+    /// as tall as its content, at least 48. Never wider than 90% of the screen.
     /// </summary>
     public float Width { get; set; }
 
     /// <summary>
     /// The frame width as a share of the screen's width (0.3 is 30%), for a game window; it follows a resolution change.
-    /// More than 0 and at most 0.9; it wins over <see cref="Width"/>. The 640 floor still applies.
+    /// More than 0 and at most 0.9; it wins over <see cref="Width"/>. The 640 floor still applies on a side; on a top or
+    /// bottom edge a share under 640 units makes a narrow strip, as <see cref="Width"/> does.
     /// </summary>
     public float WidthFraction { get; set; }
 }
@@ -238,9 +241,50 @@ internal static class UiDockLayout
         return dock.Fraction > 0f ? dock.Fraction * canvas : dock.Width;
     }
 
-    /// <summary>The frame width a dock is drawn at: the kit's 640 frame at least, a wide ask capped at 90% of the canvas.</summary>
-    internal static float FrameWidth(in UiDockSpec dock, float canvasWidth) =>
-        UiWindowLayout.FrameWidthFor(AskedWidth(dock, canvasWidth), Sane(canvasWidth, PanelFlow.FallbackCanvasWidth));
+    /// <summary>
+    /// The frame width a dock is drawn at: the kit's 640 frame at least, a wide ask capped at 90% of the canvas. A top or
+    /// bottom strip that asks for less than 640 is drawn at its ask, never below <see cref="MinStripWidth"/>
+    /// (<see cref="IsNarrowStrip"/>).
+    /// </summary>
+    internal static float FrameWidth(in UiDockSpec dock, float canvasWidth)
+    {
+        float canvas = Sane(canvasWidth, PanelFlow.FallbackCanvasWidth);
+        float asked = AskedWidth(dock, canvas);
+        if (IsNarrowAsk(dock, asked)) return Math.Max(MinStripWidth, asked);
+        return UiWindowLayout.FrameWidthFor(asked, canvas);
+    }
+
+    /// <summary>The narrowest a top or bottom strip is drawn.</summary>
+    internal const float MinStripWidth = 240f;
+
+    /// <summary>The shortest a narrow strip is drawn (one line of text and its pads).</summary>
+    internal const float MinStripHeight = 48f;
+
+    private static bool IsNarrowAsk(in UiDockSpec dock, float asked) =>
+        dock.Horizontal && asked > 0f && asked < UiWindowLayout.BasicFrameWidth - 0.01f;
+
+    /// <summary>
+    /// A top or bottom strip whose width ask (<c>Width</c> or <c>WidthFraction</c> of the canvas) is under the kit's 640
+    /// frame: it is drawn at that width (at least <see cref="MinStripWidth"/>), with no title band and as tall as its
+    /// content (<see cref="StripFrameHeight"/>). A side dock, and a strip that asks for nothing or for 640 and more, keep
+    /// the ordinary frame rules.
+    /// </summary>
+    internal static bool IsNarrowStrip(in UiDockSpec dock, float canvasWidth) =>
+        IsNarrowAsk(dock, AskedWidth(dock, canvasWidth));
+
+    /// <summary>
+    /// A narrow strip's frame height: its content (the rows and their pads, <see cref="PanelLayout.ContentHeight"/>) and
+    /// its footer band, at least <see cref="MinStripHeight"/>. The dock's area cap applies after.
+    /// </summary>
+    internal static float StripFrameHeight(float contentHeight, float footerBand)
+    {
+        float content = float.IsNaN(contentHeight) || contentHeight < 0f ? 0f : contentHeight;
+        float band = float.IsNaN(footerBand) || footerBand < 0f ? 0f : footerBand;
+        return Math.Max(MinStripHeight, content + band);
+    }
+
+    /// <summary>A narrow strip's row width: the frame less the viewport's side insets (the kit's 40 in all).</summary>
+    internal static float StripRowWidth(float frameWidth) => DialogLayout.ContentRowWidth(Math.Max(MinStripWidth, frameWidth));
 
     /// <summary>
     /// How far from the screen edge dock <paramref name="index"/> of <paramref name="docks"/> starts (its outer edge) and

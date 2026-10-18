@@ -7,9 +7,10 @@ namespace Progenitor.ControlsSample;
 /// The gallery's docked panel: a plain floating game window docked to the left edge (<c>panel.Dock(UiDock.Left)</c>),
 /// vertically centered, the way a preview's controls or a Find panel sit beside the scene. Its buttons move it round the
 /// edges (left, right, top, bottom), step its alignment along the edge (center and top on a side; start, center and end
-/// on the top or bottom), and widen it to 30% of the screen, so the placement can be seen live; the other windows (the
-/// gallery's own Basic window, say) keep clear of a side dock. Every action writes a log line. Game-free: the panel
-/// comes from the plugin.
+/// on the top or bottom), and widen it to 30% of the screen on a side. On the top and bottom edges it is a narrow
+/// strip, 420 wide (it fits the gap in the middle of the game's container window), with no title band and as tall as
+/// its rows; Width switches it to the 640 frame and back. The other windows (the gallery's own Basic window, say) keep
+/// clear of a side dock. Every action writes a log line. Game-free: the panel comes from the plugin.
 /// </summary>
 internal sealed class GalleryDocked : IDisposable
 {
@@ -47,19 +48,40 @@ internal sealed class GalleryDocked : IDisposable
         return "opened " + Describe();
     }
 
+    /// <summary>The narrow strip's width: it fits the 448-unit gap in the middle of the game's container window.</summary>
+    internal const float StripWidth = 420f;
+
     private string Describe() =>
-        _side + ", " + _options.Align.ToString().ToLowerInvariant() + (_options.WidthFraction > 0f ? ", 30% wide" : "");
+        _side + ", " + _options.Align.ToString().ToLowerInvariant()
+        + (_options.WidthFraction > 0f ? ", 30% wide" : _options.Width > 0f ? ", " + _options.Width + " wide" : "");
 
     private static bool Strip(UiDock side) => side is UiDock.Top or UiDock.Bottom;
 
-    /// <summary>The next edge round the screen: left, right, top, bottom. The alignment is kept when the new edge takes it.</summary>
+    /// <summary>
+    /// The next edge round the screen: left, right, top, bottom. The alignment is kept when the new edge takes it. On the
+    /// top and bottom edges it becomes a narrow strip (<see cref="StripWidth"/> wide, no title band, as tall as its rows).
+    /// </summary>
     internal void NextEdge()
     {
+        bool wasStrip = Strip(_side);
         _side = _side switch { UiDock.Left => UiDock.Right, UiDock.Right => UiDock.Top, UiDock.Top => UiDock.Bottom, _ => UiDock.Left };
         if (Strip(_side) && _options.Align == UiDockAlign.Top) _options.Align = UiDockAlign.Start;
         if (!Strip(_side) && _options.Align is UiDockAlign.Start or UiDockAlign.End) _options.Align = UiDockAlign.Center;
+        if (Strip(_side) && !wasStrip) { _options.Width = StripWidth; _options.WidthFraction = 0f; }
+        if (!Strip(_side) && wasStrip) _options.Width = 0f;
         Apply();
     }
+
+    /// <summary>On a side: 30% of the screen or its own width. On the top or bottom: the narrow strip or the 640 frame.</summary>
+    internal void ToggleWidth()
+    {
+        if (Strip(_side)) _options.Width = _options.Width > 0f ? 0f : StripWidth;
+        else _options.WidthFraction = _options.WidthFraction > 0f ? 0f : 0.3f;
+        Apply();
+    }
+
+    /// <summary>The frame width asked for (tests).</summary>
+    internal float AskedWidth => _options.Width;
 
     /// <summary>The next alignment along the edge: center and top on a side; start, center and end on the top or bottom.</summary>
     internal void NextAlign()
@@ -84,11 +106,11 @@ internal sealed class GalleryDocked : IDisposable
         var p = _panel().GameWindow();
         p.ContentAlignment = "left";
         p.Dock(_side, _options);
-        p.Text("Docked to a screen edge: it stays there while other windows open and close, and they keep clear of a side dock.", UiTextStyle.Muted);
+        p.Text("Docked to a screen edge: it stays put while other windows open and close.", UiTextStyle.Muted);
         p.BeginInline();
         p.Button("Next edge").OnClick(NextEdge);
         p.Button("Align").OnClick(NextAlign);
-        p.Button("Width").OnClick(() => { _options.WidthFraction = _options.WidthFraction > 0f ? 0f : 0.3f; Apply(); });
+        p.Button("Width").OnClick(ToggleWidth);
         p.EndInline();
         p.Button("Close").Centered().OnClick(() => { Window?.Hide(); Say("closed"); });
         return p;
