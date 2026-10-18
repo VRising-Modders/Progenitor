@@ -109,6 +109,7 @@ internal static class InventoryRuntime
         _engine.Touched = c => _hub?.Poke(c);
         _book = new ContainerIdRegistry();
         _netIds = new NetworkIdResolver(new ServerNetworkIdSource());
+        PlayerMoveRuntime.Install();
         _loaded = false;
         _store = ModSave.Store(StoreId);
         _ready = _store.WhenReady(store =>
@@ -136,6 +137,8 @@ internal static class InventoryRuntime
         CastleContainerRows.HeartIdResolver = null;
         try { Flush(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Inventory: saving container ids on unload threw: " + e.Message); }
+        try { PlayerMoveRuntime.Uninstall(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Inventory: player-move observer uninstall threw: " + e.Message); }
         _hub?.Clear();
         if (_stamps != null)
         {
@@ -170,6 +173,7 @@ internal static class InventoryRuntime
             long now = Environment.TickCount64;
             _stamps?.Tick();
             _hub?.Tick(now);
+            PlayerMoveRuntime.Tick();
             if (_book is { Dirty: true }) Flush();
             if (now < _nextUpkeep) return;
             _nextUpkeep = now + UpkeepMs;

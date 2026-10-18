@@ -228,6 +228,29 @@ internal sealed class NetworkIdResolver
         return true;
     }
 
+    /// <summary>
+    /// Build the map now for <paramref name="epoch"/>, from a caller that is not under time pressure
+    /// (a frame tick), so the first lookup of a world load does not pay the scan. Never throws.
+    /// </summary>
+    internal void Prime(int epoch, long nowMs)
+    {
+        try
+        {
+            _byIndex.Clear();
+            _epoch = epoch;
+            Rebuild(nowMs);
+            Primes++;
+        }
+        catch
+        {
+            _byIndex.Clear();
+            _lastRebuild = long.MinValue;
+        }
+    }
+
+    /// <summary>How many of <see cref="Rebuilds"/> were <see cref="Prime"/> calls (the rest ran on a lookup miss).</summary>
+    internal int Primes { get; private set; }
+
     private void Rebuild(long nowMs)
     {
         _lastRebuild = nowMs;

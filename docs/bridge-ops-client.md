@@ -326,6 +326,34 @@ a refinement station and a heart you know (bridge `castles` lists the entities):
 
 From bash: `node tools/mcp/call.mjs server inventory_stamp '{"containers":["123:1"]}'`.
 
+## `inventory_moves`
+
+Server only, main thread. **Source-checked, built and game-free tested (`PlayerInventoryMoveTests`);
+not run live.** The [`ctx.Inventory.OnPlayerMove`](modules.md#player-moves) observer through Core's
+public `PlayerInventoryMoveBridge` (not a plugin API). Refused on the client. MCP:
+`progenitor_inventory_moves`.
+
+| Args | Does |
+|---|---|
+| `{}` | Reads only: `installed`, `hooked` (the system hooks are in place: a plugin subscribed or the recorder is on), `subscribers`, `recording`, the counters and the last 20 `moves`. |
+| `{"record":true}` / `{"record":false}` | Turns the bridge recorder on (the hooks run with no plugin subscribed, and the server log gets one `Inventory: player move …` line per move) or off. |
+| `{"last":50}` | Returns that many recent moves (0 to 256; the ring keeps 256). |
+| `{"clear":true}` | Forgets the recent moves first. |
+
+Each move: `seq`, `utc`, `user` and `character` (`index:version`), `kind`, `direction`, `item`
+(hash), `amount`, `container` (`c-…` or null), `castle`, `inventory` (`index:version`, `#1` for a
+station output), `countBefore`, `countAfter`, `counterpart`, `counterpartInventory`,
+`counterpartContainer`, `requests`, `ambiguous`, `incomplete`. Counters: `updates` (handled system updates with
+a request), `requests`, `truncated` (past 64 per update), `playerOnly` (named only the player's own
+inventories), `unresolved` (request sides whose network id did not resolve), `unchanged` (requests
+after which none of their containers had changed: refused or nothing to do), `unread`, `lostAfter`,
+`raised`, `dropped`, `handlerErrors`, `lastError`, and the network-id map's `rebuilds`, `primes` (built from the frame tick once per world load), `hookRebuildMaxMicroseconds` (the slowest rebuild a miss ran inside the game's update) and `primeMicroseconds`: record these on the live run, the rebuild cost is not measured yet.
+
+Live check: the steps in [modules.md, Player moves: live acceptance](modules.md#player-moves-live-acceptance-procedure-not-run).
+From bash: `node tools/mcp/call.mjs server inventory_moves '{"record":true,"clear":true}'`, move
+items by hand, then `node tools/mcp/call.mjs server inventory_moves '{"last":10}'`. Turn the
+recorder off afterwards: `{"record":false}`.
+
 ## `dye`
 
 Client, main thread, read only. Reads Core's [Dye all](modules.md#dye-all) through Core's `Progenitor.Dye.DyeAllTestBridge`

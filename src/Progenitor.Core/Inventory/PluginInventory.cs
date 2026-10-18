@@ -300,6 +300,30 @@ public sealed partial class PluginInventory
         return watch;
     }
 
+    // ---- player moves ----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Call <paramref name="handler"/> for every change a player makes by hand to a non-player
+    /// inventory (a castle chest, station or heart, a servant): a drag in or out, shift-click, take
+    /// all, split, sort, smart merge, drop or equip from the window. One
+    /// <see cref="PlayerInventoryMove"/> per container and item: who (<c>FromCharacter</c>), which
+    /// container (<see cref="PlayerInventoryMove.Container"/>, <see cref="PlayerInventoryMove.Inventory"/>),
+    /// the item, the amount and the direction (In, Out, Within). Amounts are the container's real
+    /// change around the game's handling of the request: a refused request raises nothing, a partial
+    /// one raises what moved. Observe only: the request is never changed or held back. Called on the
+    /// main thread from the frame tick after the move, never inside the game's update. Moves between
+    /// a player's own inventories (a bag sort) are not raised. Tracked: unload stops it.
+    /// <b>Experimental</b>: source-checked and game-free tested, not live-verified.
+    /// </summary>
+    public IDisposable OnPlayerMove(Action<PlayerInventoryMove> handler)
+    {
+        Require(nameof(OnPlayerMove));
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        var sub = PlayerMoveRuntime.Hub.Subscribe(handler);
+        _ctx.Track(sub);
+        return sub;
+    }
+
     // ---- stable ids (P5) -------------------------------------------------------------------------
 
     /// <summary>
