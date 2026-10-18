@@ -591,6 +591,9 @@ offset ClanRoleValueOffset                       = 0x0  : ClanRole.Value        
 offset TeamDataTeamValueOffset                   = 0x0  : ProjectM.TeamData.TeamValue
 enum   ClanRoleMember                            = 0    : ClanRoleEnum.Member
 enum   ClanRoleLeader                            = 2    : ClanRoleEnum.Leader
+# The game's clan status job reads each member's Controller and the controlled character's Health
+# (UpdateClanStatusSystem lookups); stress_clan refuses a member that lacks either.
+offset ControllerControlledOffset                = 0x0  : ProjectM.Controller.Controlled      # NetworkedEntity, Entity first
 # stress_refine reads a chest's first inventory (instance 0) to keep empty chests free for products.
 offset InventoryInstanceElementExternalInventoryEntityOffset = 0x10 : InventoryInstanceElement.ExternalInventoryEntity # NetworkedEntity, Entity first
 

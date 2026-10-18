@@ -121,6 +121,7 @@ internal static class StressStageOps
                     if (m.ExistingClan.Length > 0) why ??= m.Name + " is already in clan " + m.ExistingClan;
                     else if (seen.IsConnected) why ??= m.Name + " is connected";
                     else if (OfflineUserTeamRules.Decide(seen).Action != OfflineUserTeamAction.Ready) why ??= m.Name + " has no own team (" + string.Join(", ", OfflineUserTeamRules.Missing(seen)) + ")";
+                    else if (ClanStatusShapeMissing(em, user) is string shape) why ??= "status_shape: " + m.Name + " " + shape;
                 }
                 // The live ClanSize setting bounds every clan, as the game's invite path does (the add-member routine does not check it).
                 if (clanSize <= 0) why ??= "the server's ClanSize setting could not be read";
@@ -152,7 +153,7 @@ internal static class StressStageOps
                 "the clan's TeamData: the create step copies the clan prefab's value to members in the same frame; SpawnTeamSystem's cache update only reads team data (readback compares clan and member TeamData)",
                 "ClanSystem_Server.SetClanRole (EntityManager, Entity, ClanRoleEnum; a plain component write) through its generated wrapper, after adding ClanRole to the offline owner",
                 "ClanUtility.SetCharacterClanName is skipped: it needs the user's Controller, which offline owners lack, so it would do nothing",
-                "ClanMemberStatus is left to the game's clan status system",
+                "ClanMemberStatus is filled by the game's clan status system, a Burst job that looks up each member's Controller and its character's Health; a member without them aborted the server live (2026-10-18), so such members are refused (status_shape)",
                 "castle teams are not added to the clan's allies: the game's join path does not do that (each castle team stays allied to its owner's team only, which ClaimCastle asserts)",
             };
             job.Plan = plan;
@@ -578,6 +579,26 @@ internal static class StressStageOps
             try { if (em.Exists(clan)) em.DestroyEntity(clan); } catch { }
             throw;
         }
+    }
+
+    /// <summary>
+    /// What the game's clan status job (UpdateClanStatusSystem.UpdateClanMemberStatusJob) would look up on a
+    /// member and not find. The job reads ClanRole, UserTeam, User, Controller and Health through component
+    /// lookups, inside a Burst job that aborts the process on a missing component (live 2026-10-18: a stress owner
+    /// without Controller crashed the test server right after it joined). Until the job body shows which reads are
+    /// guarded, a member needs a Controller whose controlled character exists and has Health; stress owners have
+    /// neither, so they are refused. Null when nothing is missing. ClanRole is added by the join step itself.
+    /// </summary>
+    private static unsafe string? ClanStatusShapeMissing(EntityManager em, Entity user)
+    {
+        if (!user.Has<Controller>(em)) return "has no Controller (the clan status job reads it)";
+        var type = ComponentIndex.Of<Controller>(ComponentType.AccessMode.ReadOnly);
+        byte* p = (byte*)em.GetComponentDataRawRO(user, type.TypeIndex);
+        if (p == null) return "Controller is unreadable";
+        var character = new Entity { Index = *(int*)(p + Layout.ControllerControlledOffset), Version = *(int*)(p + Layout.ControllerControlledOffset + 4) };
+        if (character == Entity.Null || !em.Exists(character)) return "has no controlled character (the clan status job reads its Health)";
+        if (!character.Has<Health>(em)) return "its character has no Health";
+        return null;
     }
 
     private static unsafe string JoinClan(World world, Entity clan, Entity user, int role, CastleHeartLimitType limit)
