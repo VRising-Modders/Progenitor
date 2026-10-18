@@ -33,7 +33,7 @@ internal sealed partial class UnityUiRuntime
         return list;
     }
 
-    private sealed class NativePanelTabs : IRuntimeVanillaTabs
+    private sealed partial class NativePanelTabs : IRuntimeVanillaTabs
     {
         readonly UnityUiRuntime _runtime;
         readonly VanillaUiSite _site;
@@ -219,12 +219,14 @@ internal sealed partial class UnityUiRuntime
                     int index = i;
                     UiSlotTable.BindClick(slot, () =>
                     {
+                        if (TabOff(index)) return;
                         if (index < _captions.Length) _changed(index);
                         else { _changed(0); Select(index); }
                     });
                     _buttons.Add((button, slot));
                     if (!_runtime.TryWire(slot, UiSlotKind.Click, widget)) { Release(); return; }
                     Activate(button);
+                    WatchTab(i, button);
                 }
                 var trims = new List<Transform>();
                 for (int i = 0; i < _strip.transform.childCount; i++)
@@ -243,6 +245,7 @@ internal sealed partial class UnityUiRuntime
             if (!_flow && _root != null && _strip != null) moved |= PlaceStrip();
             foreach (var item in _nativeTabs) item.Hide();
             ApplySelection();
+            KeepTabStates();
             KeepCaptions();
             PlacePanel();
             if (VanillaTabStripLayout.CheckDue(moved, Time.frameCount, _checkFrame)) SelfCheck();
@@ -428,6 +431,7 @@ internal sealed partial class UnityUiRuntime
                 ["artDonor"] = _artDonor,
                 ["artFixes"] = _artFixes,
                 ["stripArt"] = shown ? StripArt() : null,
+                ["tabStates"] = TabStates(),
             };
         }
 
@@ -1074,7 +1078,7 @@ internal sealed partial class UnityUiRuntime
                 if (_routing._RoutingActive != routing) _routing.SetRoutingActive(routing);
             }
             for (int i = 0; i < _buttons.Count; i++)
-                PaintWorkspaceTab(_buttons[i].go, i == _selected ? MenuRowTone.Selected : MenuRowTone.Catalog);
+                PaintWorkspaceTab(_buttons[i].go, VanillaPanelTabFallback.Highlights(i, _selected, Off) ? MenuRowTone.Selected : MenuRowTone.Catalog);
         }
 
         public void Mount(IRuntimePanel panel)
@@ -1136,6 +1140,7 @@ internal sealed partial class UnityUiRuntime
         void Release()
         {
             ParkPanel();
+            ReleaseTabStates();
             foreach (var item in _content) item.Dispose();
             foreach (var item in _nativeTabs) item.Dispose();
             _content.Clear(); _nativeTabs.Clear();

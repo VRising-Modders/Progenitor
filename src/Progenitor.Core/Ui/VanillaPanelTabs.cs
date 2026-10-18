@@ -11,6 +11,18 @@ public interface IVanillaPanelTabs : IDisposable
     void Mount(IUiPanel panel);
     event Action<VanillaPanelEvent>? PanelChanged;
     event Action<int>? SelectionChanged;
+
+    /// <summary>
+    /// Enable or disable one tab (index zero is the game's own view). A disabled tab is drawn grayed
+    /// out, cannot be clicked, selected or navigated to, and shows <paramref name="reason"/> as its
+    /// hover tooltip. Disabling the selected tab moves the selection to tab zero, or to the first
+    /// enabled tab, raising <see cref="SelectionChanged"/>. The state is kept across targets and
+    /// re-layout until changed. Out-of-range indexes are ignored. Default: no-op.
+    /// </summary>
+    void SetTabEnabled(int index, bool enabled, string reason = "") { }
+
+    /// <summary>False while <see cref="SetTabEnabled"/> has disabled the tab. Default: true.</summary>
+    bool IsTabEnabled(int index) => true;
 }
 
 public static partial class Ui
@@ -33,6 +45,75 @@ internal interface IRuntimeVanillaTabs : IDisposable
     void Select(int index);
     void Mount(IRuntimePanel panel);
     bool ShowRedistribution { get; set; }
+
+    /// <summary>Draw tab <paramref name="index"/> enabled or disabled, with its hover reason. Default: no-op (test fakes).</summary>
+    void SetTabEnabled(int index, bool enabled, string reason) { }
+}
+
+/// <summary>Which tab a selection falls back to when tabs are disabled. Game-free.</summary>
+internal static class VanillaPanelTabFallback
+{
+    /// <summary>
+    /// <paramref name="selected"/> when it is enabled; else tab zero when enabled; else the first
+    /// enabled tab; else tab zero (the game's own view) when every tab is disabled.
+    /// </summary>
+    internal static int Resolve(int selected, IReadOnlyList<bool> disabled)
+    {
+        if (selected >= 0 && selected < disabled.Count && !disabled[selected]) return selected;
+        for (int i = 0; i < disabled.Count; i++)
+            if (!disabled[i]) return i;
+        return 0;
+    }
+
+    /// <summary>
+    /// Whether strip tab <paramref name="index"/> is disabled. The Redistribution tab (the index past
+    /// the captions) is the game's view too, so it follows tab zero: a click on it would select the
+    /// game's view, which a disabled tab zero refuses, and the strip would leave the plugin's tab.
+    /// </summary>
+    internal static bool IsOff(int index, IReadOnlyList<bool> disabled)
+        => index >= 0 && disabled.Count > 0 && (index < disabled.Count ? disabled[index] : disabled[0]);
+
+    /// <summary>
+    /// Strip tab <paramref name="index"/> is drawn selected: it is the selection and is enabled. With
+    /// every tab disabled the selection rests on tab zero, which is then not highlighted.
+    /// </summary>
+    internal static bool Highlights(int index, int selected, IReadOnlyList<bool> disabled)
+        => index == selected && !IsOff(index, disabled);
+}
+
+/// <summary>
+/// How a disabled panel tab is drawn (<see cref="IVanillaPanelTabs.SetTabEnabled"/>). Game-free.
+/// The game's own disabled look when the donor tab's button draws its Disabled state differently
+/// from Normal; otherwise the faint style, the whole tab at <see cref="FaintAlpha"/>.
+/// </summary>
+internal static class VanillaTabDisabledLook
+{
+    /// <summary>The faint style's opacity, as a disabled cell (<c>CellTone.Disabled</c>) is drawn.</summary>
+    internal const float FaintAlpha = .45f;
+
+    internal const string Donor = "donor";
+    internal const string Faint = "faint";
+
+    /// <summary>
+    /// One state target of the tab's button draws Disabled unlike Normal: a color tint whose disabled
+    /// color differs (both clear counts as no difference), a sprite swap with a disabled sprite, or an
+    /// animation with a disabled trigger. <paramref name="transition"/> is Unity's numbering: 1 color
+    /// tint, 2 sprite swap, 3 animation.
+    /// </summary>
+    internal static bool Draws(int transition, (float R, float G, float B, float A) normal,
+        (float R, float G, float B, float A) disabled, bool disabledSprite, bool disabledTrigger)
+    {
+        switch (transition)
+        {
+            case 1:
+                if (normal.A < .02f && disabled.A < .02f) return false;
+                return Math.Abs(normal.R - disabled.R) > .02f || Math.Abs(normal.G - disabled.G) > .02f
+                    || Math.Abs(normal.B - disabled.B) > .02f || Math.Abs(normal.A - disabled.A) > .02f;
+            case 2: return disabledSprite;
+            case 3: return disabledTrigger;
+            default: return false;
+        }
+    }
 }
 
 internal sealed class VanillaPanelTabs : IVanillaPanelTabs
@@ -46,6 +127,8 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
     private IDisposable? _watch;
     private bool _disposed;
     private int _selected;
+    private readonly bool[] _disabled;
+    private readonly string[] _reasons;
     public event Action<VanillaPanelEvent>? PanelChanged;
     public event Action<int>? SelectionChanged;
 
@@ -54,6 +137,8 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
         _owner = owner ?? throw new ArgumentNullException(nameof(owner));
         _site = site;
         _count = captions.Length;
+        _disabled = new bool[_count];
+        _reasons = new string[_count];
         _host = runtime.CreateVanillaTabs(site, captions, i => Selected = i);
         Live.Add(this);
         if (runtime.IsClient) _watch = runtime.WatchSite(site, OnFrame);
@@ -64,7 +149,7 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
         get => _selected;
         set
         {
-            if (_disposed || value < 0 || value >= _count) return;
+            if (_disposed || value < 0 || value >= _count || _disabled[value]) return;
             _host?.Select(value);
             if (value == _selected) return;
             _selected = value;
@@ -75,7 +160,36 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
     public bool ShowRedistribution
     {
         get => _host?.ShowRedistribution ?? false;
-        set { if (!_disposed && _host != null && _host.ShowRedistribution != value) { Selected = 0; _host.ShowRedistribution = value; } }
+        set { if (!_disposed && _host != null && _host.ShowRedistribution != value) { Selected = Fallback(0); _host.ShowRedistribution = value; } }
+    }
+
+    public void SetTabEnabled(int index, bool enabled, string reason = "")
+    {
+        if (_disposed || index < 0 || index >= _count) return;
+        string why = enabled ? "" : reason ?? "";
+        if (_disabled[index] == !enabled && _reasons[index] == why) return;
+        _disabled[index] = !enabled;
+        _reasons[index] = why;
+        _host?.SetTabEnabled(index, enabled, why);
+        // While closed nothing is shown: the next open falls back after PanelChanged.
+        if (!enabled && index == _selected && _tracker.IsOpen) FallBack();
+    }
+
+    public bool IsTabEnabled(int index) => index < 0 || index >= _count || !_disabled[index];
+
+    /// <summary>The reason given when the tab was disabled; empty while it is enabled (tests).</summary>
+    internal string TabReason(int index) => index >= 0 && index < _count ? _reasons[index] ?? "" : "";
+
+    private int Fallback(int wanted) => VanillaPanelTabFallback.Resolve(wanted, _disabled);
+
+    /// <summary>Leave a disabled selected tab for the fallback tab, raising <see cref="SelectionChanged"/>.</summary>
+    private void FallBack()
+    {
+        int next = Fallback(_selected);
+        if (next == _selected) return;
+        _host?.Select(next);
+        _selected = next;
+        SelectionChanged?.Invoke(next);
     }
 
     public void Mount(IUiPanel panel)
@@ -96,6 +210,8 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
         if (change != null) { _selected = 0; _host?.Select(0); }
         _host?.Update(sample);
         if (change != null) PanelChanged?.Invoke(new VanillaPanelEvent(_site, change.Value, _tracker.Target, previous));
+        // A target opens on the game's view; when that tab is disabled, the first enabled tab is selected instead.
+        if (change != null && change.Value != VanillaPanelChange.Closed && !_disposed) FallBack();
     }
 
     /// <summary>
