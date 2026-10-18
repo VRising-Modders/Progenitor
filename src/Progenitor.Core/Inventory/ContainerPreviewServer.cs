@@ -58,11 +58,12 @@ internal static unsafe class ContainerPreviewServer
     {
         if (_installed || !Plugin.IsServerProcess) return;
         _installed = true;
-        SaveGuardEnabled = true;
         CustomEvents.OnReceiveFromClient(ContainerPreviewWire.EventId, OnRequest);
         Plugin.Frame += Tick;
-        // Only a world save suspends the sync entries; the other ModSave.SaveAll callers write only Progenitor's JSON.
-        Persistence.ModSave.BeforeWorldSave += OnBeforeWorldSave;
+        // Only a world save suspends the sync entries (the shared guard; the other ModSave.SaveAll callers write only
+        // Progenitor's JSON).
+        Persistence.WorldSaveGuard.Suspend += OnSaveSuspend;
+        Persistence.WorldSaveGuard.Resume += OnSaveResume;
         try
         {
             _store = Persistence.ModSave.Store(ContainerPreviewSyncRecords.StoreId);
@@ -108,7 +109,8 @@ internal static unsafe class ContainerPreviewServer
         try { CustomEvents.RemoveClientHandler(ContainerPreviewWire.EventId); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: handler removal threw: " + e.Message); }
         Plugin.Frame -= Tick;
-        Persistence.ModSave.BeforeWorldSave -= OnBeforeWorldSave;
+        Persistence.WorldSaveGuard.Suspend -= OnSaveSuspend;
+        Persistence.WorldSaveGuard.Resume -= OnSaveResume;
         foreach (var holder in new List<Holder>(ByUser.Values)) holder.End(CameraObservationEndReason.Unloaded, notify: false, message: "");
         ByUser.Clear();
         // One last try for releases still pending; whatever is left keeps its record for the next run's sweep.
@@ -128,52 +130,28 @@ internal static unsafe class ContainerPreviewServer
         SweepFailures.Clear();
         _records = new ContainerPreviewSyncRecords();
         _sweepSince = double.NaN;
-        Suspension.End();
     }
 
-    /// <summary>The server-wide save suspension: one clock for every preview, so a sync that starts during it starts suspended.</summary>
-    private static readonly SyncSaveSuspension Suspension = new();
-
-    private static bool _guardEnabled = true;
-    private static double _guardOffSince = double.NaN;
-
     /// <summary>
-    /// E1b persistence read only (Dev bridge <c>guard</c>): false leaves the entries in for world saves. It turns itself
-    /// back on after one world save or <see cref="GuardOffMaxSeconds"/>, and at every install.
+    /// E1b persistence read only (Dev bridge <c>guard</c>): false lets the next world save keep the sync entries and the
+    /// streaming origins. The shared <see cref="Persistence.WorldSaveGuard"/> turns it back on after that save, after five
+    /// minutes, and at every install.
     /// </summary>
     internal static bool SaveGuardEnabled
     {
-        get => _guardEnabled;
-        set { _guardEnabled = value; _guardOffSince = value ? double.NaN : Now; }
+        get => Persistence.WorldSaveGuard.Enabled;
+        set => Persistence.WorldSaveGuard.Enabled = value;
     }
 
-    /// <summary>The most the save guard stays off.</summary>
-    internal const double GuardOffMaxSeconds = 300;
-
-    /// <summary>True while a world save holds every preview's entries out.</summary>
-    internal static bool SaveSuspended => Suspension.Active;
-
-    private static DateTime SaveStamp()
-    {
-        try { return Persistence.WorldSaveTrigger.NewestSaveWriteUtc(Persistence.WorldSaveTrigger.SaveFolder()); }
-        catch { return DateTime.MinValue; }
-    }
+    /// <summary>True while a world save holds every preview's entries out (the shared <see cref="Persistence.WorldSaveGuard"/>).</summary>
+    internal static bool SaveSuspended => Persistence.WorldSaveGuard.Active;
 
     /// <summary>
-    /// The game accepted (or the Dev bridge queued) a world save: begin, or extend, the server-wide suspension and take
-    /// every preview's sync entries out until the save file is written. With the save guard off (E1b only) this one save
-    /// keeps the entries, and the guard turns itself back on.
+    /// The shared world-save guard began (or extended) its suspension: take every preview's sync entries out until the
+    /// save file is written.
     /// </summary>
-    private static void OnBeforeWorldSave()
+    private static void OnSaveSuspend()
     {
-        if (!SaveGuardEnabled)
-        {
-            Plugin.Logger?.LogWarning("ContainerPreview: save guard is off (Dev bridge); the inventory sync entries stay in this world save. The guard is on again from now.");
-            SaveGuardEnabled = true;
-            return;
-        }
-        double now = Now;
-        Suspension.Begin(now, SaveStamp());
         foreach (var holder in ByUser.Values)
         {
             try { holder.Sync?.Suspend(); }
@@ -181,17 +159,9 @@ internal static unsafe class ContainerPreviewServer
         }
     }
 
-    /// <summary>Once a second: end the suspension once the save is written; turn a forgotten guard back on.</summary>
-    private static void SaveTick(double now)
+    /// <summary>The save is written: every preview takes its copies again on its next refresh.</summary>
+    private static void OnSaveResume()
     {
-        if (!_guardEnabled && now - _guardOffSince >= GuardOffMaxSeconds)
-        {
-            SaveGuardEnabled = true;
-            Plugin.Logger?.LogInfo("ContainerPreview: save guard back on (" + GuardOffMaxSeconds + " s passed).");
-        }
-        if (!Suspension.Active || !Suspension.ShouldResume(now, SaveStamp())) return;
-        Plugin.Logger?.LogInfo("ContainerPreview: inventory sync entries go back "
-            + (Suspension.TimedOut ? "(the save file never changed in " + SyncSaveSuspension.TimeoutSeconds + " s)." : "after the save was written."));
         foreach (var holder in ByUser.Values) holder.Sync?.Resume();
     }
 
@@ -425,7 +395,7 @@ internal static unsafe class ContainerPreviewServer
         {
             holder.Sync = new ContainerPreviewSync(world, userEntity, container);
             Record(id, user.PlatformId);
-            // A world save is being written: start suspended; the entries go in when the save is (SaveTick).
+            // A world save is being written: start suspended; the entries go in when the save is written (OnSaveResume).
             if (SaveSuspended) holder.Sync.Suspend();
             try { holder.Sync.Refresh(); }
             catch (Exception e)
@@ -484,14 +454,14 @@ internal static unsafe class ContainerPreviewServer
     /// <summary>Once a second: the container still exists and the user still has access; otherwise let go.</summary>
     private static void Tick()
     {
-        if (ByUser.Count == 0 && Releasing.Count == 0 && SweepPending.Count == 0 && !SaveSuspended && SaveGuardEnabled) return;
+        if (ByUser.Count == 0 && Releasing.Count == 0 && SweepPending.Count == 0) return;
         double now = Now;
         if (now < _nextCheck) return;
         _nextCheck = now + 1;
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
         var em = world.EntityManager;
-        SaveTick(now);
+
         RetryReleases(now);
         Sweep(world, now);
         // An admin turning the setting off (or a PvE-only server becoming PvP) ends every running preview.

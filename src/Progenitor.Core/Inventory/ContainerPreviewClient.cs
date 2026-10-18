@@ -247,7 +247,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private IDisposable? _hudHook, _mapperHook, _sendHook, _escape;
     private bool _capturing;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
-    private bool _targetGoneSeen;
+    private Entity _windowTarget = Entity.Null;
     private bool _inventorySeen;
     private double _guardSince;
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
@@ -319,6 +319,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (step == ContainerPreviewStep.OpenWindow)
         {
             ArmWindow();
+            _windowTarget = _target;
             ContainerPreviewClient.WriteOpen(_world, _target);
         }
         if (Machine.Phase == ContainerPreviewPhase.Open) ApplyUi();
@@ -333,13 +334,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         var em = world!.EntityManager;
 
         if (_target != Entity.Null && (!em.Exists(_target) || !SameWords(em, _target, _targetWords))) { _target = Entity.Null; _inventory = Entity.Null; }
-        if (_target == Entity.Null && Machine.Phase == ContainerPreviewPhase.Waiting && now >= _nextLookup)
+        if (_target == Entity.Null && now >= _nextLookup)
         {
             _nextLookup = now + 0.1;
             _target = ContainerPreviewClient.FindByNetworkId(em, _netIndex, _netGeneration);
             if (_target != Entity.Null) ContainerPreviewClient.TryWords(em, _target, out _targetWords.Item1, out _targetWords.Item2, out _targetWords.Item3);
         }
-        s.TargetFound = _target != Entity.Null && !_targetGoneSeen;
+        s.TargetFound = _target != Entity.Null;
         if (s.TargetFound)
         {
             if (_inventory == Entity.Null || !em.Exists(_inventory))
@@ -357,6 +358,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
 
         var window = ContainerPreviewClient.ReadWindow(world);
         s.WindowIsOurs = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target && _target != Entity.Null && window.Interact == Entity.Null;
+        s.ContainerMenuOpen = window.Menu == Layout.HUDMenuTypeContainerMenu;
         s.OtherMenuOpen = window.Menu > 0 && !s.WindowIsOurs;
         return s;
     }
@@ -390,7 +392,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             c.Skip = ContainerPreviewHudGate.ShouldSkip(
                 Machine.OwnsWindow, Machine.Phase == ContainerPreviewPhase.Opening,
                 window.Menu == Layout.HUDMenuTypeContainerMenu,
-                window.Target == _target && _target != Entity.Null,
+                (_windowTarget != Entity.Null ? window.Target == _windowTarget : window.Target == _target && _target != Entity.Null),
                 window.Interact == Entity.Null,
                 LocalGoToMenuCount(c.World));
         }
@@ -427,21 +429,20 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private void BeforeMapper(SystemHookContext c)
     {
         // Also after the close, until the window is confirmed gone (FinishMapperGuard): the mapper must never read a destroyed chest.
-        if (c.World != _world || _mapperHook == null || _target == Entity.Null) return;
+        if (c.World != _world || _mapperHook == null || _windowTarget == Entity.Null) return;
         try
         {
             var em = c.World.EntityManager;
-            if (em.Exists(_target))
+            if (em.Exists(_windowTarget))
             {
                 // The chest is here but its inventory left (a save suspension, the server letting go): hold the window as
                 // it was rather than let the mapper read a missing inventory. The machine closes after a grace period.
                 if (Machine.OwnsWindow && _inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;
                 return;
             }
+            // The chest left this client (a save suspension takes the streaming origin away for a moment, or it is gone):
+            // hold the window; the machine waits a grace period for it to come back, then closes.
             c.Skip = true;
-            if (_targetGoneSeen) return;
-            _targetGoneSeen = true;
-            Dev.MainThread.Post(() => Close(ContainerPreviewCloseReason.TargetGone, "", notify: true));
         }
         catch (Exception e) { WarnOnce("mapper gate", e); }
     }
@@ -573,7 +574,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
                 // Close only the window this preview opened: the container menu, still on our target (or not bound
                 // yet), with no interaction behind it. A real menu the player opened is left alone.
                 if (window.Menu == Layout.HUDMenuTypeContainerMenu && window.Interact == Entity.Null
-                    && (window.Target == _target || window.Target == Entity.Null || reason == ContainerPreviewCloseReason.TargetGone))
+                    && (window.Target == _windowTarget || window.Target == Entity.Null || reason == ContainerPreviewCloseReason.TargetGone))
                     ContainerPreviewClient.CloseMenu(_world);
             }
         }
@@ -621,7 +622,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             if (alive)
             {
                 var window = ContainerPreviewClient.ReadWindow(_world);
-                onTarget = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target;
+                onTarget = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _windowTarget;
             }
             done = ContainerPreviewMachine.MapperGuardDone(alive, onTarget, ContainerPreviewClient.Now - _guardSince);
         }

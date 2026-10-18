@@ -155,6 +155,8 @@ internal struct ContainerPreviewSample
     public bool InventoryReady;
     /// <summary>The game's open HUD menu is the container window, showing this target, with no interaction behind it.</summary>
     public bool WindowIsOurs;
+    /// <summary>The game's open HUD menu is the container window (whatever it shows).</summary>
+    public bool ContainerMenuOpen;
     /// <summary>The game has some HUD menu open that is not ours.</summary>
     public bool OtherMenuOpen;
 }
@@ -290,18 +292,24 @@ internal sealed class ContainerPreviewMachine
 
             case ContainerPreviewPhase.Open:
                 if (!s.SameWorld) return Closed(ContainerPreviewCloseReason.WorldChanged, "");
-                if (!s.TargetFound) return Closed(ContainerPreviewCloseReason.TargetGone, "");
-                if (!s.WindowIsOurs) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
                 if (now >= Deadline) return Closed(ContainerPreviewCloseReason.Timeout, "");
-                if (s.InventoryReady) _inventoryMissingSince = double.NaN;
-                else
+                if (!s.TargetFound || !s.InventoryReady)
                 {
-                    // The chest's contents left this client (the server took the sync entries out for a world save, or let go):
-                    // the window stays as it was, its mapper held, for a grace period, then the preview closes.
+                    // The player closed the window (or opened another menu) meanwhile.
+                    if (!s.ContainerMenuOpen) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
+                    // The chest or its contents left this client (a world save takes the streaming origin and the sync
+                    // entries out for a moment, or the server let go): the window stays as it was, its mapper held, for a
+                    // grace period, then the preview closes.
                     if (double.IsNaN(_inventoryMissingSince)) _inventoryMissingSince = now;
                     else if (now - _inventoryMissingSince >= InventoryGraceSeconds)
-                        return Closed(ContainerPreviewCloseReason.TargetGone, "The container's contents stopped arriving.");
+                        return Closed(ContainerPreviewCloseReason.TargetGone,
+                            s.TargetFound ? "The container's contents stopped arriving." : "The container left this client.");
+                    return ContainerPreviewStep.None;
                 }
+                _inventoryMissingSince = double.NaN;
+                // Back (or never gone): the window must still be the container window on this chest. A chest that came back
+                // as another entity is not the one the window shows, so the preview ends.
+                if (!s.WindowIsOurs) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
                 return ContainerPreviewStep.None;
 
             default:

@@ -58,6 +58,14 @@ test('container preview guard goes to the server bridge and takes the queue slot
   assert.equal(isReadOnlyOp('container_preview', { action: 'guard', on: false }), false);
 });
 
+test('container preview proxy_reset goes to the server with the platform id as a string', async () => {
+  const { tool, calls } = load();
+  await tool.handler(tool.schema.parse({ side: 'server', action: 'proxy_reset', user: '76561198000000001' }));
+  assert.deepEqual(plain(calls[0]), ['server', 'container_preview', { action: 'proxy_reset', user: '76561198000000001' }]);
+  assert.equal(tool.schema.safeParse({ side: 'server', action: 'proxy_reset', user: 'abc' }).success, false);
+  assert.equal(isReadOnlyOp('container_preview', { action: 'proxy_reset', user: '1' }), false);
+});
+
 test('container preview status reads without the queue slot; open, close and bag take it', () => {
   assert.equal(isReadOnlyOp('container_preview', {}), true);
   assert.equal(isReadOnlyOp('container_preview', { action: 'status' }), true);

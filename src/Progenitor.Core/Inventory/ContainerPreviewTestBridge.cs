@@ -87,6 +87,20 @@ internal static class ContainerPreviewTestBridge
         return result;
     }
 
+    /// <summary>
+    /// Dev-only one-off repair (server): put a user's streaming origin (<c>User.ProxySyncPosition</c>) back to zero, for an
+    /// origin left over from before the lease records existed. Refused while a lease of this run holds that user.
+    /// </summary>
+    public static Dictionary<string, object?> ProxyReset(string platform)
+    {
+        if (!Plugin.IsServerProcess) throw new InvalidOperationException("container_preview proxy_reset runs on the server");
+        if (!ulong.TryParse((platform ?? "").Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out ulong id) || id == 0)
+            throw new ArgumentException("args.user must be the user's platform id (a SteamID64)");
+        var result = ObservationGuard.ResetToZero(id);
+        result["requested"] = "proxy_reset";
+        return result;
+    }
+
     public static Dictionary<string, object?> ServerStatus()
     {
         var leases = new List<Dictionary<string, object?>>();
@@ -96,6 +110,7 @@ internal static class ContainerPreviewTestBridge
                 ["user"] = lease.User.Index + ":" + lease.User.Version,
                 ["point"] = new[] { lease.Point.x, lease.Point.y, lease.Point.z },
                 ["holders"] = lease.HolderCount,
+                ["proxySuspended"] = lease.ProxySuspended,
             });
         return new Dictionary<string, object?>
         {
@@ -107,6 +122,8 @@ internal static class ContainerPreviewTestBridge
             ["saveGuard"] = ContainerPreviewServer.SaveGuardEnabled,
             ["saveSuspended"] = ContainerPreviewServer.SaveSuspended,
             ["worldSaveHookArmed"] = Persistence.ModSave.WorldSaveHookArmed,
+            ["observationRecords"] = ObservationGuard.RecordCount,
+            ["observationSweepPending"] = ObservationGuard.SweepPending,
             ["leases"] = leases,
         };
     }

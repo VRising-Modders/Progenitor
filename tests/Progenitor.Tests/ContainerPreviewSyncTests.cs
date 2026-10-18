@@ -189,25 +189,31 @@ public class ContainerPreviewSyncTests
     }
 
     [Fact]
-    public void Only_world_saves_suspend_the_entries()
+    public void Only_world_saves_suspend_the_entries_through_one_shared_guard()
     {
         string modSave = SourcePin.ReadFile("src", "Progenitor.Core", "Persistence", "ModSave.cs");
         string trigger = SourcePin.MethodBody(modSave, "private static void SlotTriggerSave(");
         Assert.Contains("RaiseBeforeWorldSave();", trigger);
         Assert.DoesNotContain("RaiseBeforeWorldSave", SourcePin.MethodBody(modSave, "public static void SaveAll("));
+        string guard = SourcePin.ReadFile("src", "Progenitor.Core", "Persistence", "WorldSaveGuard.cs");
+        Assert.Contains("ModSave.BeforeWorldSave += OnBeforeWorldSave;", guard);
+        Assert.Contains("ModSave.BeforeWorldSave -= OnBeforeWorldSave;", guard);
         string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
-        Assert.Contains("Persistence.ModSave.BeforeWorldSave += OnBeforeWorldSave;", server);
-        Assert.Contains("Persistence.ModSave.BeforeWorldSave -= OnBeforeWorldSave;", server);
+        Assert.Contains("Persistence.WorldSaveGuard.Suspend += OnSaveSuspend;", server);
+        Assert.Contains("Persistence.WorldSaveGuard.Resume += OnSaveResume;", server);
         Assert.DoesNotContain("ModSave.BeforeSave +=", server);
+        Assert.DoesNotContain("ModSave.BeforeWorldSave +=", server);
     }
 
     [Fact]
     public void The_suspension_is_one_server_clock_and_a_new_sync_starts_inside_it()
     {
+        string guard = SourcePin.ReadFile("src", "Progenitor.Core", "Persistence", "WorldSaveGuard.cs");
+        Assert.Contains("private static readonly SyncSaveSuspension Suspension = new();", guard);
+        Assert.Contains("Suspension.Begin(Now, SaveStamp());", SourcePin.MethodBody(guard, "private static void OnBeforeWorldSave("));
+        Assert.Contains("Raise(Resume, \"resume\");", SourcePin.MethodBody(guard, "private static void Tick("));
         string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
-        Assert.Contains("private static readonly SyncSaveSuspension Suspension = new();", server);
-        Assert.Contains("Suspension.Begin(now, SaveStamp());", SourcePin.MethodBody(server, "private static void OnBeforeWorldSave("));
-        Assert.Contains("holder.Sync?.Resume();", SourcePin.MethodBody(server, "private static void SaveTick("));
+        Assert.Contains("holder.Sync?.Resume();", SourcePin.MethodBody(server, "private static void OnSaveResume("));
         string open = SourcePin.MethodBody(server, "private static void Open(");
         Assert.True(open.IndexOf("if (SaveSuspended) holder.Sync.Suspend();", StringComparison.Ordinal)
             < open.IndexOf("holder.Sync.Refresh();", StringComparison.Ordinal));
@@ -241,10 +247,66 @@ public class ContainerPreviewSyncTests
     [Fact]
     public void The_guard_turns_itself_back_on_after_one_save_or_five_minutes()
     {
-        string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
-        string before = SourcePin.MethodBody(server, "private static void OnBeforeWorldSave(");
-        Assert.True(before.IndexOf("SaveGuardEnabled = true;", StringComparison.Ordinal) < before.IndexOf("Suspension.Begin", StringComparison.Ordinal));
-        Assert.Contains("now - _guardOffSince >= GuardOffMaxSeconds", SourcePin.MethodBody(server, "private static void SaveTick("));
+        string guard = SourcePin.ReadFile("src", "Progenitor.Core", "Persistence", "WorldSaveGuard.cs");
+        string before = SourcePin.MethodBody(guard, "private static void OnBeforeWorldSave(");
+        Assert.True(before.IndexOf("Enabled = true;", StringComparison.Ordinal) < before.IndexOf("Suspension.Begin", StringComparison.Ordinal));
+        Assert.Contains("now - _offSince >= OffMaxSeconds", SourcePin.MethodBody(guard, "private static void Tick("));
+    }
+
+    // ---- the streaming origin (User.ProxySyncPosition is saved with the world) -------------------------
+
+    private static Progenitor.Cameras.ObservationLeaseRecord Lease(ulong platform = 7) => new()
+    { Platform = platform, X = -2116.75f, Y = 0.0245f, Z = 24.25f };
+
+    [Fact]
+    public void An_origin_left_at_a_recorded_lease_point_with_no_lease_is_restored()
+    {
+        var r = Lease();
+        Assert.True(Progenitor.Cameras.ObservationProxyRules.AtPoint(-2116.75f, 0.0245f, 24.25f, r));
+        Assert.True(Progenitor.Cameras.ObservationProxyRules.AtPoint(-2116.745f, 0.0245f, 24.25f, r));
+        Assert.False(Progenitor.Cameras.ObservationProxyRules.AtPoint(-2116.6f, 0.0245f, 24.25f, r));
+        Assert.False(Progenitor.Cameras.ObservationProxyRules.AtPoint(0, 0, 0, r));
+        Assert.Equal(Progenitor.Cameras.ObservationProxyRepair.Restore, Progenitor.Cameras.ObservationProxyRules.Decide(leaseRunning: false, originAtRecordedPoint: true));
+        Assert.Equal(Progenitor.Cameras.ObservationProxyRepair.Leave, Progenitor.Cameras.ObservationProxyRules.Decide(leaseRunning: true, originAtRecordedPoint: true));
+        Assert.Equal(Progenitor.Cameras.ObservationProxyRepair.Leave, Progenitor.Cameras.ObservationProxyRules.Decide(leaseRunning: false, originAtRecordedPoint: false));
+        Assert.True(Progenitor.Cameras.ObservationProxyRules.IsZero(0, 0, 0));
+    }
+
+    [Fact]
+    public void Lease_records_are_one_per_user()
+    {
+        var doc = new Progenitor.Cameras.ObservationLeaseRecords();
+        doc.Put(Lease(7));
+        doc.Put(new Progenitor.Cameras.ObservationLeaseRecord { Platform = 7, X = 1 });
+        doc.Put(Lease(8));
+        Assert.Equal(2, doc.Records.Count);
+        Assert.Equal(1, doc.For(7)!.X);
+        Assert.True(doc.Remove(7));
+        Assert.Null(doc.For(7));
+        Assert.False(doc.Remove(7));
+    }
+
+    [Fact]
+    public void Every_lease_restores_the_origin_for_a_save_and_keeps_a_record_while_it_runs()
+    {
+        string obs = SourcePin.ReadFile("src", "Progenitor.Core", "Cameras", "CameraObservation.cs");
+        Assert.Contains("else if (writeProxy && !_proxySuspended) WriteProxy(_point);", obs);
+        Assert.Contains("WriteProxy(_originalProxy.Value);", SourcePin.MethodBody(obs, "internal void SuspendProxy("));
+        string start = SourcePin.MethodBody(obs, "private void Start(");
+        Assert.Contains("_proxySuspended = Persistence.WorldSaveGuard.Active;", start);
+        Assert.Contains("ObservationGuard.Put(Platform, _point, _originalProxy.Value);", start);
+        Assert.Contains("ObservationGuard.Remove(Platform);", SourcePin.MethodBody(obs, "private void Close("));
+        // A lease start that finds the origin at a recorded point repairs it instead of refusing.
+        string acquire = SourcePin.MethodBody(obs, "internal static SharedObservation Acquire(");
+        Assert.True(acquire.IndexOf("ObservationGuard.TryRepair(world, user)", StringComparison.Ordinal)
+            < acquire.IndexOf("ObservationShareRules.Decide(", StringComparison.Ordinal));
+        string guard = SourcePin.ReadFile("src", "Progenitor.Core", "Cameras", "ObservationGuard.cs");
+        Assert.Contains("WorldSaveGuard.Suspend += OnSuspend;", guard);
+        Assert.Contains("lease.SuspendProxy();", guard);
+        Assert.Contains("lease.ResumeProxy();", guard);
+        Assert.Contains("if (!_loaded) return;", SourcePin.MethodBody(guard, "private static void Save("));
+        Assert.Contains("SharedObservation.WriteProxyRaw(world, user, original);", guard);
+        Assert.DoesNotContain("GetComponentData<User>(user).ProxySyncPosition = ", guard);
     }
 
     // ---- records and the startup sweep --------------------------------------------------------------
@@ -321,7 +383,7 @@ public class ContainerPreviewSyncTests
     public void A_missing_inventory_holds_the_window_then_closes_after_the_grace()
     {
         var m = OpenMachine();
-        var missing = new ContainerPreviewSample { SameWorld = true, TargetFound = true, InventoryReady = false, WindowIsOurs = true };
+        var missing = new ContainerPreviewSample { SameWorld = true, TargetFound = true, InventoryReady = false, WindowIsOurs = true, ContainerMenuOpen = true };
         Assert.Equal(ContainerPreviewStep.None, m.Step(1, missing));
         Assert.True(m.InventoryMissing);
         Assert.Equal(ContainerPreviewStep.None, m.Step(1 + ContainerPreviewMachine.InventoryGraceSeconds - 0.1, missing));
@@ -334,8 +396,8 @@ public class ContainerPreviewSyncTests
     public void An_inventory_that_comes_back_within_the_grace_keeps_the_preview()
     {
         var m = OpenMachine();
-        var missing = new ContainerPreviewSample { SameWorld = true, TargetFound = true, InventoryReady = false, WindowIsOurs = true };
-        var back = new ContainerPreviewSample { SameWorld = true, TargetFound = true, InventoryReady = true, WindowIsOurs = true };
+        var missing = new ContainerPreviewSample { SameWorld = true, TargetFound = true, InventoryReady = false, WindowIsOurs = true, ContainerMenuOpen = true };
+        var back = new ContainerPreviewSample { SameWorld = true, TargetFound = true, InventoryReady = true, WindowIsOurs = true, ContainerMenuOpen = true };
         m.Step(1, missing);
         m.Step(10, back);
         Assert.False(m.InventoryMissing);
@@ -350,6 +412,8 @@ public class ContainerPreviewSyncTests
         string client = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewClient.cs");
         string mapper = SourcePin.MethodBody(client, "private void BeforeMapper(");
         Assert.Contains("_inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;", mapper);
+        Assert.Contains("if (em.Exists(_windowTarget))", mapper);
+        Assert.DoesNotContain("Close(", mapper);   // a chest that left during a save may come back: the machine decides
     }
 
     // ---- the wire -------------------------------------------------------------------------------

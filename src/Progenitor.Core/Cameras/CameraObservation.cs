@@ -196,11 +196,18 @@ internal sealed unsafe class SharedObservation
     private readonly ObservationShareBook<IObservationHolder> _holders = new();
     private IDisposable? _hook;
     private int _timerGeneration;
+    private bool _proxySuspended;
 
     /// <summary>True until the last holder leaves.</summary>
     internal bool Active { get; private set; } = true;
 
     internal Entity User => _user;
+
+    /// <summary>The user's platform id (the persisted record's key).</summary>
+    internal ulong Platform { get; }
+
+    /// <summary>True while a world save is being written: the user's original origin is in place and the point is not written.</summary>
+    internal bool ProxySuspended => _proxySuspended;
 
     internal float3 Point => _point;
 
@@ -224,6 +231,8 @@ internal sealed unsafe class SharedObservation
         var running = For(user);
         bool same = running != null && ObservationShareRules.SamePoint(running._point.x, running._point.y, running._point.z, point.x, point.y, point.z);
         bool elsewhere = running == null && math.any(em.GetComponentData<User>(user).ProxySyncPosition.Value != float3.zero);
+        // An origin left at a recorded lease point by an earlier run (a crash; the game saves it) is ours: put it back and go on.
+        if (elsewhere && ObservationGuard.TryRepair(world, user)) elsewhere = false;
         switch (ObservationShareRules.Decide(running != null, same, elsewhere))
         {
             case ObservationJoin.Join:
@@ -265,6 +274,7 @@ internal sealed unsafe class SharedObservation
         var em = world.EntityManager;
         var row = em.GetComponentData<User>(user);
         _originalProxy = row.ProxySyncPosition;
+        Platform = row.PlatformId;
         try { _character = row.LocalCharacter._Entity; } catch { _character = Entity.Null; }
         if (_character != Entity.Null && _character.TryRead<Translation>(em, out var at)) { _standing = at.Value; _standingKnown = true; }
         _anchor = em.CreateEntity();
@@ -276,6 +286,9 @@ internal sealed unsafe class SharedObservation
         _anchor.Add<Translation>(em);
         _anchor.Add<PersistenceV2.DontSaveEntity>(em);
         _anchor.Write(em, new Translation { Value = _point });
+        // A world save is being written: start with the original origin in place; the point goes in after the save.
+        _proxySuspended = Persistence.WorldSaveGuard.Active;
+        ObservationGuard.Put(Platform, _point, _originalProxy.Value);
         _hook = SystemHooks.Before<UserActivityGridSystem>(c =>
         {
             if (c.World != _world || !Active) return;
@@ -335,7 +348,7 @@ internal sealed unsafe class SharedObservation
             {
                 foreach (var holder in _holders.TakeExpired(Now)) holder.LeaseEnded(CameraObservationEndReason.Expired, notify: true);
                 if (_holders.Count == 0) reason = CameraObservationEndReason.Expired;
-                else if (writeProxy) WriteProxy(_point);
+                else if (writeProxy && !_proxySuspended) WriteProxy(_point);
             }
         }
         catch (Exception e)
@@ -369,6 +382,7 @@ internal sealed unsafe class SharedObservation
             }
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Camera: observation restore threw: " + e.Message); }
+        ObservationGuard.Remove(Platform);
         Plugin.Logger?.LogInfo("Camera: streaming origin restored (" + reason + ").");
         foreach (var holder in _holders.TakeAll())
         {
@@ -377,9 +391,29 @@ internal sealed unsafe class SharedObservation
         }
     }
 
-    private void WriteProxy(float3 point)
+    /// <summary>
+    /// The shared world-save guard began its suspension: put the user's original origin back (the game saves
+    /// <c>User.ProxySyncPosition</c>) and stop writing the point until <see cref="ResumeProxy"/>. While the origin is
+    /// back, the chest and its surroundings stop streaming to the previewing client for the save's duration.
+    /// </summary>
+    internal void SuspendProxy()
     {
-        var data = AiRuntime.RW<User>(_world.EntityManager, _user, Layout.ObservationProxyPositionOffset + 12);
+        if (!Active) return;
+        _proxySuspended = true;
+        if (!_world.IsCreated) return;
+        var em = _world.EntityManager;
+        if (_user.Exists(em) && math.all(em.GetComponentData<User>(_user).ProxySyncPosition.Value == _point)) WriteProxy(_originalProxy.Value);
+    }
+
+    /// <summary>The save is written: the frame hook writes the point again from the next frame.</summary>
+    internal void ResumeProxy() => _proxySuspended = false;
+
+    private void WriteProxy(float3 point) => WriteProxyRaw(_world, _user, point);
+
+    /// <summary>The one write of a user's streaming origin (an overlay write at the layout offset).</summary>
+    internal static void WriteProxyRaw(World world, Entity user, float3 point)
+    {
+        var data = AiRuntime.RW<User>(world.EntityManager, user, Layout.ObservationProxyPositionOffset + 12);
         if (data == null) throw new InvalidOperationException("User observation layout unavailable.");
         *(float3*)(data + Layout.ObservationProxyPositionOffset) = point;
     }

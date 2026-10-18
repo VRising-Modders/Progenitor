@@ -354,11 +354,35 @@ public class ContainerPreviewTests
     }
 
     [Fact]
-    public void An_open_preview_closes_when_the_target_leaves_before_the_window_check()
+    public void An_open_preview_whose_target_leaves_holds_the_window_then_closes_after_the_grace()
     {
         var m = OpenMachine();
-        Assert.Equal(ContainerPreviewStep.Closed, m.Step(1, World(target: false, ours: false)));
+        var gone = new ContainerPreviewSample { SameWorld = true, ContainerMenuOpen = true };
+        Assert.Equal(ContainerPreviewStep.None, m.Step(1, gone));
+        Assert.True(m.InventoryMissing);
+        Assert.Equal(ContainerPreviewStep.Closed, m.Step(1 + ContainerPreviewMachine.InventoryGraceSeconds, gone));
         Assert.Equal(ContainerPreviewCloseReason.TargetGone, m.CloseReason);
+        Assert.Equal("The container left this client.", m.Message);
+    }
+
+    [Fact]
+    public void A_target_that_leaves_and_the_player_closing_the_window_meanwhile_is_window_closed()
+    {
+        var m = OpenMachine();
+        m.Step(1, new ContainerPreviewSample { SameWorld = true, ContainerMenuOpen = true });
+        Assert.Equal(ContainerPreviewStep.Closed, m.Step(2, new ContainerPreviewSample { SameWorld = true, ContainerMenuOpen = false }));
+        Assert.Equal(ContainerPreviewCloseReason.WindowClosed, m.CloseReason);
+    }
+
+    [Fact]
+    public void A_target_that_comes_back_as_another_entity_ends_the_preview()
+    {
+        var m = OpenMachine();
+        m.Step(1, new ContainerPreviewSample { SameWorld = true, ContainerMenuOpen = true });
+        // Found again, but the window still shows the old entity: not ours.
+        Assert.Equal(ContainerPreviewStep.Closed, m.Step(2, new ContainerPreviewSample
+            { SameWorld = true, TargetFound = true, InventoryReady = true, ContainerMenuOpen = true, WindowIsOurs = false }));
+        Assert.Equal(ContainerPreviewCloseReason.WindowClosed, m.CloseReason);
     }
 
     [Theory]

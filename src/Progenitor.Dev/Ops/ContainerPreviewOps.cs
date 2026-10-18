@@ -23,6 +23,8 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{"action":"bag","mode":"inactive"|"alpha"}</c> (client): how the next preview hides the bag panel (E5).</item>
 /// <item><c>{"action":"guard","on":false}</c> (server, E1b persistence read only): leave the inventory sync entries in
 /// world saves; back on by itself after one world save, after 5 minutes, and at every Core install.</item>
+/// <item><c>{"action":"proxy_reset","user":"7656…"}</c> (server, a one-off repair): put that user's streaming origin back
+/// to zero; refused while a lease of this run holds the user.</item>
 /// </list>
 /// </summary>
 internal static class ContainerPreviewOps
@@ -46,8 +48,9 @@ internal static class ContainerPreviewOps
                 Bool(args, "syncInventory") ?? true),
             "close" => Call("Close"),
             "guard" => Call("Guard", Bool(args, "on") ?? throw new ArgumentException("args.on (true or false) is required for guard")),
+            "proxy_reset" => Call("ProxyReset", Str(args, "user") ?? throw new ArgumentException("args.user (the platform id, as a string) is required for proxy_reset")),
             "bag" => Call("BagMode", Str(args, "mode")?.Trim().ToLowerInvariant() ?? throw new ArgumentException("args.mode (inactive or alpha) is required for bag")),
-            _ => throw new ArgumentException("args.action must be status, open, close, bag or guard"),
+            _ => throw new ArgumentException("args.action must be status, open, close, bag, guard or proxy_reset"),
         };
     }
 
