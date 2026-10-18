@@ -53,6 +53,8 @@ internal sealed class StressStageArgs
     public int? OnlyClan { get; private set; }
     /// <summary>stress_stations experiment: stations placed per castle at most (default 1).</summary>
     public int Limit { get; private set; } = 1;
+    /// <summary>stress_stations experiment: free tiles kept around every other building (default 0: footprints only must not overlap).</summary>
+    public int Margin { get; private set; }
     public const int MaxExperimentPlots = 3;
     public bool DryRun { get; private set; }
     public string? Confirm { get; private set; }
@@ -136,6 +138,7 @@ internal sealed class StressStageArgs
         a.DryRun = Bool(args, "dryRun", false);
         a.Experiment = Bool(args, "experiment", false);
         a.Limit = OptInt(args, "limit", 1, MaxPerCastle) ?? 1;
+        a.Margin = OptInt(args, "margin", 0, 3) ?? 0;
         if (a.Experiment && !a.DryRun && (a.AllPlots || a.Plots.Count > MaxExperimentPlots))
             throw new ArgumentException($"experiment placement needs plots:[...] with 1..{MaxExperimentPlots} territories (prove it on one castle first)");
         a.Confirm = Str(args, "confirm");
@@ -782,34 +785,41 @@ internal readonly struct StressRect
 /// <summary>
 /// Where a new station can stand in an existing castle (the stress_stations experiment): a
 /// <paramref name="width"/> x <paramref name="depth"/> tile block fully on the castle's floors and clear of every
-/// other building's footprint plus <paramref name="margin"/> tiles. Footprints are taken inclusive at both ends, so
-/// the test errs on the side of free space. Scans rows (y, then x) from the floors' low corner; deterministic.
+/// other building's footprint widened by <paramref name="margin"/> tiles. Rectangles are inclusive tiles (the live
+/// side converts the game's exclusive TileBounds max). Scans rows (y, then x) from the floors' low corner; deterministic.
 /// </summary>
 internal static class StressSpotFinder
 {
-    public static StressRect? Find(IReadOnlyList<StressRect> floors, IReadOnlyList<StressRect> occupied, int width, int depth, int margin)
+    public static StressRect? Find(IReadOnlyList<StressRect> floors, IReadOnlyList<StressRect> occupied, int width, int depth, int margin) =>
+        Find(floors, occupied, width, depth, margin, out _, out _);
+
+    /// <summary>Also reports the floor tiles and how many of them are free (on a floor, outside every widened footprint).</summary>
+    public static StressRect? Find(IReadOnlyList<StressRect> floors, IReadOnlyList<StressRect> occupied, int width, int depth, int margin,
+        out int floorTiles, out int freeTiles)
     {
+        floorTiles = freeTiles = 0;
         if (floors.Count == 0 || width < 1 || depth < 1) return null;
-        var covered = new HashSet<(int, int)>();
+        var free = new HashSet<(int, int)>();
         foreach (var f in floors)
             for (int x = f.MinX; x <= f.MaxX; x++)
                 for (int y = f.MinY; y <= f.MaxY; y++)
-                    covered.Add((x, y));
+                    free.Add((x, y));
+        floorTiles = free.Count;
+        foreach (var o in occupied)
+            for (int x = o.MinX - margin; x <= o.MaxX + margin; x++)
+                for (int y = o.MinY - margin; y <= o.MaxY + margin; y++)
+                    free.Remove((x, y));
+        freeTiles = free.Count;
         int minX = floors.Min(f => f.MinX), minY = floors.Min(f => f.MinY), maxX = floors.Max(f => f.MaxX), maxY = floors.Max(f => f.MaxY);
         for (int y = minY; y + depth - 1 <= maxY; y++)
         {
             for (int x = minX; x + width - 1 <= maxX; x++)
             {
-                var r = new StressRect(x, y, x + width - 1, y + depth - 1);
-                bool onFloor = true;
-                for (int tx = r.MinX; tx <= r.MaxX && onFloor; tx++)
-                    for (int ty = r.MinY; ty <= r.MaxY && onFloor; ty++)
-                        if (!covered.Contains((tx, ty))) onFloor = false;
-                if (!onFloor) continue;
-                bool clear = true;
-                foreach (var o in occupied)
-                    if (r.Overlaps(o, margin)) { clear = false; break; }
-                if (clear) return r;
+                bool ok = true;
+                for (int tx = x; tx < x + width && ok; tx++)
+                    for (int ty = y; ty < y + depth && ok; ty++)
+                        if (!free.Contains((tx, ty))) ok = false;
+                if (ok) return new StressRect(x, y, x + width - 1, y + depth - 1);
             }
         }
         return null;

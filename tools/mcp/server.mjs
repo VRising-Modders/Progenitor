@@ -939,6 +939,7 @@ server.tool("progenitor_stress", "Server only, Moo World copy on the isolated te
     name: z.string().min(1).max(61).optional().describe("clan with members: the clan name, default StressClanH1."),
     experiment: z.boolean().optional().describe("clan: opts in to the game's add-member routine (a native call through its generated wrapper), required unless dryRun. stations: places stations (needs plots with 1-3 castles and confirm)."),
     limit: z.number().int().min(1).max(30).optional().describe("stations experiment: stations placed per castle at most, default 1."),
+    margin: z.number().int().min(0).max(3).optional().describe("stations experiment: free tiles kept around every other building, default 0 (footprints must only not overlap)."),
     hours: z.number().min(0.05).max(24).optional().describe("refine: hours of raw inputs per station, default 1."),
     supply: z.enum(["spread", "local", "auto"]).optional().describe("refine: 'spread' (raws only in the island's farthest-apart castles), 'local' (every castle its own), default auto: spread for clan and castle-share islands, local for solo."),
     emptyChests: z.number().int().min(0).max(10).optional().describe("refine: chests per castle left empty for products, default 3."),

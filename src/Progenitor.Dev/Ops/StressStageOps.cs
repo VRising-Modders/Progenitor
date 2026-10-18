@@ -419,9 +419,12 @@ internal static class StressStageOps
         "no proven path places a station for an offline owner in an existing castle: the build event needs the owner's " +
         "character (CanBuildTileModels, in range, blueprint unlocked by the owner's progression). experiment:true places " +
         "with the per-object writes the server's castle generator makes for a room object (Instantiate the prefab, " +
-        "Translation, CastleHeartConnection = the heart; no rotation), at a free floor spot found from the castle's " +
-        "footprints and a same-prefab template's offset. Unproven: tile registration, team, inventories and save reload; " +
-        "the readback checks each";
+        "Translation, CastleHeartConnection = the heart; no rotation) on free tiles of the castle's existing floors " +
+        "(option a: inside the built castle, on floor the heart already owns; no new floors, nothing replaced). " +
+        "Unproven: tile registration, team, inventories and save reload; the readback checks each";
+
+    /// <summary>Tile models read per frame while scanning for a castle's buildings.</summary>
+    private const int ScanChunk = 1500;
 
     public static object StationsOp(JsonElement args)
     {
@@ -434,63 +437,82 @@ internal static class StressStageOps
         var job = new StageJob("stations", a.Seed, dryRun: !place, a.BudgetMs, stopOnFailure: true);
         foreach (var n in collected.Notes) job.Note(n);
         if (!a.DryRun && !a.Experiment) job.Note("writes need experiment:true (and plots:[...] with 1-3 castles); this run only plans");
+
+        // The castles' buildings come from one world query of placed tile models, filtered by heart a chunk per frame.
         var reads = new Dictionary<int, StationCastle>();
-        foreach (int t0 in collected.Plots.Keys.OrderBy(t => t))
+        var byHeart = new Dictionary<Entity, StationCastle>();
+        foreach (var kv in collected.Plots.OrderBy(k => k.Key))
         {
-            int t = t0;
-            job.Add("read " + t, () =>
-            {
-                reads[t] = ReadStationCastle(world, collected.Plots[t]);
-                return $"{reads[t].Refinement.Count} refinement station(s), {reads[t].Buildings.Count} building(s), {reads[t].FloorEntities.Count} floor(s)";
-            });
+            var c = new StationCastle { Territory = kv.Key, Heart = kv.Value.HeartEntity };
+            reads[kv.Key] = c;
+            byHeart[c.Heart] = c;
         }
-        var plan = new Dictionary<string, object?> { ["seed"] = a.Seed, ["perCastle"] = a.PerCastle, ["experiment"] = place, ["limit"] = a.Limit, ["note"] = PlacementNote };
+        job.Add("query tile models", () =>
+        {
+            var em = world.EntityManager;
+            var models = Query.Entities(em, includeDisabled: true, includeSystems: false,
+                ComponentIndex.Of<ProjectM.Tiles.TileModel>(ComponentType.AccessMode.ReadOnly),
+                ComponentIndex.Of<ProjectM.CastleBuilding.CastleHeartConnection>(ComponentType.AccessMode.ReadOnly));
+            var chunks = new List<(string, Func<string>)>();
+            for (int start = 0; start < models.Count; start += ScanChunk)
+            {
+                int from = start, to = Math.Min(models.Count, start + ScanChunk);
+                chunks.Add(($"scan {from}..{to - 1}", () => ScanModels(world, models, from, to, byHeart)));
+            }
+            foreach (var c in reads.Values)
+            {
+                var castle = c;
+                chunks.Add(($"templates {castle.Territory}", () => FinishCastleRead(world, castle)));
+            }
+            job.InsertNext(chunks);
+            return $"{models.Count} tile model(s), {chunks.Count - reads.Count} scan step(s)";
+        });
+        var plan = new Dictionary<string, object?> { ["seed"] = a.Seed, ["perCastle"] = a.PerCastle, ["experiment"] = place, ["limit"] = a.Limit, ["margin"] = a.Margin, ["note"] = PlacementNote };
         var placed = new List<Placement>();
         job.Plan = plan;
         job.Add("plan", () =>
         {
-            var catalog = reads.Values.SelectMany(r => r.Refinement.Select(s => s.PrefabGuid.GuidHash)).GroupBy(g => g)
+            var catalog = reads.Values.SelectMany(r => r.Refinement.Select(s => s.Guid)).GroupBy(g => g)
                 .OrderByDescending(x => x.Count()).ThenBy(x => x.Key).Select(x => x.Key).ToList();
             var rows = new List<object>();
             int total = 0;
+            var reasons = new Dictionary<string, int>();
             foreach (var kv in reads.OrderBy(k => k.Key))
             {
                 var castle = kv.Value;
-                var have = castle.Refinement.Select(s => s.PrefabGuid.GuidHash).ToList();
-                // Placement copies a same-prefab, unrotated template's offset, so it only offers kinds this castle has one of.
-                var kinds = place ? catalog.Where(g => castle.Template(g) != null).ToList() : catalog;
-                var add = StressStationPlanner.Plan(have, a.PerCastle, kinds);
+                var have = castle.Refinement.Select(s => s.Guid).ToList();
+                var add = StressStationPlanner.Plan(have, a.PerCastle, catalog);
                 total += add.Count;
                 var row = new Dictionary<string, object?>
                 {
                     ["territory"] = kv.Key,
+                    ["buildings"] = castle.Buildings.Count,
+                    ["floors"] = castle.Buildings.Count(b => b.IsFloor),
                     ["refinementStations"] = have.Count,
                     ["structureRevision"] = castle.Revision,
                     ["add"] = add.GroupBy(x => x).Select(x => (object)new Dictionary<string, object?> { ["prefab"] = Name(world, x.Key), ["guid"] = x.Key, ["count"] = x.Count() }).ToList(),
                 };
-                if (place)
+                if (place || a.Experiment)
                 {
                     var spots = new List<object>();
-                    var occupied = castle.Occupied.ToList();
+                    var occupied = castle.Buildings.Where(b => !b.IsFloor).ToList();
+                    var extra = new List<(int Height, StressRect Rect)>();
                     foreach (int guid in add.Take(a.Limit))
                     {
-                        var tpl = castle.Template(guid)!;
-                        var floors = castle.Buildings.Where(b => castle.FloorEntities.Contains(b.Entity) && b.OriginHeight == tpl.OriginHeight).Select(Rect).ToList();
-                        var size = Rect(tpl);
-                        var spot = StressSpotFinder.Find(floors, occupied, size.Width, size.Depth, margin: 1);
-                        if (spot is not StressRect r)
-                        {
-                            spots.Add(new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["spot"] = null, ["why"] = "no free floor block of that size" });
-                            continue;
-                        }
-                        occupied.Add(r);
-                        var pos = new Unity.Mathematics.float3(
-                            CastleGeometry.TileToWorld(r.MinX) + castle.TemplateOffsets[guid].x,
-                            castle.TemplateOffsets[guid].y,
-                            CastleGeometry.TileToWorld(r.MinY) + castle.TemplateOffsets[guid].z);
+                        var spot = FindStationSpot(castle, guid, occupied, extra, a.Margin, out var reason, out var detail);
+                        var spotRow = new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["reason"] = reason, ["detail"] = detail };
+                        spots.Add(spotRow);
+                        reasons[reason] = (reasons.TryGetValue(reason, out int rn) ? rn : 0) + 1;
+                        if (spot is not (StressRect r, int height, Unity.Mathematics.float3 pos)) continue;
+                        extra.Add((height, r));
+                        spotRow["tiles"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}";
+                        spotRow["height"] = height;
+                        spotRow["x"] = Math.Round(pos.x, 2);
+                        spotRow["y"] = Math.Round(pos.y, 2);
+                        spotRow["z"] = Math.Round(pos.z, 2);
+                        if (!place) continue;
                         var p = new Placement { Territory = kv.Key, PrefabGuid = guid, Spot = r, Position = pos, Heart = castle.Heart, RevisionBefore = castle.Revision };
                         placed.Add(p);
-                        spots.Add(new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["tiles"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}", ["x"] = Math.Round(pos.x, 2), ["y"] = Math.Round(pos.y, 2), ["z"] = Math.Round(pos.z, 2) });
                         job.Add($"place {kv.Key} {guid} at {r.MinX},{r.MinY}", () => PlaceStation(world, p));
                     }
                     row["placements"] = spots;
@@ -500,18 +522,17 @@ internal static class StressStageOps
             plan["catalog"] = catalog.Select(c => Name(world, c)).ToList();
             plan["castles"] = rows;
             plan["stationsToAdd"] = total;
+            plan["spotReasons"] = reasons.OrderBy(k => k.Key).ToDictionary(k => k.Key, k => (object?)k.Value);
+            if (place && placed.Count == 0 && total > 0)
+                job.Note("nothing placed: " + string.Join(", ", reasons.Select(k => k.Key + " x" + k.Value)) + " (see plan.castles[].placements[].detail)");
             return place ? $"{placed.Count} placement(s) queued of {total} planned" : total + " station(s) would be added";
         });
         job.Readback = () =>
         {
             var list = new List<object>();
-            foreach (var p in placed) list.Add(PlacementReadback(world, p, collected.Plots[p.Territory]));
+            foreach (var p in placed) list.Add(PlacementReadback(world, p, reads[p.Territory]));
             foreach (var kv in reads.OrderBy(k => k.Key))
-            {
-                int now = 0;
-                foreach (var s in CastleApi.ForTerritory(kv.Key).Stations()) if (s.IsRefinement) now++;
-                list.Add(new Dictionary<string, object?> { ["territory"] = kv.Key, ["refinementStations"] = now, ["before"] = kv.Value.Refinement.Count });
-            }
+                list.Add(new Dictionary<string, object?> { ["territory"] = kv.Key, ["refinementStationsBefore"] = kv.Value.Refinement.Count, ["placed"] = placed.Count(p => p.Territory == kv.Key && p.Placed != Entity.Null) });
             return list;
         };
         return Start(world, job);
@@ -528,40 +549,125 @@ internal static class StressStageOps
         public Entity Placed;
     }
 
-    private sealed class StationCastle
+    /// <summary>One placed tile model of a castle: footprint as inclusive tiles (TileBounds max is exclusive).</summary>
+    private sealed class StationBuilding
     {
-        public Entity Heart;
-        public long Revision;
-        public List<CastleBuilding> Buildings { get; } = new();
-        public HashSet<Entity> FloorEntities { get; } = new();
-        public List<CastleBuilding> Refinement { get; } = new();
-        public List<StressRect> Occupied { get; } = new();
-        public Dictionary<int, Unity.Mathematics.float3> TemplateOffsets { get; } = new();
-        private readonly Dictionary<int, CastleBuilding> _templates = new();
-
-        public CastleBuilding? Template(int guid) => _templates.TryGetValue(guid, out var b) ? b : null;
-        public void AddTemplate(CastleBuilding b, Unity.Mathematics.float3 offset) { _templates[b.PrefabGuid.GuidHash] = b; TemplateOffsets[b.PrefabGuid.GuidHash] = offset; }
+        public Entity Entity;
+        public int Guid;
+        public int Height;
+        public byte Rotation;
+        public StressRect Rect;
+        public bool IsFloor;
+        public bool IsRefinement;
     }
 
-    private static StressRect Rect(CastleBuilding b) => new(b.FootprintMinX, b.FootprintMinY, b.FootprintMaxX, b.FootprintMaxY);
+    private sealed class StationCastle
+    {
+        public int Territory;
+        public Entity Heart;
+        public long Revision;
+        public List<StationBuilding> Buildings { get; } = new();
+        public List<StationBuilding> Refinement { get; } = new();
+        /// <summary>Per refinement prefab: an unrotated station, its Translation minus its footprint's low corner, and the height of the floor under it.</summary>
+        public Dictionary<int, (StationBuilding Station, Unity.Mathematics.float3 Offset, int FloorHeight)> Templates { get; } = new();
+    }
 
-    private static StationCastle ReadStationCastle(World world, CastlePlot plot)
+    private static string ScanModels(World world, List<Entity> models, int from, int to, Dictionary<Entity, StationCastle> byHeart)
     {
         var em = world.EntityManager;
-        var c = new StationCastle { Heart = plot.HeartEntity, Revision = CastleApi.ForTerritory(plot.TerritoryIndex).StructureRevision };
-        foreach (var t in CastleReader.Tiles(world, plot)) if (t.FloorEntity != Entity.Null) c.FloorEntities.Add(t.FloorEntity);
-        c.Buildings.AddRange(CastleReader.Buildings(world, plot));
+        var floorType = ComponentIndex.Of<ProjectM.CastleBuilding.CastleFloor>(ComponentType.AccessMode.ReadOnly);
         var refinement = ComponentIndex.Of<Refinementstation>(ComponentType.AccessMode.ReadOnly);
-        foreach (var b in c.Buildings)
+        int found = 0;
+        for (int i = from; i < to; i++)
         {
-            if (!c.FloorEntities.Contains(b.Entity)) c.Occupied.Add(Rect(b));
-            if (!em.HasComponent(b.Entity, refinement)) continue;
-            c.Refinement.Add(b);
-            if (b.Rotation != 0 || c.Template(b.PrefabGuid.GuidHash) != null) continue;
-            if (!b.Entity.TryRead<Unity.Transforms.Translation>(em, out var tr)) continue;
-            c.AddTemplate(b, new Unity.Mathematics.float3(tr.Value.x - CastleGeometry.TileToWorld(b.FootprintMinX), tr.Value.y, tr.Value.z - CastleGeometry.TileToWorld(b.FootprintMinY)));
+            var e = models[i];
+            if (!GhostOps.TryReadEntityField<ProjectM.CastleBuilding.CastleHeartConnection>(em, e, Layout.CastleHeartConnectionEntityOffset, out var heart)) continue;
+            if (!byHeart.TryGetValue(heart, out var castle)) continue;
+            var b = ReadStationBuilding(world, e, floorType, refinement);
+            if (b == null) continue;
+            castle.Buildings.Add(b);
+            if (b.IsRefinement) castle.Refinement.Add(b);
+            found++;
         }
-        return c;
+        return found + " building(s) of the selected castles";
+    }
+
+    private static StationBuilding? ReadStationBuilding(World world, Entity e, ComponentType floorType, ComponentType refinement)
+    {
+        var em = world.EntityManager;
+        if (!e.TryRead<ProjectM.TilePosition>(em, out var pos)) return null;
+        int height;
+        try { height = pos.HeightLevel; } catch { return null; }
+        int minX = pos.Tile.x, minY = pos.Tile.y, maxX = pos.Tile.x + 1, maxY = pos.Tile.y + 1;
+        if (e.TryRead<ProjectM.TileBounds>(em, out var bounds))
+        {
+            minX = bounds.Value.Min.x; minY = bounds.Value.Min.y; maxX = bounds.Value.Max.x; maxY = bounds.Value.Max.y;
+        }
+        return new StationBuilding
+        {
+            Entity = e,
+            Guid = AiPrefabGuid(em, e),
+            Height = height,
+            Rotation = (byte)pos.TileRotation,
+            Rect = new StressRect(minX, minY, Math.Max(minX, maxX - 1), Math.Max(minY, maxY - 1)),
+            IsFloor = em.HasComponent(e, floorType),
+            IsRefinement = em.HasComponent(e, refinement),
+        };
+    }
+
+    private static int AiPrefabGuid(EntityManager em, Entity e) => e.TryRead<PrefabGUID>(em, out var g) ? g.GuidHash : 0;
+
+    private static string FinishCastleRead(World world, StationCastle castle)
+    {
+        var em = world.EntityManager;
+        castle.Revision = CastleApi.ForTerritory(castle.Territory).StructureRevision;
+        foreach (var b in castle.Refinement)
+        {
+            if (b.Rotation != 0 || castle.Templates.ContainsKey(b.Guid)) continue;
+            if (!b.Entity.TryRead<Unity.Transforms.Translation>(em, out var tr)) continue;
+            // The floor the template stands on gives the height level its siblings' floors share.
+            var under = castle.Buildings.FirstOrDefault(f => f.IsFloor && f.Rect.Overlaps(new StressRect(b.Rect.MinX, b.Rect.MinY, b.Rect.MinX, b.Rect.MinY)));
+            if (under == null) continue;
+            castle.Templates[b.Guid] = (b, new Unity.Mathematics.float3(tr.Value.x - CastleGeometry.TileToWorld(b.Rect.MinX), tr.Value.y, tr.Value.z - CastleGeometry.TileToWorld(b.Rect.MinY)), under.Height);
+        }
+        return $"{castle.Buildings.Count} building(s), {castle.Refinement.Count} refinement station(s), {castle.Templates.Count} template kind(s)";
+    }
+
+    /// <summary>
+    /// A free block of the castle's floors for <paramref name="guid"/>, at the height of the floor its template stands on,
+    /// clear of every other building on that height (and of earlier picks) by <paramref name="margin"/> tiles.
+    /// </summary>
+    private static (StressRect, int, Unity.Mathematics.float3)? FindStationSpot(StationCastle castle, int guid, List<StationBuilding> occupied,
+        List<(int Height, StressRect Rect)> extra, int margin, out string reason, out string detail)
+    {
+        if (!castle.Templates.TryGetValue(guid, out var tpl))
+        {
+            bool any = castle.Refinement.Any(r => r.Guid == guid);
+            reason = "no_template";
+            detail = any ? "every station of this kind in the castle is rotated or not on a floor" : "the castle has no station of this kind to copy the offset from";
+            return null;
+        }
+        var floors = castle.Buildings.Where(b => b.IsFloor && b.Height == tpl.FloorHeight).Select(b => b.Rect).ToList();
+        if (floors.Count == 0)
+        {
+            reason = "no_floor_at_height";
+            detail = $"no floor at height {tpl.FloorHeight}; floor heights: {string.Join(",", castle.Buildings.Where(b => b.IsFloor).Select(b => b.Height).Distinct().OrderBy(h => h))}";
+            return null;
+        }
+        var blocked = occupied.Where(o => o.Height == tpl.Station.Height || o.Height == tpl.FloorHeight).Select(o => o.Rect)
+            .Concat(extra.Where(x => x.Height == tpl.FloorHeight).Select(x => x.Rect)).ToList();
+        var size = tpl.Station.Rect;
+        var spot = StressSpotFinder.Find(floors, blocked, size.Width, size.Depth, margin, out int floorTiles, out int freeTiles);
+        if (spot is not StressRect r)
+        {
+            reason = "no_free_spot";
+            detail = $"{size.Width}x{size.Depth} tiles needed, margin {margin}; {floorTiles} floor tile(s) at height {tpl.FloorHeight}, {freeTiles} of them free";
+            return null;
+        }
+        reason = "spot";
+        detail = $"{floorTiles} floor tile(s), {freeTiles} free";
+        var pos = new Unity.Mathematics.float3(CastleGeometry.TileToWorld(r.MinX) + tpl.Offset.x, tpl.Offset.y, CastleGeometry.TileToWorld(r.MinY) + tpl.Offset.z);
+        return (r, tpl.FloorHeight, pos);
     }
 
     /// <summary>The castle generator's per-object writes for a room object, on one station.</summary>
@@ -596,7 +702,7 @@ internal static class StressStageOps
         }
     }
 
-    private static object PlacementReadback(World world, Placement p, CastlePlot plot)
+    private static object PlacementReadback(World world, Placement p, StationCastle castle)
     {
         var em = world.EntityManager;
         var row = new Dictionary<string, object?> { ["territory"] = p.Territory, ["prefab"] = Name(world, p.PrefabGuid), ["entity"] = p.Placed == Entity.Null ? null : Fmt(p.Placed) };
@@ -614,25 +720,24 @@ internal static class StressStageOps
         var progress = StationApi.Progress(world, p.Placed);
         row["status"] = progress?.RawStatus;
         row["noOwner"] = progress?.RawStatus == 5;
-        var building = CastleReader.Buildings(world, plot).FirstOrDefault(b => b.Entity == p.Placed);
-        row["listedInCastle"] = building != null;
-        if (building != null)
+        var b = ReadStationBuilding(world, p.Placed,
+            ComponentIndex.Of<ProjectM.CastleBuilding.CastleFloor>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<Refinementstation>(ComponentType.AccessMode.ReadOnly));
+        row["tileRegistered"] = b != null;
+        if (b != null)
         {
-            var r = Rect(building);
-            row["footprint"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}";
-            row["overlaps"] = CastleReader.Buildings(world, plot)
-                .Where(b => b.Entity != p.Placed && b.Kind != CastleLogic.BuildingKind.Decor && Rect(b).Overlaps(r))
-                .Select(b => b.PrefabName + " " + Fmt(b.Entity)).ToList();
+            row["footprint"] = $"{b.Rect.MinX},{b.Rect.MinY}..{b.Rect.MaxX},{b.Rect.MaxY}";
+            row["footprintAsPlanned"] = b.Rect.MinX == p.Spot.MinX && b.Rect.MinY == p.Spot.MinY;
+            row["overlaps"] = castle.Buildings.Where(o => !o.IsFloor && o.Height == b.Height && o.Rect.Overlaps(b.Rect))
+                .Select(o => Name(world, o.Guid) + " " + Fmt(o.Entity)).ToList();
         }
         bool station = false;
         foreach (var s in CastleApi.ForTerritory(p.Territory).Stations())
             if (s.Entity.Index == p.Placed.Index && s.Entity.Version == p.Placed.Version) station = true;
         row["listedAsStation"] = station;
-        long rev = CastleApi.ForTerritory(p.Territory).StructureRevision;
-        row["structureRevisionChanged"] = rev != p.RevisionBefore;
+        row["structureRevisionChanged"] = CastleApi.ForTerritory(p.Territory).StructureRevision != p.RevisionBefore;
         return row;
     }
-
     // ---- status / shutdown ---------------------------------------------------------------------
 
     public static object Status(JsonElement args)
@@ -1272,6 +1377,9 @@ internal static class StressStageOps
 
         /// <summary>Queue a step. A dry run still runs reads and the plan step; write steps are only queued when not dry.</summary>
         public void Add(string label, Func<string> run) => _steps.Add((label, run));
+
+        /// <summary>Queue steps to run right after the current one (a read that learns how many chunks it needs).</summary>
+        public void InsertNext(IEnumerable<(string Label, Func<string> Run)> steps) => _steps.InsertRange(_at, steps);
 
         public void Note(string text) => _notes.Add(text);
 

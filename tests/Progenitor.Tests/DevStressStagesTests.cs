@@ -381,6 +381,17 @@ public class DevStressStagesTests
         var wide = StressSpotFinder.Find(floors, new List<StressRect>(), 15, 2, 0);
         Assert.Equal(0, wide!.Value.MinX);
         Assert.Equal(14, wide.Value.MaxX);
+        // Counts for the per-station reason: 200 floor tiles, the chest plus its margin (4 x 4 at the corner) taken.
+        StressSpotFinder.Find(floors, occupied, 3, 3, 1, out int floorTiles, out int freeTiles);
+        Assert.Equal(200, floorTiles);
+        Assert.Equal(200 - 16, freeTiles);
+        // A dense room: with a margin nothing fits, without one the gap between two objects does.
+        var room = new[] { new StressRect(0, 0, 5, 2) };
+        var dense = new List<StressRect> { new(0, 0, 1, 2), new(4, 0, 5, 2) };
+        Assert.Null(StressSpotFinder.Find(room, dense, 2, 2, 1));
+        Assert.Equal(2, StressSpotFinder.Find(room, dense, 2, 2, 0)!.Value.MinX);
+        Assert.Equal(1, StressStageArgs.ParseStations(Json("{\"seed\":18,\"margin\":1}")).Margin);
+        Assert.Equal(0, StressStageArgs.ParseStations(Json("{\"seed\":18}")).Margin);
         // Fully occupied: nothing.
         Assert.Null(StressSpotFinder.Find(floors, new List<StressRect> { new(0, 0, 19, 9) }, 1, 1, 0));
         Assert.Null(StressSpotFinder.Find(Array.Empty<StressRect>(), occupied, 1, 1, 0));
