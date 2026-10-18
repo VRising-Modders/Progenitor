@@ -132,6 +132,8 @@ internal static unsafe class ContainerOpenGateServer
     private static readonly HashSet<long> Seen = new();
     private static readonly HashSet<long> Present = new();
     private static readonly ContainerGateRecent Recent = new();
+    private static readonly ContainerGateExtras Extras = new();
+    private static int _unresolvedLogged;
     private static IDisposable? _hook;
     private static IDisposable? _disconnected;
     private static bool _installed;
@@ -242,6 +244,7 @@ internal static unsafe class ContainerOpenGateServer
         if (_frameHooked) { Plugin.Frame -= OnFrame; _frameHooked = false; }
         BuffQuery.Release();
         Recent.Clear();
+        Extras.Clear();
         Seen.Clear();
         Present.Clear();
         _primed = false;
@@ -252,7 +255,7 @@ internal static unsafe class ContainerOpenGateServer
         var world = c.World;
         if (world == null || Book.Count == 0) return;
         try { Scan(world); }
-        catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: interaction check threw: " + e.Message); }
+        catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: interaction check threw: " + e.GetType().Name); }
     }
 
     private static void OnFrame()
@@ -261,7 +264,7 @@ internal static unsafe class ContainerOpenGateServer
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
         try { Scan(world); }
-        catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: interaction check threw: " + e.Message); }
+        catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: interaction check threw: " + e.GetType().Name); }
         try { ExpirePending(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: prompt expiry threw: " + e.Message); }
     }
@@ -275,6 +278,7 @@ internal static unsafe class ContainerOpenGateServer
         {
             query = Query.Build(em, includeDisabled: false, includeSystems: false,
                 ComponentIndex.Of<InteractBuff>(ComponentType.AccessMode.ReadOnly),
+                ComponentIndex.Of<Buff>(ComponentType.AccessMode.ReadOnly),
                 ComponentIndex.Of<SpellTarget>(ComponentType.AccessMode.ReadOnly),
                 ComponentIndex.Of<EntityOwner>(ComponentType.AccessMode.ReadOnly));
             BuffQuery.Store(world, query);
@@ -291,32 +295,48 @@ internal static unsafe class ContainerOpenGateServer
                 if (!Seen.Add(key) || !_primed) continue;
                 // One buff that cannot be read must not stop the others from being checked.
                 try { Check(world, em, buff); }
-                catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: interaction check threw: " + e.Message); }
+                catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: interaction check threw: " + e.GetType().Name); }
             }
         }
         finally { buffs.Dispose(); }
         Seen.IntersectWith(Present);
+        try { SweepExtras(em); }
+        catch (Exception e) { if (_failures++ < 4) Plugin.Logger?.LogWarning("ContainerOpenGate: extra buff sweep threw: " + e.GetType().Name); }
     }
 
     private static void Check(World world, EntityManager em, Entity buff)
     {
         if (buff.Has<DestroyTag>(em)) return;
-        if (!buff.TryRead<EntityOwner>(em, out var owner)) return;
-        var character = owner.Owner;
-        if (character == Entity.Null || !em.Exists(character) || !character.Has<PlayerCharacter>(em)) return;
         byte* st = AiRuntime.RO<SpellTarget>(em, buff, Layout.SpellTargetTargetOffset + 8);
         if (st == null) return;
         var target = AiRuntime.ReadEntity(st + Layout.SpellTargetTargetOffset);
         if (target == Entity.Null || !em.Exists(target)) return;
-        var userEntity = em.GetComponentData<PlayerCharacter>(character).UserEntity;
-        if (userEntity == Entity.Null || !em.Exists(userEntity) || !userEntity.Has<User>(em)) return;
         if (!TryGated(world, em, target, out var id, out bool notReady)) return;
+
+        // The user the way the game resolves it for the inventory sync (InteractInventorySync_Spawn): the buffed character
+        // (Buff.Target), then its ControlledBy.Controller. A servant's or an NPC's interaction (no player character) is not
+        // gated; a player's whose user cannot be resolved is refused, closed.
+        var character = Entity.Null;
+        byte* b = AiRuntime.RO<Buff>(em, buff, Layout.BuffTargetOffset + 8);
+        if (b != null) character = AiRuntime.ReadEntity(b + Layout.BuffTargetOffset);
+        if (character == Entity.Null && buff.TryRead<EntityOwner>(em, out var owner)) character = owner.Owner;
+        if (character != Entity.Null && em.Exists(character) && !character.Has<PlayerCharacter>(em)) return;
+        Entity userEntity = Entity.Null;
+        if (character != Entity.Null && em.Exists(character) && character.TryRead<ControlledBy>(em, out var controlled))
+            userEntity = controlled.Controller;
+        if (userEntity == Entity.Null || !em.Exists(userEntity) || !userEntity.Has<User>(em))
+        {
+            Close(em, buff, character);
+            if (_unresolvedLogged++ < 4)
+                Plugin.Logger?.LogWarning("ContainerOpenGate: closed an interaction with " + id + ": its player could not be resolved (the open is refused).");
+            return;
+        }
         var user = em.GetComponentData<User>(userEntity);
 
         // One interaction can bring more than one interact buff for the same container: they share the first one's answer.
         if (Recent.TryGet(user.PlatformId, id, Now, out bool allowedBefore))
         {
-            if (!allowedBefore) DestroyUtility.Destroy(em, buff, DestroyDebugReason.TryRemoveBuff);
+            if (!allowedBefore) Close(em, buff, character);
             return;
         }
 
@@ -325,11 +345,13 @@ internal static unsafe class ContainerOpenGateServer
             ? new ContainerGateOutcome<ContainerOpenRequest> { Verdict = ContainerOpenVerdict.Deny, Reason = ContainerGateText.NotReady }
             : Book.Evaluate(request, user.PlatformId, id, Now, (r, granted) => r.WithGrant(granted));
         Recent.Record(user.PlatformId, id, outcome.Verdict == ContainerOpenVerdict.Allow, Now);
-        if (outcome.Verdict == ContainerOpenVerdict.Allow) return;
+        if (outcome.Verdict == ContainerOpenVerdict.Allow)
+        {
+            Extras.ForgetCharacter(Key(character));
+            return;
+        }
 
-        // The game's own way to end an interaction it does not allow (its interact validation destroys the buff).
-        DestroyUtility.Destroy(em, buff, DestroyDebugReason.TryRemoveBuff);
-        _closed++;
+        Close(em, buff, character);
         if (outcome.Verdict == ContainerOpenVerdict.Deny)
         {
             Plugin.Logger?.LogInfo("ContainerOpenGate: closed user " + user.PlatformId + "'s interaction with " + id + ": refused"
@@ -339,6 +361,57 @@ internal static unsafe class ContainerOpenGateServer
         }
         Plugin.Logger?.LogInfo("ContainerOpenGate: closed user " + user.PlatformId + "'s interaction with " + id + " until " + outcome.Steps.Count + " prompt(s) are answered.");
         Begin(world, userEntity, user, id, target, ContainerOpenKind.Interact, request, outcome.Steps, null);
+    }
+
+    private static long Key(Entity e) => ((long)e.Index << 32) | (uint)e.Version;
+
+    /// <summary>
+    /// End a refused interaction the game's own way (its interact validation destroys the buff). A station's interaction
+    /// can carry <c>AdditionalInteractBuff</c>: the game spawns an extra buff on the character for it in the same spawn
+    /// reaction, and its destroy reaction removes that one when the interaction ends. The two spawn reactions have no
+    /// order between them in the game's metadata, so the extra buff may not exist yet, or may be spawned on a buff that
+    /// is already being destroyed: it is watched for a moment and destroyed too (<see cref="SweepExtras"/>).
+    /// </summary>
+    private static void Close(EntityManager em, Entity buff, Entity character)
+    {
+        int prefab = 0;
+        Entity instance = Entity.Null;
+        byte* extra = AiRuntime.RO<AdditionalInteractBuff>(em, buff, Layout.AdditionalInteractBuffInstanceOffset + 8);
+        if (extra != null)
+        {
+            prefab = *(int*)(extra + Layout.AdditionalInteractBuffPrefabOffset);
+            instance = AiRuntime.ReadEntity(extra + Layout.AdditionalInteractBuffInstanceOffset);
+        }
+        DestroyUtility.Destroy(em, buff, DestroyDebugReason.TryRemoveBuff);
+        _closed++;
+        if (prefab != 0 && character != Entity.Null)
+        {
+            Extras.Add(Key(character), prefab, instance == Entity.Null ? 0 : Key(instance), Now);
+            SweepExtras(em);
+        }
+    }
+
+    /// <summary>Destroy the extra buffs of refused station interactions (<see cref="Close"/>) while they are watched.</summary>
+    private static void SweepExtras(EntityManager em)
+    {
+        if (Extras.Count == 0) return;
+        Extras.Expire(Now);
+        foreach (var w in Extras.Live())
+        {
+            var character = new Entity { Index = (int)(w.Character >> 32), Version = (int)(uint)w.Character };
+            if (w.Instance != 0)
+            {
+                var known = new Entity { Index = (int)(w.Instance >> 32), Version = (int)(uint)w.Instance };
+                if (em.Exists(known) && !known.Has<DestroyTag>(em)) DestroyUtility.Destroy(em, known, DestroyDebugReason.TryRemoveBuff);
+            }
+            if (!em.Exists(character) || !em.HasComponent(character, ComponentIndex.Of<BuffBuffer>(ComponentType.AccessMode.ReadOnly))) continue;
+            var buffs = em.GetBuffer<BuffBuffer>(character, true);
+            var found = new List<Entity>();
+            for (int i = 0; i < buffs.Length; i++)
+                if (buffs[i].PrefabGuid._Value == w.Prefab && buffs[i].Entity != Entity.Null) found.Add(buffs[i].Entity);
+            foreach (var e in found)
+                if (em.Exists(e) && !e.Has<DestroyTag>(em)) DestroyUtility.Destroy(em, e, DestroyDebugReason.TryRemoveBuff);
+        }
     }
 
     /// <summary>
@@ -423,8 +496,8 @@ internal static unsafe class ContainerOpenGateServer
         {
             if (p.Kind == ContainerGateWire.KindCancel)
             {
-                Plugin.Logger?.LogInfo("ContainerOpenGate: user " + user.PlatformId + " cancelled the prompt for " + pending.State.Container + ".");
-                End(pending, ok: false, ContainerGateText.Cancelled, notify: false);
+                Plugin.Logger?.LogInfo("ContainerOpenGate: user " + user.PlatformId + " canceled the prompt for " + pending.State.Container + ".");
+                End(pending, ok: false, ContainerGateText.Canceled, notify: false);
                 return;
             }
 
@@ -458,7 +531,7 @@ internal static unsafe class ContainerOpenGateServer
         }
         catch (Exception e)
         {
-            Plugin.Logger?.LogWarning("ContainerOpenGate: " + p.Kind + " threw: " + e.Message);
+            Plugin.Logger?.LogWarning("ContainerOpenGate: " + p.Kind + " threw: " + e.GetType().Name);
             End(pending, ok: false, ContainerGateText.CheckFailed);
         }
     }
@@ -508,7 +581,7 @@ internal static unsafe class ContainerOpenGateServer
         if (p.State.Kind != ContainerOpenKind.Preview || p.PreviewSequence != previewSequence) return;
         Plugin.Logger?.LogInfo("ContainerOpenGate: user " + platform + " closed the preview of " + p.State.Container + " while its prompt was up.");
         // The client already dropped the preview; its prompt closes on the result.
-        End(p, ok: false, ContainerGateText.Cancelled, notify: true, by: null, runContinuation: false);
+        End(p, ok: false, ContainerGateText.Canceled, notify: true, by: null, runContinuation: false);
     }
 
     private static void ExpirePending()

@@ -79,7 +79,7 @@ internal static unsafe class ContainerOpenGateClient
                 case ContainerGateWire.KindResult: OnResult(p); break;
             }
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: " + p.Kind + " threw: " + e.Message); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: " + p.Kind + " threw: " + e.GetType().Name); }
     }
 
     private static void ShowPrompt(ContainerGatePacket p)
@@ -137,7 +137,7 @@ internal static unsafe class ContainerOpenGateClient
             if (!CustomEvents.SendToServer(ContainerGateWire.EventId, ContainerGateWire.Encode(packet)))
                 Plugin.Logger?.LogWarning("ContainerOpenGate: the " + packet.Kind + " could not be sent.");
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: " + packet.Kind + " send threw: " + e.Message); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: " + packet.Kind + " send threw: " + e.GetType().Name); }
         finally { packet.Text = ""; }
     }
 
@@ -154,7 +154,7 @@ internal static unsafe class ContainerOpenGateClient
         string text = string.IsNullOrWhiteSpace(mod) ? message : ModMessagePrefix.Apply(mod, message, true);
         _lastNote = text;
         try { UnityUiRuntime.HudNotify(Owner, text, "", kind, 0); }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: toast threw: " + e.Message); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerOpenGate: toast threw: " + e.GetType().Name); }
     }
 
     private static void Tick()
@@ -176,7 +176,7 @@ internal static unsafe class ContainerOpenGateClient
             try { _retry.Tick(); }
             catch (Exception e)
             {
-                Plugin.Logger?.LogWarning("ContainerOpenGate: the repeat threw: " + e.Message);
+                Plugin.Logger?.LogWarning("ContainerOpenGate: the repeat threw: " + e.GetType().Name);
                 EndRetry();
                 Toast("", ContainerGateText.Unlocked, UiNoticeKind.Info);
             }
@@ -204,14 +204,15 @@ internal static unsafe class ContainerOpenGateClient
         InputAcquireResult acquired;
         try
         {
-            // Override for this one second: a mouse movement must not swap the hovered object under the press.
+            // Yield (the default): no warning per unlock. A player who moves the mouse or presses a key in this second
+            // takes the hover or the buttons back, and the toast below is not needed then (they are interacting already).
             acquired = InputLeases.TryAcquire(Holder,
-                new InputLeaseOptions(InputChannels.Hover | InputChannels.Buttons, UserPolicy.Override, preempt: false,
+                new InputLeaseOptions(InputChannels.Hover | InputChannels.Buttons, UserPolicy.Yield, preempt: false,
                     reason: "repeat the interaction the container open gate closed"), out lease);
         }
         catch (Exception e)
         {
-            Plugin.Logger?.LogWarning("ContainerOpenGate: the input lease threw: " + e.Message);
+            Plugin.Logger?.LogWarning("ContainerOpenGate: the input lease threw: " + e.GetType().Name);
             acquired = InputAcquireResult.Faulted;
         }
         if (acquired != InputAcquireResult.Acquired || lease == null)

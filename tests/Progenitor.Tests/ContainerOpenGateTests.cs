@@ -20,8 +20,8 @@ public sealed class ContainerOpenGateTests
 
     private static readonly ContainerId Chest = ContainerId.New();
     private static readonly ContainerId Other = ContainerId.New();
-    private const ulong Ada = 76561190000000001UL;
-    private const ulong Bo = 76561190000000002UL;
+    private const ulong Ada = 76561198000000001UL;
+    private const ulong Bo = 76561198000000002UL;
 
     private static ContainerGateBook<Req> NewBook(List<string>? warnings = null)
     {
@@ -80,7 +80,8 @@ public sealed class ContainerOpenGateTests
         var outcome = Ask(book);
         Assert.Equal(ContainerOpenVerdict.Deny, outcome.Verdict);
         Assert.Equal(ContainerGateText.CheckFailed, outcome.Reason);
-        Assert.Contains(warnings, w => w.Contains("Boom") && w.Contains("no data"));
+        Assert.Contains(warnings, w => w.Contains("Boom") && w.Contains(nameof(InvalidOperationException)));
+        Assert.DoesNotContain(warnings, w => w.Contains("no data"));                     // the type only, never the message
     }
 
     [Fact]
@@ -281,8 +282,37 @@ public sealed class ContainerOpenGateTests
         var q = Pending(book, sequence: 8);
         Assert.Equal(ContainerGateAnswerStep.Failed, q.Answer(8, Typed("x"), book, 1, out reason));
         Assert.Equal(ContainerGateText.CheckFailed, reason);
-        Assert.Contains(warnings, w => w.Contains("store down"));
+        Assert.Contains(warnings, w => w.Contains(nameof(InvalidOperationException)));
+        Assert.DoesNotContain(warnings, w => w.Contains("store down"));                  // an answer handler's message may quote the typed text
         Assert.DoesNotContain(warnings, w => w.Contains("\"x\""));
+    }
+
+    [Fact]
+    public void An_answered_prompt_still_belongs_to_its_handler_so_an_unload_ends_the_open()
+    {
+        var book = NewBook();
+        var one = book.Add(new object(), "one", "One", _ => ContainerOpenDecision.Challenge("t1"), Password("1"));
+        var two = book.Add(new object(), "two", "Two", _ => ContainerOpenDecision.Challenge("t2"), Password("2"));
+        var p = Pending(book);
+        Assert.Equal(ContainerGateAnswerStep.Next, p.Answer(7, Typed("1"), book, 1, out _));
+        Assert.True(p.Owns(one));                                                   // answered, still referenced
+        Assert.True(p.Owns(two));
+        Assert.False(p.Owns(book.Add(new object(), "three", "Three", _ => ContainerOpenDecision.Allow, null)));
+    }
+
+    [Fact]
+    public void A_refused_station_interactions_extra_buff_is_watched_for_a_second_and_an_allowed_one_ends_the_watch()
+    {
+        var extras = new ContainerGateExtras();
+        extras.Add(character: 11, prefab: 500, instance: 0, now: 0);
+        extras.Add(character: 12, prefab: 501, instance: 99, now: 0);
+        Assert.Equal(2, extras.Live().Count);
+        extras.Expire(ContainerGateExtras.Seconds - 0.1);
+        Assert.Equal(2, extras.Count);
+        extras.ForgetCharacter(11);
+        Assert.Equal(12, Assert.Single(extras.Live()).Character);
+        extras.Expire(ContainerGateExtras.Seconds);
+        Assert.Equal(0, extras.Count);
     }
 
     [Fact]

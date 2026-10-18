@@ -724,6 +724,10 @@ offset RenameInteractableIdOffset                  = 0x40 : InteractEvents_Clien
 # of the buff). SpellTarget carries a bool, so it is read raw at this offset, never as a typed copy.
 dump server
 offset SpellTargetTargetOffset                     = 0x0  : SpellTarget.Target                       # NetworkedEntity, _Entity {Index, Version} first
+# A station's interaction can carry AdditionalInteractBuff: the extra buff the game spawns on the character for it, and
+# the instance once spawned. A refused interaction's extra buff is destroyed too.
+offset AdditionalInteractBuffPrefabOffset          = 0x0  : AdditionalInteractBuff.Buff              # PrefabGUID, int
+offset AdditionalInteractBuffInstanceOffset        = 0x4  : AdditionalInteractBuff.BuffInstance      # Entity {Index, Version}
 
 # ---- Container preview inventory sync (src/Progenitor.Core/Inventory/ContainerPreviewSync.cs) ------------------
 # Server only. A chest's inventory entity (AlwaysNetworked + OnlySyncToUsersTag) is sent only to the users in its

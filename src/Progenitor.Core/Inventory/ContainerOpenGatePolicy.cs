@@ -177,7 +177,7 @@ internal static class ContainerGateText
     internal const string Wrong = "Wrong password.";
     internal const string CheckFailed = "This container could not be checked. Try again.";
     internal const string NotReady = "This container is not ready yet. Try again in a moment.";
-    internal const string Cancelled = "Cancelled.";
+    internal const string Canceled = "Canceled.";
     internal const string TimedOut = "The prompt timed out.";
     internal const string TooMany = "Too many tries. Wait a minute and try again.";
     internal const string Changed = "The lock changed. Try again.";
@@ -314,7 +314,8 @@ internal sealed class ContainerGateBook<TRequest>
             try { d = h.Decide(withGrant != null ? withGrant(request, granted) : request); }
             catch (Exception e)
             {
-                Warn?.Invoke("ContainerOpenGate: " + h.PluginName + "'s open handler threw (the open is refused): " + e.GetType().Name + ": " + e.Message);
+                // The type only: a handler's message may carry what it was checking.
+                Warn?.Invoke("ContainerOpenGate: " + h.PluginName + "'s open handler threw (the open is refused): " + e.GetType().Name);
                 d = ContainerOpenDecision.Deny(ContainerGateText.CheckFailed);
             }
 
@@ -392,6 +393,38 @@ internal sealed class ContainerGateBook<TRequest>
         if (gone != null) foreach (var k in gone) { _passes.Remove(k); n++; }
         return n;
     }
+}
+
+/// <summary>
+/// The extra buffs of refused station interactions (<c>AdditionalInteractBuff</c>) the server still watches, game-free:
+/// (character, extra buff prefab, the instance when known) for <see cref="Seconds"/>. Entities are kept as
+/// index/version keys. Main thread only.
+/// </summary>
+internal sealed class ContainerGateExtras
+{
+    /// <summary>How long a refused interaction's extra buff is watched.</summary>
+    internal const double Seconds = 1.0;
+
+    internal readonly record struct Watch(long Character, int Prefab, long Instance, double Until);
+
+    private readonly List<Watch> _watches = new();
+
+    internal int Count => _watches.Count;
+
+    internal void Add(long character, int prefab, long instance, double now)
+    {
+        if (_watches.Count > 256) _watches.RemoveAt(0);
+        _watches.Add(new Watch(character, prefab, instance, now + Seconds));
+    }
+
+    internal void Expire(double now) => _watches.RemoveAll(w => now >= w.Until || double.IsNaN(w.Until));
+
+    internal IReadOnlyList<Watch> Live() => _watches.ToArray();
+
+    /// <summary>The character got an allowed interaction: its watches end (its new extra buff is the game's own).</summary>
+    internal void ForgetCharacter(long character) => _watches.RemoveAll(w => w.Character == character);
+
+    internal void Clear() => _watches.Clear();
 }
 
 /// <summary>
@@ -497,10 +530,13 @@ internal sealed class ContainerGatePending<TRequest>
 
     internal bool Expired(double now) => now >= Deadline;
 
-    /// <summary>True when a prompt not yet answered belongs to <paramref name="handler"/>.</summary>
+    /// <summary>
+    /// True when any prompt of this open, answered or not, belongs to <paramref name="handler"/>: an unloading plugin's
+    /// handler must not stay referenced (a hot reload would keep its generation alive).
+    /// </summary>
     internal bool Owns(ContainerGateHandler<TRequest> handler)
     {
-        for (int i = _index; i < _steps.Count; i++)
+        for (int i = 0; i < _steps.Count; i++)
             if (ReferenceEquals(_steps[i].Handler, handler)) return true;
         return false;
     }
@@ -526,7 +562,8 @@ internal sealed class ContainerGatePending<TRequest>
         try { verdict = step.Handler.Answer(Request, step.Decision.Token, secret, remember && step.Decision.OfferRemember); }
         catch (Exception e)
         {
-            book.Warn?.Invoke("ContainerOpenGate: " + step.Handler.PluginName + "'s answer handler threw (the answer is refused): " + e.GetType().Name + ": " + e.Message);
+            // The type only, never the message: an answer handler's exception may quote what was typed.
+            book.Warn?.Invoke("ContainerOpenGate: " + step.Handler.PluginName + "'s answer handler threw (the answer is refused): " + e.GetType().Name);
             reason = ContainerGateText.CheckFailed;
             return ContainerGateAnswerStep.Failed;
         }
