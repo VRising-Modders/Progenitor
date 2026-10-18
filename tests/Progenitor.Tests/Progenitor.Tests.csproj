@@ -866,6 +866,8 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfFinalize.cs" Link="Linked\PerfFinalize.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PingIdentity.cs" Link="Linked\PingIdentity.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\ModsUiOps.cs" Link="Linked\ModsUiOps.cs" />
+    <!-- create_character: the send and creation-scene cleanup decisions are game-free; the game calls are in CharacterCreateOps.cs. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\CharacterCreatePlan.cs" Link="Linked\CharacterCreatePlan.cs" />
     <!-- keybind_press: argument parsing is game-free; the dispatch is behind !PROGENITOR_TESTS. -->
     <Compile Include="..\..\src\Progenitor.Dev\Ops\KeybindPressOps.cs" Link="Linked\KeybindPressOps.cs" />
     <!-- map and key: parsing, decisions, the held-key ledger and event bytes are game-free; the game calls are behind !PROGENITOR_TESTS. -->

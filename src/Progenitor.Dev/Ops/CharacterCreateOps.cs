@@ -1,6 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text.Json;
+using Il2CppInterop.Runtime;
+using ProjectM;
 using ProjectM.Network;
+using ProjectM.UI;
 using Progenitor.Ecs;
 using Unity.Collections;
 using Unity.Entities;
@@ -15,12 +20,17 @@ namespace Progenitor.Dev.Ops;
 /// <see cref="CreateCharacterEvent"/> network event the creation screen sends
 /// (<c>NetworkEventType.EventId = NetworkEvents.EventId_CreateCharacterEvent</c>, 527272789 in both
 /// the client and server metadata, plus <c>SendNetworkEventTag</c>), so the client's own join flow sees its character arrive.
-/// The server's <c>HandleCreateCharacterEventSystem</c> validates the name and spawns it.</para>
+/// The server's <c>HandleCreateCharacterEventSystem</c> validates the name and spawns it. The op
+/// then waits (deferred, at most <see cref="CharacterCreatePlan.WaitMs"/>) for the character and for
+/// the client to leave the creation scene, and takes it off that scene with the game's own calls when
+/// the game does not (see <see cref="CharacterCreatePlan"/>). With a character already there it sends
+/// nothing (<c>already:true</c>) and only does that cleanup, so running it again repairs a client
+/// left on the creation scene.</para>
 ///
 /// <para><b>Server (fallback).</b> Enqueues the inbound event + <see cref="FromCharacter"/> pair for
 /// a connected user. The character spawns, but that user's client stays on its creation screen
-/// (verified live 2026-09-24: the player saw the creation preview while the compass moved);
-/// disconnect and reconnect that client afterwards and it loads straight into the character.</para>
+/// (verified live 2026-09-24: the player saw the creation preview while the compass moved). Run the
+/// client form on that client afterwards to clear the scene, or disconnect and reconnect it.</para>
 ///
 /// <para>A new character starts asleep in the crypt, hidden from other players, until its client
 /// presses the wake-up key. A headless client cannot; run the server <c>wake</c> op
@@ -45,7 +55,7 @@ internal static class CharacterCreateOps
             throw new ArgumentException("args.name must be 1..20 characters");
         var appearance = ReadAppearance(args, name);
         if (!Progenitor.Plugin.IsServerProcess)
-            return SendFromClient(em, appearance);
+            return RunClient(world, appearance);
 
         var userEntity = ResolveUser(em, args, out var user);
         if (!user.IsConnected)
@@ -75,39 +85,181 @@ internal static class CharacterCreateOps
         };
     }
 
-    private static object SendFromClient(EntityManager em, CreateCharacterEvent appearance)
+    private static object RunClient(World world, CreateCharacterEvent appearance)
     {
+        var em = world.EntityManager;
+        string name = appearance.Name.ToString();
+        var clock = Stopwatch.StartNew();
+        int poll = 0, scenes = 0;
+        bool afterCall = false;
+        var before = ReadClient(world, scanScenes: true, ref scenes);
+        bool already = before.State.HasCharacter;
+        string? sent = null;
+
         // Idempotent, so a launcher can retry: a server drops a create sent while the join is
         // still loading (live 2026-09-24: the first send vanished, a resend seconds later spawned).
+        if (CharacterCreatePlan.Start(before.State) == CharacterCreatePlan.Step.Send)
+        {
+            var ev = em.CreateEntity(
+                ComponentIndex.Of<CreateCharacterEvent>(ComponentType.AccessMode.ReadWrite),
+                ComponentIndex.Of<NetworkEventType>(ComponentType.AccessMode.ReadWrite),
+                ComponentIndex.Of<SendNetworkEventTag>(ComponentType.AccessMode.ReadWrite));
+            ev.Write(em, appearance);
+            // NetworkEventType has bools, so it is not C# unmanaged: typed SetComponentData (as Chat does).
+            em.SetComponentData(ev, new NetworkEventType { EventId = CreateCharacterEventId, IsAdminEvent = false, IsDebugEvent = false });
+            sent = $"{ev.Index}:{ev.Version}";
+            Plugin.Logger?.LogInfo($"create_character: client sent CreateCharacterEvent name '{name}' event {sent}"
+                + $" (view {before.State.View}, menu {before.State.HudMenu})");
+        }
+
+        var tracker = new CharacterCreatePlan.Tracker();
+        var deferred = new DeferredResult(CharacterCreatePlan.WaitMs);
+        int cleared = 0;
+        void Finish(CharacterCreatePlan.Step step, ClientRead now, string? error = null)
+        {
+            var reply = new Dictionary<string, object?>
+            {
+                ["action"] = "create_character",
+                ["side"] = "client",
+                ["ok"] = step == CharacterCreatePlan.Step.Done,
+                ["already"] = already,
+                ["result"] = CharacterCreatePlan.ResultName(step),
+                ["character"] = now.Character,
+                ["leftCreation"] = tracker.LeaveIssued || cleared > 0,
+                ["handler"] = CharacterCreatePlan.Handler(tracker),
+                ["hudMenu"] = now.State.HudMenu,
+                ["view"] = now.State.View,
+                ["creationScenes"] = now.State.CreationScenes,
+                ["frames"] = tracker.Frames,
+                ["elapsedMs"] = clock.ElapsedMilliseconds,
+            };
+            if (sent != null)
+            {
+                reply["name"] = name;
+                reply["event"] = sent;
+            }
+            if (tracker.ClearIssued) reply["destroyedScenes"] = cleared;
+            string? note = error ?? CharacterCreatePlan.Note(step);
+            if (note != null) reply["note"] = note;
+            Plugin.Logger?.LogInfo($"create_character: {CharacterCreatePlan.ResultName(step)} after {tracker.Frames} frame(s)"
+                + $" (menu {now.State.HudMenu}, view {now.State.View}, scenes {now.State.CreationScenes}, handler {CharacterCreatePlan.Handler(tracker)})");
+            deferred.SetResult(reply);
+        }
+        void Poll()
+        {
+            try
+            {
+                if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
+                if (!world.IsCreated)
+                {
+                    Finish(CharacterCreatePlan.Step.Stuck, default, "the client left the game before the character was ready");
+                    return;
+                }
+                var now = ReadClient(world, CharacterCreatePlan.ShouldScanScenes(++poll, afterCall), ref scenes);
+                var step = tracker.Next(now.State, clock.ElapsedMilliseconds);
+                afterCall = step is CharacterCreatePlan.Step.Leave or CharacterCreatePlan.Step.Clear;
+                switch (step)
+                {
+                    case CharacterCreatePlan.Step.Wait:
+                        break;
+                    case CharacterCreatePlan.Step.Leave:
+                        // CharacterCreationMenuMapper.OnUpdate's own exit once the local user has a character.
+                        HUDMenuManager.GoToMenu(world, HUDMenuType.WakeUpMenu);
+                        Plugin.Logger?.LogInfo("create_character: the creation menu stayed after the character arrived; HUDMenuManager.GoToMenu(WakeUpMenu)");
+                        break;
+                    case CharacterCreatePlan.Step.Clear:
+                        cleared = DestroyCreationScenes();
+                        Plugin.Logger?.LogInfo($"create_character: destroyed {cleared} creation scene(s) left by the loading screen (the creation menu's DestroyBrowser)");
+                        break;
+                    default:
+                        Finish(step, now);
+                        return;
+                }
+                MainThread.PostDelayed(0, Poll, deferred);
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("create_character: " + e.Message);
+                if (!deferred.Completion.Task.IsCompleted) Finish(CharacterCreatePlan.Step.Stuck, default, e.Message);
+            }
+        }
+        try { MainThread.PostDelayed(0, Poll, deferred); }
+        catch
+        {
+            deferred.SetException(new InvalidOperationException("create_character could not schedule its readback"));
+            throw;
+        }
+        return deferred;
+    }
+
+    private readonly record struct ClientRead(CharacterCreatePlan.State State, string? Character);
+
+    /// <summary>
+    /// The local character, the HUD menu and view, and the creation scenes, read once on the main
+    /// thread. Searches the scene only when <paramref name="scanScenes"/>; otherwise reports the last
+    /// count in <paramref name="scenes"/>.
+    /// </summary>
+    private static ClientRead ReadClient(World world, bool scanScenes, ref int scenes)
+    {
+        var em = world.EntityManager;
+        string? character = null;
         var local = Query.Entities(
             em,
             includeDisabled: true,
             includeSystems: false,
             ComponentIndex.Of<LocalCharacter>(ComponentType.AccessMode.ReadOnly));
-        if (local.Count > 0)
-        {
-            var c = local[0];
-            return new { action = "create_character", side = "client", already = true, character = $"{c.Index}:{c.Version}" };
-        }
+        if (local.Count > 0) character = $"{local[0].Index}:{local[0].Version}";
 
-        var ev = em.CreateEntity(
-            ComponentIndex.Of<CreateCharacterEvent>(ComponentType.AccessMode.ReadWrite),
-            ComponentIndex.Of<NetworkEventType>(ComponentType.AccessMode.ReadWrite),
-            ComponentIndex.Of<SendNetworkEventTag>(ComponentType.AccessMode.ReadWrite));
-        ev.Write(em, appearance);
-        // NetworkEventType has bools, so it is not C# unmanaged: typed SetComponentData (as Chat does).
-        em.SetComponentData(ev, new NetworkEventType { EventId = CreateCharacterEventId, IsAdminEvent = false, IsDebugEvent = false });
-        string name = appearance.Name.ToString();
-        Plugin.Logger?.LogInfo($"create_character: client sent CreateCharacterEvent name '{name}' event {ev.Index}:{ev.Version}");
-        return new
+        string hudMenu = "", view = "";
+        try
         {
-            action = "create_character",
-            side = "client",
-            already = false,
-            name,
-            @event = $"{ev.Index}:{ev.Version}",
-            note = "sent; the server validates the name and spawns the character",
-        };
+            var hud = OpenHUDMenuSystem.Get(world);
+            if (hud != null) hudMenu = hud.CurrentMenuType.ToString();
+        }
+        catch { hudMenu = ""; }
+        try { view = ViewManager.GetCurrentView().ToString(); } catch { view = ""; }
+        if (scanScenes)
+        {
+            int found = 0;
+            ForEachCreationScene(_ => found++);
+            scenes = found;
+        }
+        return new ClientRead(new CharacterCreatePlan.State(character != null, hudMenu, view, scenes), character);
+    }
+
+    /// <summary>
+    /// Each <c>CustomizationBrowser</c> (the creation scene's behaviour) except one owned by the
+    /// character-creation icon generator, which is not part of the join.
+    /// </summary>
+    private static void ForEachCreationScene(Action<CustomizationBrowser> body)
+    {
+        var found = UnityEngine.Object.FindObjectsOfType(Il2CppType.Of<CustomizationBrowser>());
+        if (found == null || found.Length == 0) return;
+        var icons = UnityEngine.Object.FindObjectsOfType(Il2CppType.Of<CharacterCreationIconGenerator>());
+        for (int i = 0; i < found.Length; i++)
+        {
+            var browser = found[i]?.TryCast<CustomizationBrowser>();
+            if (browser == null) continue;
+            bool icon = false;
+            for (int j = 0; icons != null && j < icons.Length && !icon; j++)
+            {
+                var gen = icons[j]?.TryCast<CharacterCreationIconGenerator>();
+                icon = gen != null && gen.CustomizationBrowser != null && gen.CustomizationBrowser.Pointer == browser.Pointer;
+            }
+            if (!icon) body(browser);
+        }
+    }
+
+    /// <summary>What <c>CharacterCreationMenuMapper.DestroyBrowser</c> does: <c>Object.Destroy(browser.gameObject)</c>.</summary>
+    private static int DestroyCreationScenes()
+    {
+        int n = 0;
+        ForEachCreationScene(browser =>
+        {
+            UnityEngine.Object.Destroy(browser.gameObject);
+            n++;
+        });
+        return n;
     }
 
     private static CreateCharacterEvent ReadAppearance(JsonElement args, string name) => new()
