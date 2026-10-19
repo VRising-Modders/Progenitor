@@ -52,7 +52,7 @@ The store notices when the file is edited outside the game (checked every two se
 
 ## Protocol
 
-Core channel `PrSt` (`0x50725374`), capability `ScopedSettings = 1073741824`. The earlier design's value 4 belongs to JoinFlow and must not be reused. Older peers receive no PrSt traffic. The existing ConfigSync and PrSe paths remain supported.
+Core channel `PrSt` (`0x50725374`), capability `ScopedSettings = 1073741824`. The earlier design's value 4 belongs to JoinFlow and must not be reused. Since 2026-10-18 bit 8 is `MaterialViews` (declared at run time, only while a client's material seams are bound); the free capability bits are 16, 32 and 2147483648, and the top bit is best kept for an extension marker once the 32-bit row is full. Older peers receive no PrSt traffic. The existing ConfigSync and PrSe paths remain supported.
 
 A versioned, direction-checked binary stream sends a bounded snapshot: begin, up to 512 individual definitions, end. All parts carry a generation; the client publishes the catalog only when its count and identifiers are complete. Each packet is at most 15 KiB, fields at most 4096 UTF-8 bytes, choices at most 128. Updates carry values for that recipient; personal values are never broadcast to other accounts. Register/unregister and permission changes replace the catalog. Client caches and pending callbacks are discarded on disconnect or unload.
 

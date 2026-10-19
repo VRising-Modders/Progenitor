@@ -46,7 +46,8 @@ internal static class MaterialNet
 /// is one <see cref="MaterialService"/> session: the provider is asked once at the check, every line is
 /// paid from that answer, and the queued <see cref="MaterialPaid"/> events are published when the
 /// system's update ends. Every second (and right after an invalidation or a governed payment) each
-/// online player's Build, Craft, Upgrade, CharacterCraft and RefineView totals are refreshed and sent when they changed
+/// online player's Build, Craft, Upgrade, CharacterCraft and RefineView totals are refreshed and sent when they changed,
+/// to a client that declared <c>Handshake.Capability.MaterialViews</c> only
 /// (<see cref="MaterialRefreshPolicy"/>, <see cref="MaterialViewPublisher"/>); a refresh recomputes a
 /// view only when something it depends on changed (<see cref="MaterialService.RefreshView"/>).</para>
 ///
@@ -154,6 +155,17 @@ internal static unsafe class MaterialSeamRuntime
 
         _bound = BootstrapLink.TrySetMaterialSlots(_countGate, _compose, _payGate, _pay);
         _reason = _bound ? "" : "native seams not armed (" + bootstrap + ")";
+        // Client: own 'PrMv' whether or not the seams bound. Unowned, a view an older server still sends would
+        // reach the game's event reader, which rejects it as malformed and logs a line per packet. OnView drops
+        // it unread while unbound; the MaterialViews capability (declared only when bound) stops a current
+        // server from sending at all.
+        if (MaterialClientPolicy.RegistersViewHandler(_server))
+        {
+            CustomEvents.OnReceive(MaterialViewWire.EventId, OnView);
+            _clientHandler = true;
+            Handshake.ClientConnectionEnded += OnConnectionEnded;
+            Handshake.ClientReadsMaterialViews = _bound;
+        }
         if (!_bound) return;
 
         if (_server)
@@ -218,9 +230,6 @@ internal static unsafe class MaterialSeamRuntime
             // run only when the system runs, so they always pair.
             Hooks.Add(SystemHooks.Before<ProjectM.UI.RefinementstationMenuMapper>(_ => MaterialRefineTooltipRuntime.Before()));
             Hooks.Add(SystemHooks.After<ProjectM.UI.RefinementstationMenuMapper>(_ => MaterialRefineTooltipRuntime.After(Overlay)));
-            CustomEvents.OnReceive(MaterialViewWire.EventId, OnView);
-            _clientHandler = true;
-            Handshake.ClientConnectionEnded += OnConnectionEnded;
         }
         Plugin.Frame += Frame;
         _frameHooked = true;
@@ -247,6 +256,7 @@ internal static unsafe class MaterialSeamRuntime
         {
             CustomEvents.RemoveHandler(MaterialViewWire.EventId, OnView);
             Handshake.ClientConnectionEnded -= OnConnectionEnded;
+            Handshake.ClientReadsMaterialViews = false;
             _clientHandler = false;
         }
         try { _service?.EndScope(); }
@@ -564,12 +574,13 @@ internal static unsafe class MaterialSeamRuntime
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
             catch { continue; }
-            // A CharacterCraft view only to a client that declared it reads one (an older Core drops it as malformed).
+            // Views only to a client that declared it reads them (MaterialViews: its seams are bound), and a
+            // CharacterCraft or RefineView view only to one that also declared that operation (an older Core drops
+            // it as malformed). A client without MaterialViews gets nothing and costs no provider call.
             var caps = Handshake.CapsOf(userIndex);
-            bool readsCharacterCraft = (caps & Handshake.Capability.MaterialCharacterCraft) != 0;
-            bool readsRefineView = (caps & Handshake.Capability.MaterialRefineView) != 0;
+            if (!MaterialClientPolicy.ReadsViews(caps)) continue;
             foreach (var op in MaterialClientPolicy.ViewOperations)
-                if (MaterialClientPolicy.ReadByPeer(op, readsCharacterCraft, readsRefineView))
+                if (MaterialClientPolicy.ReadByPeer(op, caps))
                     Push(bootstrap, userIndex, user, character, op, force || dirty, dirty, Reads);
         }
         return true;
@@ -615,6 +626,8 @@ internal static unsafe class MaterialSeamRuntime
 
     private static void OnView(int eventId, byte* payload, int length)
     {
+        // Registered even while the seams are unbound (see Install): then nothing reads the overlay, so drop it.
+        if (!MaterialClientPolicy.AppliesView(_bound)) return;
         if (!MaterialViewWire.TryDecode(new ReadOnlySpan<byte>(payload, length), out var view, out string why))
         {
             // Once per connection: a newer server resends every view every few seconds.

@@ -458,6 +458,10 @@ Debug bridge: `broadcast` op (`{text, type?: ChatMessageType name, count?: 1-100
 
 Neither refusal throws. The caller gets a handle that removes nothing, and the log names both parties. Pick ids from your own four-letter tag: the Sample's are `Sm??` (`SmFx`, `SmUi`, `SmMd`, `SmNp`, `SmNr`).
 
+**On receive, a reserved id with no handler is consumed, never passed to the game** (2026-10-18). Both receive paths (client and server) route every packet through `EventHandlerTable<T>.Route`: an id with a handler is dispatched; a reserved id with none is dropped the way a handled event is consumed, with one warning per id per Core generation (`CustomEvents: no client handler for reserved event 'PrMv' (0x50724D76); dropped.`, at most 64 distinct ids); any other unknown id goes to the game as before. A reserved id is never a game event, and handed to the game it is rejected by the game's event reader as malformed, one log line per packet. This works on any Bootstrap, because it is Core's dispatcher that decides. The Core-swap freeze is unaffected: while frozen, Bootstrap does not call Core's dispatcher at all; it buffers the ids in its owned set and replays them into the new Core afterwards. A plugin's own unknown ids still reach the game, so a mod that registers a handler conditionally must also stop its peer from sending (below).
+
+**Conditional receive needs a capability, not just a missing handler.** If one side registers a handler only when a feature is available (seams armed, a setting on) while the other side sends unconditionally, the receiver has nothing to read the packets with. Core's rule: the receiver advertises a handshake capability bit only when the feature is really running, computed at run time when it depends on run-time state, and the sender checks that bit for each peer. Core's material views are the example: `Handshake.Capability.MaterialViews` (8) is declared only while the client's material seams are bound, and the client registers `'PrMv'` whether or not they bound (dropping views while unbound) so an older server that ignores the bit still cannot reach the game's event reader.
+
 **Where the rules live.** `Networking/CustomEventPolicy.cs` — game-free, so it is compiled into the test suite and the refusals are *driven* rather than pinned. It holds the predicate, all four refusal sentences (register, send, remove, clear), the `EventIdOwner` identity and `EventHandlerTable<T>`, which is the only thing that stores or erases a handler or an owner: a refusal returns out of it before either, so there is no store and no removal for a refusal to reach. The whole-table erasure asks a decision too — `ClearForUninstall` refuses anyone but Core (R59 finding 8); it was a bare `Clear()` with no decision in it, eleven lines under a docstring saying the two `Remove` overloads were the only things that erase a row. Both its callers were Core and correct, so nothing was reachable — but a false structural sentence in the one file whose claim is that its refusals are driven costs a reader the audit. That structure is the fix for R57 finding 4, which measured the old source pin to be worth nothing — deleting both `return;` statements after the refusal's log line, so every refusal stored the handler anyway, passed all twenty-five tests including the one named for it.
 
 ```csharp
@@ -4098,7 +4102,7 @@ changes.
 **Who gets CharacterCraft views.** Anyone standing on a plot the provider governs for them: there is no
 ownership gate (unlike Upgrade, as for Build); whether a visitor or an ally is governed is the
 provider's call through `Candidates`. The views go only to clients whose Core declared it reads them
-(handshake capability `MaterialCharacterCraft`, 268435456); an older client gets none (it would drop
+(handshake capabilities `MaterialViews`, 8, and `MaterialCharacterCraft`, 268435456); an older client gets none (it would drop
 operation 6 as malformed) and keeps the game's own counts in the Character window. Capabilities are
 learned at the handshake, so right after a server Core swap a client gets CharacterCraft views again
 once its handshake was re-answered.
@@ -4240,6 +4244,15 @@ and of the structure it was computed for (Craft: the workstation; Upgrade: the c
 is open; RefineView: the refinement station). At most 1500 items, flagged when cut. A RefineView view goes
 only to a client whose Core declared handshake capability `MaterialRefineView` (536870912); an older
 client would drop operation 7 as malformed.
+
+**No view goes to a client that does not read views** (2026-10-18). A client declares handshake capability
+`MaterialViews` (8) only while its material seams are bound; it is the one bit a client sets at run time
+rather than by build. The server computes and sends no view of any operation (Build, Craft, Upgrade,
+CharacterCraft, RefineView) to a client without it, so a client whose Bootstrap lacks the seams, or an older
+Core, is sent nothing and keeps the game's own counts. The client registers its `'PrMv'` handler whether or
+not its seams bound and drops views while unbound, so an older server that still sends to everyone is
+consumed rather than handed to the game. Before this, such a client logged the game's malformed-packet line
+roughly every 3 seconds. (Source-checked and game-free tested, `ReservedEventConsumeTests`; not live-verified.)
 
 #### Refinement recipe tooltip counts
 

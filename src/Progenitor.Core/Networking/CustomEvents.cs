@@ -641,9 +641,17 @@ public static unsafe class CustomEvents
         int eventId = *(int*)(data + bytePos);
 
         CustomEventHandler? handler;
-        lock (ClientHandlers)
+        ReceiveRoute route;
+        string? dropLog;
+        lock (ClientHandlers) route = ClientHandlers.Route(eventId, out handler, out dropLog);
+        if (route == ReceiveRoute.PassToGame) return false;
+        if (route == ReceiveRoute.DropReserved || handler == null)
         {
-            if (!ClientHandlers.TryGetHandler(eventId, out handler) || handler == null) return false;
+            // A reserved id with no handler is never a game event: the game's event reader would reject it
+            // as malformed and log a line per packet. Consume it the way a handled event is consumed.
+            if (dropLog != null) Plugin.Logger?.LogWarning(dropLog);
+            netBuffer->_ReadPosition = bits;
+            return true;
         }
         int payloadStart = bytePos + sizeof(int);
         EnterReceiveDispatch();
@@ -1076,9 +1084,17 @@ public static unsafe class CustomEvents
         int eventId = *(int*)(data + bytePos + 1);
 
         CustomEventFromClientHandler? handler;
-        lock (ServerHandlers)
+        ReceiveRoute route;
+        string? dropLog;
+        lock (ServerHandlers) route = ServerHandlers.Route(eventId, out handler, out dropLog);
+        if (route == ReceiveRoute.PassToGame) return false;
+        if (route == ReceiveRoute.DropReserved || handler == null)
         {
-            if (!ServerHandlers.TryGetHandler(eventId, out handler) || handler == null) return false;
+            // Same rule as the client: a reserved id with no handler is consumed, never fed to the game's
+            // event reader. Nothing is resolved or wrapped for it, so it costs less than a handled packet.
+            if (dropLog != null) Plugin.Logger?.LogWarning(dropLog);
+            netBuffer->_ReadPosition = bits;
+            return true;
         }
 
         int payloadStart = bytePos + 1 + sizeof(int);

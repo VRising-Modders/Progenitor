@@ -102,6 +102,48 @@ internal readonly struct EventIdOwner : IEquatable<EventIdOwner>
     public override string ToString() => Describe();
 }
 
+/// <summary>What a receive path does with one packet (<see cref="CustomEventPolicy.RouteReceive"/>).</summary>
+internal enum ReceiveRoute
+{
+    /// <summary>A handler holds the id: call it, then consume the packet.</summary>
+    Dispatch,
+
+    /// <summary>No handler, reserved id: consume the packet without calling anything, logged once per id.</summary>
+    DropReserved,
+
+    /// <summary>No handler, not reserved: hand the packet to the game.</summary>
+    PassToGame,
+}
+
+/// <summary>
+/// Logs a dropped reserved id with no handler once per id, so a peer resending it every few seconds writes one
+/// line, not one per packet. Bounded: the reserved range has 65536 ids and the sender is a remote peer, so past
+/// <see cref="MaxIds"/> distinct ids nothing more is logged (the packets are still dropped). Thread-safe.
+/// </summary>
+internal sealed class ReservedDropGate
+{
+    /// <summary>How many distinct ids the gate remembers.</summary>
+    public const int MaxIds = 64;
+
+    private readonly HashSet<int> _logged = new();
+
+    /// <summary>True the first time <paramref name="eventId"/> is seen, while fewer than <see cref="MaxIds"/> are remembered.</summary>
+    public bool Note(int eventId)
+    {
+        lock (_logged)
+        {
+            if (_logged.Contains(eventId) || _logged.Count >= MaxIds) return false;
+            return _logged.Add(eventId);
+        }
+    }
+
+    /// <summary>Forget every logged id (tests; a Core swap replaces the instance). Not named Clear: the handler table's pin forbids a bare Clear in this file.</summary>
+    public void ForgetLogged()
+    {
+        lock (_logged) _logged.Clear();
+    }
+}
+
 /// <summary>What happened to one registration.</summary>
 internal enum EventRegistrationResult
 {
@@ -193,6 +235,42 @@ internal static class CustomEventPolicy
 
     /// <summary>True when <paramref name="eventId"/> falls in the reserved <c>0x5072____</c> range.</summary>
     public static bool IsReserved(int eventId) => ((eventId >> 16) & 0xFFFF) == ReservedEventIdPrefix;
+
+    /// <summary>
+    /// What a receive path does with one packet's event id, given whether a handler holds it.
+    /// <list type="bullet">
+    /// <item><see cref="ReceiveRoute.Dispatch"/>: a handler holds the id; call it and consume the packet.</item>
+    /// <item><see cref="ReceiveRoute.DropReserved"/>: no handler, but the id is in Progenitor's reserved range.
+    /// Consume it anyway. A reserved id is never a game event, and passing it on makes the game's event reader
+    /// reject it as malformed and log a line per packet. This happens whenever this side's feature that would
+    /// read the id is off (a client whose Bootstrap lacks the seams that feature needs, say) while the peer
+    /// still sends it.</item>
+    /// <item><see cref="ReceiveRoute.PassToGame"/>: no handler and not reserved; the game's own traffic.</item>
+    /// </list>
+    /// </summary>
+    public static ReceiveRoute RouteReceive(bool hasHandler, int eventId)
+    {
+        if (hasHandler) return ReceiveRoute.Dispatch;
+        return IsReserved(eventId) ? ReceiveRoute.DropReserved : ReceiveRoute.PassToGame;
+    }
+
+    /// <summary>The id as its four characters (<c>'PrMv'</c>), or its hex form when they are not printable.</summary>
+    public static string FourCc(int eventId)
+    {
+        var chars = new char[4];
+        for (int i = 0; i < 4; i++)
+        {
+            int b = (eventId >> (24 - 8 * i)) & 0xFF;
+            if (b < 0x20 || b > 0x7E) return Format(eventId);
+            chars[i] = (char)b;
+        }
+        return "'" + new string(chars) + "'";
+    }
+
+    /// <summary>The line written the first time a reserved id with no handler is dropped on <paramref name="side"/>.</summary>
+    public static string UnhandledReservedLog(int eventId, string side) =>
+        $"CustomEvents: no {side} handler for reserved event {FourCc(eventId)} ({Format(eventId)}); dropped. "
+        + "The feature that reads it is not running on this side; further drops of this id are not logged.";
 
     /// <summary>How an id reads in a log line.</summary>
     public static string Format(int eventId) => "0x" + eventId.ToString("X8");
@@ -317,6 +395,13 @@ internal static class CustomEventPolicy
 
     private static readonly HashSet<int> LoggedSendRefusals = new();
     private static readonly HashSet<int> LoggedRemovalRefusals = new();
+
+    /// <summary>
+    /// The once-per-id gate for dropped reserved ids with no handler, shared by both sides' tables this
+    /// generation. A test gives its table its own <see cref="ReservedDropGate"/> instead.
+    /// </summary>
+    public static readonly ReservedDropGate UnhandledReserved = new();
+
     private static bool _notedUnattributedOwner;
 
     /// <summary>True the first time <paramref name="eventId"/> is refused on a send this generation.</summary>
@@ -355,6 +440,7 @@ internal static class CustomEventPolicy
         {
             LoggedSendRefusals.Clear();
             LoggedRemovalRefusals.Clear();
+            UnhandledReserved.ForgetLogged();
             _notedUnattributedOwner = false;
         }
     }
@@ -372,13 +458,35 @@ internal sealed class EventHandlerTable<THandler> where THandler : class
     private readonly Dictionary<int, THandler> _handlers = new();
     private readonly Dictionary<int, EventIdOwner> _owners = new();
     private readonly string _side;
+    private readonly ReservedDropGate _dropGate;
 
     /// <param name="side">"client" or "server"; appears in the refusal lines.</param>
-    public EventHandlerTable(string side) => _side = side ?? "";
+    /// <param name="dropGate">The once-per-id log gate for <see cref="Route"/>; the shared generation gate when null.</param>
+    public EventHandlerTable(string side, ReservedDropGate? dropGate = null)
+    {
+        _side = side ?? "";
+        _dropGate = dropGate ?? CustomEventPolicy.UnhandledReserved;
+    }
 
     public int Count => _handlers.Count;
 
     public bool TryGetHandler(int eventId, out THandler? handler) => _handlers.TryGetValue(eventId, out handler);
+
+    /// <summary>
+    /// The receive decision for one packet (<see cref="CustomEventPolicy.RouteReceive"/>), with the handler when
+    /// it is <see cref="ReceiveRoute.Dispatch"/>. <paramref name="log"/> carries the once-per-id line the first
+    /// time a reserved id with no handler is dropped, and is null otherwise. Both dispatchers call this, so the
+    /// tests drive the same decision the receive hooks make.
+    /// </summary>
+    public ReceiveRoute Route(int eventId, out THandler? handler, out string? log)
+    {
+        log = null;
+        bool has = _handlers.TryGetValue(eventId, out handler) && handler != null;
+        var route = CustomEventPolicy.RouteReceive(has, eventId);
+        if (route == ReceiveRoute.DropReserved && _dropGate.Note(eventId))
+            log = CustomEventPolicy.UnhandledReservedLog(eventId, _side);
+        return route;
+    }
 
     public bool TryGetOwner(int eventId, out EventIdOwner owner) => _owners.TryGetValue(eventId, out owner);
 

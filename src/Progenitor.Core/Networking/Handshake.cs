@@ -198,9 +198,24 @@ public static partial class Handshake
         JoinFlow = 4,
 
         /// <summary>
+        /// Material sources (client only, in its answer): this client reads material totals views (<c>'PrMv'</c>) at
+        /// all. Unlike the other client bits this one is decided at run time, not by the build: a client declares it
+        /// only while its material seams are bound (its Bootstrap has them armed), which is the only time it registers
+        /// a working <c>'PrMv'</c> handler (<see cref="ClientReadsMaterialViews"/>). The server computes and sends no
+        /// view of any operation to a client without it, so an older client, or one whose Bootstrap lacks the seams,
+        /// is simply sent nothing. <see cref="MaterialCharacterCraft"/> and <see cref="MaterialRefineView"/> still gate
+        /// their own operations on top of this bit.
+        ///
+        /// <para>Bit 8 was chosen over bit 2147483648: it was never assigned in any Core (the JoinAdmin note kept 8 to
+        /// 32 for join-flow stages that took no bits), and the top bit stays free for a future extension marker once the
+        /// 32-bit row is full.</para>
+        /// </summary>
+        MaterialViews = 8,
+
+        /// <summary>
         /// JOINADMIN1 (join flow stage 3): this client handles the admin "Players joining" channel
         /// (<c>'PrJa'</c>). The server sends its hello on that id after an ok handshake only to a client that
-        /// declared this. (Bits 8 to 32 are left for other join-flow stages.)
+        /// declared this. (Bits 16 and 32 are still free; 8 is <see cref="MaterialViews"/>.)
         /// </summary>
         JoinAdmin = 64,
 
@@ -356,8 +371,20 @@ public static partial class Handshake
         return v == Progenitor.Ui.FrameworkVersions.Unknown ? "" : v;
     }
 
+    /// <summary>
+    /// True while this client's material seams are bound and its <c>'PrMv'</c> handler applies views. Set by the
+    /// material seam runtime on install, cleared on uninstall; read when the handshake answer is built, so it adds
+    /// <see cref="Capability.MaterialViews"/> at run time (<see cref="RuntimeCapabilities"/>).
+    /// </summary>
+    internal static bool ClientReadsMaterialViews { get; set; }
+
+    /// <summary>The bits decided at run time rather than by the build, for the given state.</summary>
+    internal static Capability RuntimeCapabilities(bool readsMaterialViews) =>
+        readsMaterialViews ? Capability.MaterialViews : Capability.None;
+
     /// <summary>Everything <em>this</em> Core can do, as the client puts it on the wire.</summary>
     internal static Capability CapabilitiesForPrefabLimit(int limit) => SelfCapabilities
+        | RuntimeCapabilities(ClientReadsMaterialViews)
         | (limit >= 1024 ? Capability.ItemCapacity1024 : Capability.None)
         | (limit >= 16384 ? Capability.ItemCapacity16384 : Capability.None);
 
@@ -371,6 +398,10 @@ public static partial class Handshake
         return (capabilities & required) == required;
     }
 
+    /// <summary>
+    /// The bits every build of this Core declares. <see cref="Capability.MaterialViews"/> is not one of them: it
+    /// depends on whether the material seams bound, so <see cref="CapabilitiesForPrefabLimit"/> adds it at run time.
+    /// </summary>
     public const Capability SelfCapabilities = Capability.InstallWindow | Capability.RemoteInstall | Capability.JoinFlow
         | Capability.JoinAdmin | Capability.ClientPolicy | Capability.ClientFix | Capability.PolicyRecheck
         | Capability.CommandHints | Capability.PolicyRuleUpdates | Capability.ModFeatures | Capability.ModMessages
