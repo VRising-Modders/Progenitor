@@ -146,6 +146,18 @@ public static class Castles
         if (heart.IsNone || !IsUsable(runtime, nameof(ForHeart)))
             return CastleHandle.Disabled(runtime);
 
+        // One plot read for this heart: listing every castle per call made per-heart callers (the
+        // servant hooks, once per heart with a hunt and update) scale with the castle count.
+        try
+        {
+            if (runtime.TrySnapshotOfHeart(heart, out var one))
+                return one != null ? new CastleHandle(one, runtime, enabled: true) : CastleHandle.Disabled(runtime);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Castles: single heart read for " + heart + " threw: " + e.Message + "; listing every castle instead");
+        }
+
         var rows = SnapshotSafe(runtime);
         for (int i = 0; i < rows.Count; i++)
         {

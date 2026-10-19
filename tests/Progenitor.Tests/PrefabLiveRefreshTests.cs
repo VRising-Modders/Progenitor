@@ -612,7 +612,7 @@ public class PrefabLiveRefreshTests
     {
         var src = ReadContentFile("PrefabRegistry.cs");
         SourcePin.AssertStatement(src, "private static void NoteLiveRefresh(");
-        SourcePin.AssertStatement(src, "private static void SettleLiveRefresh()");
+        SourcePin.AssertStatement(src, "private static bool SettleLiveRefresh()");
         SourcePin.AssertStatement(src, "RefreshDecisions.Note(");
         SourcePin.AssertUncommented(src, "RefreshDecisions.TrySettle(guidHash, currentFp, out var decision)");
 
@@ -622,7 +622,7 @@ public class PrefabLiveRefreshTests
         Assert.Equal(
             remember,
             src.LastIndexOf("PrefabLiveRefresh.RememberFingerprint(", StringComparison.Ordinal));
-        int settle = src.IndexOf("private static void SettleLiveRefresh()", StringComparison.Ordinal);
+        int settle = src.IndexOf("private static bool SettleLiveRefresh()", StringComparison.Ordinal);
         Assert.True(settle > 0 && remember > settle);
 
         // AfterCloneChanged on the server runs from the settle only; the client nudge stays
@@ -1126,9 +1126,10 @@ public class PrefabLiveRefreshTests
         SourcePin.AssertStatement(src, "out var fpGuids, out var fingerprints, out var fpSkipped, out var fpStatus");
         SourcePin.AssertStatement(src, "if (status != PrefabLiveRefresh.FingerprintExport.AuthoritativelyEmpty)");
         SourcePin.AssertUncommented(src, "GetMethod(\"ClearFingerprints\"");
-        // The sweep runs at both settle exits (nothing pending, and after the decision loop) and
-        // again on the way out through the export, so no path can leave a fossil row behind.
-        Assert.Equal(2, CountOccurrences(src, "SettleApplyPassAndDropUnclaimed();"));
+        // The sweep runs once the budgeted settle has decided every noted prefab (nothing pending
+        // included) and again on the way out through the export, so no path can leave a fossil row behind.
+        Assert.Equal(1, CountOccurrences(src, "SettleApplyPassAndDropUnclaimed();"));
+        SourcePin.AssertStatement(src, "if (!SettleLiveRefresh()) return;");
         Assert.Equal(1, CountOccurrences(src, "SweepUnclaimedFingerprints();"));
         // Cleared is a success, not a refusal, or every clear would log as an error.
         SourcePin.AssertUncommented(src, "string.Equals(name, \"Cleared\", StringComparison.Ordinal)");

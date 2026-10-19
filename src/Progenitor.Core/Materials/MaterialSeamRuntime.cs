@@ -268,6 +268,7 @@ internal static unsafe class MaterialSeamRuntime
         Publisher.Clear();
         Overlay.Clear();
         Dirty.Clear();
+        Pass.Clear();
         _inBuildMode = false;
         _buildMenuFrame = -1;
         _inCharacterCraftMenu = false;
@@ -510,11 +511,24 @@ internal static unsafe class MaterialSeamRuntime
 
     // ---- server views ------------------------------------------------------------------------------
 
+    /// <summary>
+    /// The most the view refresh (the shared-storage index included) spends in one frame. Its work is
+    /// carried over to later frames; a single view recompute is the one step that can go over it.
+    /// </summary>
+    internal const double FrameBudgetMs = 3;
+
+    private const string WorkName = "materials";
+
+    private static readonly MaterialRefreshPass Pass = new(PushItem);
+    private static readonly List<MaterialPushItem> PassItems = new();
+    private static ServerBootstrapSystem? _passBootstrap;
+    private static World? _passWorld;
+
     private static void Frame()
     {
         if (!_server) return;
         var registry = _registry;
-        if (registry == null || _service == null) return;
+        if (registry == null || _service == null || _world == null) return;
         // A scope whose system threw before its closing hook: close its operations now.
         Scope.Tick(FrameNow());
         if (Scope.OpenSystem == null && (_service.OpenSessions > 0 || _service.PendingEvents > 0)) CloseOperations();
@@ -522,42 +536,65 @@ internal static unsafe class MaterialSeamRuntime
         foreach (var u in Drain) Dirty.Add(u);
         // Every view stale (InvalidateAll, a provider registered or went away): recompute everyone.
         if (all) _service.ForgetViews();
-        if (!Refresh.Tick(Environment.TickCount64, all, Dirty.Count > 0, out bool everyone, out bool force)) return;
+
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return;
+        var budget = new Progenitor.Perf.FrameBudget(FrameBudgetMs);
+        bool worked = false;
         try
         {
-            if (PushViews(everyone, force) && everyone) Publisher.FirstRefreshDone();
+            // The shared-storage index first: views wait until this world load has one.
+            bool indexing = _world.SharedIndexRemaining > 0;
+            _world.StepSharedIndex(budget);
+            worked = indexing || _world.SharedIndexRemaining > 0;
+            if (!Pass.Active && _world.SharedIndexReady
+                && Refresh.Tick(Environment.TickCount64, all, Dirty.Count > 0, out bool everyone, out bool force))
+            {
+                worked = true;
+                if (StartPass(world, everyone, force)) Dirty.Clear();
+            }
+            if (Pass.Active && !budget.Exhausted)
+            {
+                worked = true;
+                _passWorld = world;
+                _passBootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
+                _world.InRefresh = true;
+                try { Pass.Run(budget); }
+                finally
+                {
+                    _world.InRefresh = false;
+                    _passBootstrap = null;
+                    _passWorld = null;
+                }
+                if (!Pass.Active)
+                {
+                    if (Pass.Everyone) Publisher.FirstRefreshDone();
+                    Reads?.Clear();
+                }
+            }
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("materials: view refresh threw: " + e.Message); }
-        finally { Reads?.Clear(); }
-        Dirty.Clear();
+        if (worked) Progenitor.Perf.FrameWork.Note(WorkName, budget.ElapsedTicks, Pass.Remaining + _world.SharedIndexRemaining);
     }
 
-    /// <summary>The refresh's read cache: each inventory read at most once per refresh, cleared after it.</summary>
+    /// <summary>The pass's read cache: each inventory read at most once per pass, cleared when a pass starts and ends.</summary>
     private static MaterialStockReads? Reads;
 
     /// <summary>
-    /// Refresh and send; false when the world was not ready (nothing was sent). A player's view is
-    /// recomputed only when it is new, the player is dirty (an invalidation or a governed payment), or
-    /// something it depends on changed (<see cref="MaterialService.RefreshView"/>); otherwise the cached
-    /// view is reused, and a forced resend sends it again unchanged.
+    /// Queue one item per online player and operation for a budgeted pass; false when the world was not
+    /// ready (nothing queued). A player's view is recomputed only when it is new, the player is dirty (an
+    /// invalidation or a governed payment), or something it depends on changed
+    /// (<see cref="MaterialService.RefreshView"/>); otherwise the cached view is reused, and a forced resend
+    /// sends it again unchanged. Each item first reads what its cached view depended on, a step at a time.
     /// </summary>
-    private static bool PushViews(bool everyone, bool force)
+    private static bool StartPass(World world, bool everyone, bool force)
     {
-        var world = Worlds.Server;
-        if (world == null || !world.IsCreated || _service == null || _world == null) return false;
+        if (_service == null || _world == null) return false;
         var em = world.EntityManager;
-        var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
-        if (bootstrap == null) return false;
-        if (Reads == null) Reads = new MaterialStockReads(_world);
-        Reads.Clear();
-        _world.InRefresh = true;
-        try { return PushPlayers(world, em, bootstrap, everyone, force); }
-        finally { _world.InRefresh = false; }
-    }
-
-    private static bool PushPlayers(World world, EntityManager em, ServerBootstrapSystem bootstrap, bool everyone, bool force)
-    {
-        if (everyone) _service!.BeginFullRefresh();
+        if (world.GetExistingSystemManaged<ServerBootstrapSystem>() == null) return false;
+        Reads ??= new MaterialStockReads(_world);
+        if (everyone) _service.BeginFullRefresh();
+        PassItems.Clear();
         foreach (var p in PlayerDirectory.Online(world))
         {
             var s = p.Session;
@@ -566,10 +603,6 @@ internal static unsafe class MaterialSeamRuntime
             bool dirty = Dirty.Contains(user);
             if (!everyone && !dirty) continue;
             var character = new CastleId(s.CharacterIndex, s.CharacterVersion);
-            // Dirty is cleared after this refresh: drop every cached view of the character now, so a
-            // view this refresh skips (Craft with no workstation open, Upgrade with no heart window)
-            // is recomputed when it is next refreshed instead of reused.
-            if (dirty) _service.ForgetViews(character);
             var userEntity = new Entity { Index = s.UserIndex, Version = s.UserVersion };
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
@@ -580,10 +613,41 @@ internal static unsafe class MaterialSeamRuntime
             var caps = Handshake.CapsOf(userIndex);
             if (!MaterialClientPolicy.ReadsViews(caps)) continue;
             foreach (var op in MaterialClientPolicy.ViewOperations)
-                if (MaterialClientPolicy.ReadByPeer(op, caps))
-                    Push(bootstrap, userIndex, user, character, op, force || dirty, dirty, Reads);
+            {
+                if (!MaterialClientPolicy.ReadByPeer(op, caps)) continue;
+                var item = new MaterialPushItem
+                {
+                    UserIndex = userIndex, User = user, Character = character, Operation = op,
+                    Force = force || dirty, Recompute = dirty,
+                };
+                // What the last view read is read again first (a recompute reads mostly the same containers).
+                _service.CachedDependencies(character, op, item.WarmIds, item.WarmStocks);
+                PassItems.Add(item);
+            }
+            // Dirty is cleared once the pass is queued: drop every cached view of the character now, so a
+            // view this pass skips (Craft with no workstation open, Upgrade with no heart window) is
+            // recomputed when it is next refreshed instead of reused.
+            if (dirty) _service.ForgetViews(character);
         }
+        Pass.Start(PassItems, everyone, Reads);
+        PassItems.Clear();
         return true;
+    }
+
+    /// <summary>One queued view: refreshed and sent while its player is still connected.</summary>
+    private static void PushItem(MaterialPushItem item)
+    {
+        var world = _passWorld;
+        var bootstrap = _passBootstrap;
+        if (world == null || bootstrap == null || Reads == null) return;
+        try
+        {
+            var em = world.EntityManager;
+            var userEntity = new Entity { Index = item.User.Index, Version = item.User.Version };
+            if (!userEntity.Exists(em) || !em.GetComponentData<User>(userEntity).IsConnected) return;
+            Push(bootstrap, item.UserIndex, item.User, item.Character, item.Operation, item.Force, item.Recompute, Reads);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("materials: view refresh threw: " + e.Message); }
     }
 
     private static void Push(ServerBootstrapSystem bootstrap, int userIndex, CastleId user, CastleId character, MaterialOperation op, bool force,

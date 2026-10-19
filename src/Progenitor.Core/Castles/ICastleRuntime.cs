@@ -50,6 +50,18 @@ internal interface ICastleRuntime
     /// </summary>
     IReadOnlyList<CastleSnapshot> Snapshot();
 
+    /// <summary>
+    /// One castle by its heart, read without listing every castle (a single plot read instead of one
+    /// per heart on the server). False when this runtime cannot answer for a single heart; the caller
+    /// then filters <see cref="Snapshot"/>. True with a null <paramref name="snapshot"/>: no castle has
+    /// that heart.
+    /// </summary>
+    bool TrySnapshotOfHeart(CastleId heart, out CastleSnapshot? snapshot)
+    {
+        snapshot = null;
+        return false;
+    }
+
     /// <summary>Placed tile-models of one castle, already sorted by network id.</summary>
     IReadOnlyList<CastleBuildingInfo> Buildings(CastleId heart);
 

@@ -4708,8 +4708,9 @@ anything the last computation depended on differs at the next refresh:
   no provider call at all);
 - the inventories the pool leaves out (the bag, a plain station, an open window for `Repair` and
   `Upgrade`) and the station put first;
-- the plot's own shared-storage containers (listed once per refresh by a query of only the
-  shared-storage tile models, not a scan of every castle building; their contents are read fresh);
+- the plot's own shared-storage containers (from a server-wide index of only the shared-storage tile
+  models, rebuilt a few containers per frame every 10 s, so a newly placed or removed shared container
+  reaches discovery within about 10 s; their contents are read fresh);
 - every container id it resolved (a container that is gone or rebound);
 - the stock (per item, slots without an item entity) of every inventory it read: the provider's
   containers, the plot's shared storage, the bag and the station.
@@ -4717,8 +4718,14 @@ anything the last computation depended on differs at the next refresh:
 Otherwise the refresh reuses the last view: one `Revision` call, one read of each of those inventories
 and no `Sources` call. Within one refresh every inventory is read at most once, every container id
 resolved at most once and every player's standing plot resolved once, however many items, operations
-and players need it (the plot's shared-storage listing is kept per plot, so the Build and CharacterCraft
-views of one player on one plot share it). With 136 provider chests
+and players need it.
+
+The refresh is spread across frames: it spends at most 3 ms of a server frame (`FrameBudgetMs`) and carries
+the rest over. Each step resolves one container id or reads one inventory that a player's cached view
+depended on, then the view is checked and sent; reads are kept for the whole pass, so a displayed total is
+stale by at most one pass. Views wait until the shared-storage index of the world load is built. A
+recompute is the one step that can exceed the budget. Before this (2026-10-19, a 147-castle test world),
+one refresh frame took up to 634 ms, mostly listing shared storage server-wide for every view. With 136 provider chests
 and 40 item types (game-free benchmark, `MaterialViewRefreshBenchTests`) a refresh of one Build view
 went from 5712 inventory reads, 5576 id resolutions, two castle building scans and 42 provider calls to
 137 reads, 136 resolutions and one provider call while nothing changes; a recompute costs the same 137

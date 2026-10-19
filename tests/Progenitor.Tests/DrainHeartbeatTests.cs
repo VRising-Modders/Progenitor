@@ -145,6 +145,7 @@ public class HeartbeatUiTickTimingTests
     }
 }
 
+[Collection("UiFrameCost")]
 public class UiFrameCostTests
 {
     [Fact]

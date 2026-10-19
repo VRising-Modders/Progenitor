@@ -114,6 +114,18 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         return rows;
     }
 
+    /// <summary>One plot read for one heart (<see cref="CastleReader.PlotOf"/>), not the whole castle list.</summary>
+    public bool TrySnapshotOfHeart(CastleId heart, out CastleSnapshot? snapshot)
+    {
+        snapshot = null;
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return false;
+        if (heart.IsNone) return true;
+        var plot = CastleReader.PlotOf(world, heart.ToEntity());
+        if (plot != null && CastleId.From(plot.HeartEntity) == heart) snapshot = ToSnapshot(plot);
+        return true;
+    }
+
     public IReadOnlyList<CastleBuildingInfo> Buildings(CastleId heart)
     {
         var world = Worlds.Server;

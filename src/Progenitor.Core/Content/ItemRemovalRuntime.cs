@@ -32,6 +32,14 @@ internal static class ItemRemovalRuntime
     private static DateTime _nextRegistrationFlush;
     private const int RegistrationBatchSize = 128;
     private static string Root => Paths.BepInExRootPath;
+
+    /// <summary>What unchanged plugin DLLs declare, kept across ticks (only a new or changed DLL is read again).</summary>
+    private static readonly ItemOwnerDiskPlugins.GuidCache DiskGuids = new();
+
+    /// <summary>The most one cleanup step spends; its entity and slot cursor carries over to the next step.</summary>
+    internal const double StepBudgetMs = 2;
+
+    private const string WorkName = "itemRemoval";
     private static string LedgerPath => Path.Combine(Root, ItemOwnerLedger.RelativeFileName);
 
     internal static void Install()
@@ -61,6 +69,7 @@ internal static class ItemRemovalRuntime
         _installed = false;
         _job = null;
         StartupAbsent.Clear(); Completed.Clear(); Warned.Clear(); RetryAfter.Clear();
+        DiskGuids.Clear();
     }
 
     internal static void NoteRegistered(PrefabDefinition definition)
@@ -151,7 +160,7 @@ internal static class ItemRemovalRuntime
             var ledger = ItemOwnerLedger.Load(LedgerPath);
             if (!ledger.IsValid) { Warn("ledger", "invalid ownership ledger; preserving items: " + ledger.Error); _job = null; return; }
             // One read of the plugin folders per tick, shared by every owner checked in it.
-            var disk = new ItemOwnerDiskPlugins(Root);
+            var disk = new ItemOwnerDiskPlugins(Root, cache: DiskGuids);
             if (_job == null)
             {
                 foreach (var owner in ledger.Owners)
@@ -164,7 +173,10 @@ internal static class ItemRemovalRuntime
             }
             // Recheck at every mutation boundary, including a reinstall while cleanup is pending.
             if (!Eligible(ledger, _job.Owner, disk)) { _job = null; return; }
-            if (_job.Step(world.EntityManager))
+            var budget = new Progenitor.Perf.FrameBudget(StepBudgetMs);
+            bool finished = _job.Step(world.EntityManager, budget);
+            Progenitor.Perf.FrameWork.Note(WorkName, budget.ElapsedTicks, finished ? 0 : 1);
+            if (finished)
             {
                 Plugin.Logger?.LogInfo($"Item removal: owner={_job.Owner} quarantined={_job.Removed} preserved={_job.Preserved}; unsupported equipment, properties and destinations are preserved in place.");
                 Completed.Add(_job.Owner);
@@ -198,12 +210,13 @@ internal static class ItemRemovalRuntime
             Owner = owner; _guids = new HashSet<int>(guids);
             _entities = Snapshot(em, new[] { ComponentIndex.Of<Equipment>(ComponentType.AccessMode.ReadOnly), ComponentIndex.Of<PlayerCharacter>(ComponentType.AccessMode.ReadOnly) });
         }
-        internal bool Step(EntityManager em)
+        internal bool Step(EntityManager em, Progenitor.Perf.FrameBudget time)
         {
             int budget = 128;
+            int start = budget;
             // At most one ledger read per step, and only when a stack is about to be quarantined.
             ItemOwnerLedger? ledger = null;
-            while (_index < _entities.Count && budget-- > 0)
+            while (_index < _entities.Count && budget-- > 0 && (budget >= start - 1 || !time.Exhausted))
             {
                 var entity = _entities[_index];
                 if (!em.Exists(entity)) { _index++; _slot = -1; continue; }
@@ -239,7 +252,7 @@ internal static class ItemRemovalRuntime
                     int length = em.GetBuffer<InventoryBuffer>(entity, true).Length;
                     if (length > 1024) throw new InvalidOperationException("Inventory exceeds cleanup bounds.");
                     if (_slot < 0) _slot = length - 1;
-                    while (_slot >= 0 && budget-- > 0)
+                    while (_slot >= 0 && budget-- > 0 && !time.Exhausted)
                     {
                         int i = _slot--;
                         var buffer = em.GetBuffer<InventoryBuffer>(entity, true);

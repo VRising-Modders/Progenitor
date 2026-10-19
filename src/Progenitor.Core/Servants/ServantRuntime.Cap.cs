@@ -273,15 +273,38 @@ internal static unsafe partial class ServantRuntime
         return CapBook.TryGet(row.MissionGuid, row.StartTicks, TerritoryOf(heart), out var r, out _) ? r!.MaxSuccess : null;
     }
 
+    /// <summary>
+    /// The castle territory of a heart, cached per world load: a heart entity sits on one territory for
+    /// its whole life (a new heart is a new entity). The before-update hook asks this for every heart
+    /// with a hunt on every update; read uncached it listed every castle each time. A heart with no
+    /// castle is asked again after <see cref="TerritoryRetryTicks"/>.
+    /// </summary>
     private static int TerritoryOf(Entity heart)
     {
+        int epoch = WorldEpoch.Current;
+        if (epoch != _territoryEpoch)
+        {
+            HeartTerritories.Clear();
+            _territoryEpoch = epoch;
+        }
+        long now = DateTime.UtcNow.Ticks;
+        if (HeartTerritories.TryGetValue(heart, out var known)
+            && ServantLogic.TerritoryCacheHit(known.Territory, known.Ticks, now, TerritoryRetryTicks))
+            return known.Territory;
+        int territory;
         try
         {
             var castle = Progenitor.Castles.Castles.ForHeart(CastleId.From(heart));
-            return castle.Enabled ? castle.Territory.Index : -1;
+            territory = castle.Enabled ? castle.Territory.Index : -1;
         }
-        catch { return -1; }
+        catch { territory = -1; }
+        HeartTerritories[heart] = (territory, now);
+        return territory;
     }
+
+    private const long TerritoryRetryTicks = 5 * ServantLogic.TicksPerSecond;
+    private static readonly Dictionary<Entity, (int Territory, long Ticks)> HeartTerritories = new();
+    private static int _territoryEpoch = int.MinValue;
 
     // ---- the game's save in flight ------------------------------------------------------------------
 
@@ -367,6 +390,9 @@ internal static unsafe partial class ServantRuntime
             Plugin.Logger?.LogWarning("servants: the cap book is not loaded and the game's servant timers are off, so due hunts cannot be held; they finish uncapped");
             _timersHoldWarned = true;
         }
+
+        // Every hold and veto is for a row due within the slack: none can be, so no heart is read.
+        if (!ServantLogic.AnyDueBy(_nextDueTicks, now, DueSlackTicks, timers)) return;
 
         foreach (var heart in MissionHearts)
         {

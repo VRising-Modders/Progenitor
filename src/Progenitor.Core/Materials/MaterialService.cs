@@ -375,6 +375,19 @@ internal sealed class MaterialService
         return MaterialViewOutcome.Computed;
     }
 
+    /// <summary>
+    /// What the cached view of this character and operation resolved and read when it was computed (its
+    /// container ids and inventories, the plot's shared storage, bag and station included), so a budgeted
+    /// refresh can resolve and read them a few per frame before <see cref="RefreshView"/> checks reuse.
+    /// Nothing when no view is cached.
+    /// </summary>
+    internal void CachedDependencies(CastleId character, MaterialOperation operation, List<ContainerId> ids, List<InventoryRef> stocks)
+    {
+        if (!_views.TryGetValue((character, operation), out var entry)) return;
+        foreach (var (id, _) in entry.Ids) ids.Add(id);
+        foreach (var (inventory, _) in entry.Stocks) stocks.Add(inventory);
+    }
+
     /// <summary>Drop every cached view: the next refresh recomputes everyone (an invalidation of all views, a provider change).</summary>
     internal void ForgetViews() => _views.Clear();
 

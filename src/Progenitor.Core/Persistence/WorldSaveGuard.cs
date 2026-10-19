@@ -60,6 +60,7 @@ internal static class WorldSaveGuard
         ModSave.BeforeWorldSave -= OnBeforeWorldSave;
         Plugin.Frame -= Tick;
         Suspension.End();
+        StampPoller.Reset();
         Suspend = null;
         Resume = null;
     }
@@ -82,6 +83,8 @@ internal static class WorldSaveGuard
             Enabled = true;
             return;
         }
+        // Sampled here, on the main thread, before the game writes: the stamp the write must move past.
+        StampPoller.Reset();
         Suspension.Begin(Now, SaveStamp());
         Raise(Suspend, "suspend");
     }
@@ -96,11 +99,30 @@ internal static class WorldSaveGuard
             Enabled = true;
             Plugin.Logger?.LogInfo("WorldSaveGuard: the guard is back on (" + OffMaxSeconds + " s passed).");
         }
-        if (!Suspension.Active || !Suspension.ShouldResume(now, SaveStamp())) return;
+        if (!Suspension.Active) return;
+        // The folder is listed off the main thread (StampPoller): on the main thread, right as the game wrote a
+        // large save, it stalled a frame for 254 ms. A sample is judged at the time it was asked for; with
+        // none ready, only the timeout is checked. The guarded state goes back no earlier than before.
+        long start = Stopwatch.GetTimestamp();
+        bool resume;
+        if (StampPoller.TryTake(out var stamp, out double askedAt)) resume = Suspension.ShouldResume(askedAt, stamp);
+        else resume = Suspension.ShouldResume(now, DateTime.MinValue);
+        if (!resume)
+        {
+            if (!StampPoller.Busy) StampPoller.Request(WorldSaveTrigger.SaveFolder(), now);
+            Progenitor.Perf.FrameWork.Note(WorkName, Stopwatch.GetTimestamp() - start, 0);
+            return;
+        }
+        StampPoller.Reset();
         Plugin.Logger?.LogInfo("WorldSaveGuard: guarded state goes back "
             + (Suspension.TimedOut ? "(the save file never changed in " + SyncSaveSuspension.TimeoutSeconds + " s)." : "after the save was written."));
         Raise(Resume, "resume");
+        Progenitor.Perf.FrameWork.Note(WorkName, Stopwatch.GetTimestamp() - start, 0);
     }
+
+    private const string WorkName = "saveGuard";
+
+    private static readonly SaveStampPoller StampPoller = new(WorldSaveTrigger.NewestSaveWriteUtc);
 
     private static void Raise(Action? handlers, string what)
     {

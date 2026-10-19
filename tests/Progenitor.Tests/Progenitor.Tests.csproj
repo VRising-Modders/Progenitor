@@ -49,6 +49,9 @@
     <Compile Include="..\..\src\Progenitor.Core\Content\ItemOwnerDiskPlugins.cs" Link="Linked\ItemOwnerDiskPlugins.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Models\RigReferenceSnapshot.cs" Link="Linked\RigReferenceSnapshot.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\MenuPanelLayout.cs" Link="Linked\MenuPanelLayout.cs" />
+    <!-- Frame budgets and the per-subsystem work counters the hitch summary prints (game-free). -->
+    <Compile Include="..\..\src\Progenitor.Core\Perf\FrameBudget.cs" Link="Linked\FrameBudget.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Perf\IncrementalGrouping.cs" Link="Linked\IncrementalGrouping.cs" />
     <!-- Job KEY2: the menu-hotkey guard is game-free by construction (dump-read ints and one
          focus flag), so its action set and its release rules are tested without a client. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\MenuHotkeyGuard.cs" Link="Linked\MenuHotkeyGuard.cs" />
@@ -180,6 +183,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialPlanner.cs" Link="Linked\MaterialPlanner.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialService.cs" Link="Linked\MaterialService.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialViewCache.cs" Link="Linked\MaterialViewCache.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialRefreshPass.cs" Link="Linked\MaterialRefreshPass.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialScope.cs" Link="Linked\MaterialScope.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialViewWire.cs" Link="Linked\MaterialViewWire.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialRows.cs" Link="Linked\MaterialRows.cs" />
@@ -846,6 +850,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Persistence\ServerStoreSet.cs" Link="Linked\ServerStoreSet.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Persistence\StoreMerge.cs" Link="Linked\StoreMerge.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Persistence\WorldSaveTrigger.cs" Link="Linked\WorldSaveTrigger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\SaveStampPoller.cs" Link="Linked\SaveStampPoller.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Systems\DefaultAnchorWatch.cs" Link="Linked\DefaultAnchorWatch.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Systems\DispatchAmbient.cs" Link="Linked\DispatchAmbient.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Systems\VirtualSystemDispatcher.cs" Link="Linked\VirtualSystemDispatcher.cs" />

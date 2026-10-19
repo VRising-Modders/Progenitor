@@ -152,6 +152,13 @@ internal static unsafe partial class ServantRuntime
         _zones = null;
         _cacheEpoch = int.MinValue;
         _heartsEpoch = int.MinValue;
+        _nextDueTicks = long.MinValue;
+        HeartTerritories.Clear();
+        _territoryEpoch = int.MinValue;
+        CoffinHearts.Clear();
+        _coffins = new List<Entity>();
+        _coffinsTicks = long.MinValue;
+        _coffinsEpoch = int.MinValue;
     }
 
     // ---- reads ------------------------------------------------------------------------------------
@@ -306,15 +313,51 @@ internal static unsafe partial class ServantRuntime
     private static List<Entity> CoffinsOf(EntityManager em, Entity heart)
     {
         var list = new List<Entity>();
-        var coffins = Query.Entities(em, includeDisabled: true, includeSystems: false, ComponentIndex.Of<ServantCoffinstation>(ComponentType.AccessMode.ReadOnly));
-        foreach (var c in coffins)
+        foreach (var c in AllCoffins(em))
         {
+            if (!em.Exists(c) || CoffinHeart(em, c) != heart) continue;
             byte* p = AiRuntime.RO<ServantCoffinstation>(em, c, CoffinNeed);
             if (p == null || !ServantLogic.ThroneLists(*(int*)(p + Layout.ServantCoffinstationStateOffset))) continue;
-            if (HeartOf(em, c) == heart) list.Add(c);
+            list.Add(c);
         }
         return list;
     }
+
+    /// <summary>
+    /// Every coffin on the server, listed at most once a second (a coffin placed since shows up within a
+    /// second). A servant list (<c>ctx.Servants.List</c>, often called from a return handler) used to list
+    /// them and read each one's heart on every call.
+    /// </summary>
+    private static List<Entity> AllCoffins(EntityManager em)
+    {
+        long now = DateTime.UtcNow.Ticks;
+        int epoch = WorldEpoch.Current;
+        if (epoch != _coffinsEpoch)
+        {
+            CoffinHearts.Clear();
+            _coffinsEpoch = epoch;
+            _coffinsTicks = long.MinValue;
+        }
+        if (_coffinsTicks != long.MinValue && now - _coffinsTicks < CoffinListTicks) return _coffins;
+        _coffins = Query.Entities(em, includeDisabled: true, includeSystems: false, ComponentIndex.Of<ServantCoffinstation>(ComponentType.AccessMode.ReadOnly));
+        _coffinsTicks = now;
+        return _coffins;
+    }
+
+    /// <summary>A coffin's heart, cached per world load once known (a placed coffin stays connected to its castle's heart).</summary>
+    private static Entity CoffinHeart(EntityManager em, Entity coffin)
+    {
+        if (CoffinHearts.TryGetValue(coffin, out var heart) && heart != Entity.Null && em.Exists(heart)) return heart;
+        heart = HeartOf(em, coffin);
+        if (heart != Entity.Null) CoffinHearts[coffin] = heart;
+        return heart;
+    }
+
+    private const long CoffinListTicks = ServantLogic.TicksPerSecond;
+    private static List<Entity> _coffins = new();
+    private static long _coffinsTicks = long.MinValue;
+    private static int _coffinsEpoch = int.MinValue;
+    private static readonly Dictionary<Entity, Entity> CoffinHearts = new();
 
     private static Entity ServantOfCoffin(byte* coffin) =>
         AiRuntime.ReadEntity(coffin + Layout.ServantCoffinstationConnectedServantOffset + Layout.NetworkedEntityEntityOffset);
@@ -787,13 +830,34 @@ internal static unsafe partial class ServantRuntime
         _heartsEpoch = epoch;
         _heartsStamp = now;
         MissionHearts.Clear();
+        // Unknown until every record was read: a failed read leaves every update scanning.
+        _nextDueTicks = long.MinValue;
         var type = ComponentIndex.Of<ActiveServantMission>(ComponentType.AccessMode.ReadOnly);
         foreach (var heart in Query.Entities(em, includeDisabled: true, includeSystems: false, type))
             if (em.GetBufferLength(heart, type.TypeIndex) > 0) MissionHearts.Add(heart);
+        long earliest = long.MaxValue;
+        foreach (var heart in MissionHearts)
+            earliest = Math.Min(earliest, ServantLogic.EarliestCompletion(ReadRows(em, heart)));
+        _nextDueTicks = earliest;
     }
+
+    /// <summary>
+    /// The earliest completion among every hunt record, read with the heart list (once a second, after
+    /// any send or return, and every update with the game's servant timers off). Until it is within the
+    /// clock slack no hunt can finish, so the before-update hook reads no record. A hunt the game's own
+    /// throne sends in between lasts minutes, far past the next re-read.
+    /// </summary>
+    private static long _nextDueTicks = long.MinValue;
+
+    private const string HookWork = "servants.hook";
+    private const string ReturnWork = "servants.returns";
+
+    /// <summary>The most one frame spends publishing returns (their handlers included); the rest wait a frame.</summary>
+    internal const double ReturnBudgetMs = 3;
 
     private static void BeforeUpdate(SystemHookContext hook)
     {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
         // Anything a previous update left (its after-hook did not run and no guard caught it yet).
         GuardRestore("before the next update");
         Due.Clear();
@@ -805,6 +869,10 @@ internal static unsafe partial class ServantRuntime
         {
             Plugin.Logger?.LogError("servants: the success cap step threw; this update's writes are undone after it: " + e.Message);
         }
+        // Not deferrable (a veto or hold belongs to this update), so counted, not budgeted.
+        if (ServantLogic.AnyDueBy(_nextDueTicks, DateTime.UtcNow.Ticks, DueSlackTicks, timersDisabled: false))
+            Progenitor.Perf.FrameWork.Note(HookWork, System.Diagnostics.Stopwatch.GetTimestamp() - start, 0);
+        else Progenitor.Perf.FrameWork.NoteSkip(HookWork);
     }
 
     private static void BeforeUpdateReturns(SystemHookContext hook)
@@ -820,6 +888,8 @@ internal static unsafe partial class ServantRuntime
             if (timers) _heartsDirty = true;
             RefreshHearts(em, now);
             if (MissionHearts.Count == 0) return;
+            // No hunt finishes within the clock slack: nothing to snapshot this update.
+            if (!ServantLogic.AnyDueBy(_nextDueTicks, now, DueSlackTicks, timers)) return;
             foreach (var heart in MissionHearts)
             {
                 if (!em.Exists(heart)) continue;
@@ -942,8 +1012,18 @@ internal static unsafe partial class ServantRuntime
             PendingReturns.RemoveAt(i);
             ready.Add(p);
         }
+        var budget = new Progenitor.Perf.FrameBudget(ReturnBudgetMs);
+        int published = 0;
         for (int i = ready.Count - 1; i >= 0; i--)
         {
+            // Each return runs its handlers (a resend, a loot move): past the budget the rest wait a frame,
+            // still settled (or past the wait), and are published then.
+            if (published > 0 && budget.Exhausted)
+            {
+                for (int j = i; j >= 0; j--) PendingReturns.Add(ready[j]);
+                break;
+            }
+            published++;
             var (heartId, row, seen, coffins) = ready[i];
             try
             {
@@ -957,6 +1037,7 @@ internal static unsafe partial class ServantRuntime
                 Plugin.Logger?.LogWarning("servants: building or publishing a return failed: " + e.Message);
             }
         }
+        if (published > 0) Progenitor.Perf.FrameWork.Note(ReturnWork, budget.ElapsedTicks, PendingReturns.Count);
     }
 
     /// <summary>The mission buff prefab of the game's servant mission settings; 0 when unreadable.</summary>
@@ -1021,9 +1102,9 @@ internal static unsafe partial class ServantRuntime
     private static Dictionary<CastleId, Entity> CoffinsByServant(EntityManager em)
     {
         var map = new Dictionary<CastleId, Entity>();
-        var coffins = Query.Entities(em, includeDisabled: true, includeSystems: false, ComponentIndex.Of<ServantCoffinstation>(ComponentType.AccessMode.ReadOnly));
-        foreach (var c in coffins)
+        foreach (var c in AllCoffins(em))
         {
+            if (!em.Exists(c)) continue;
             byte* p = AiRuntime.RO<ServantCoffinstation>(em, c, CoffinNeed);
             if (p == null) continue;
             var s = ServantOfCoffin(p);
