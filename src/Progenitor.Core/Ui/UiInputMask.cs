@@ -33,6 +33,20 @@ internal static class ButtonInputActions
     /// </summary>
     internal const int MenuClose = 1004;
 
+    /// <summary>
+    /// <c>Building_Deselect</c>. The game's input asset binds it to Escape and Space on keyboard and mouse;
+    /// <c>BuildMenuMapper</c> (order 502) reads it from <c>InputsDown</c> and drops the current placement. It does not
+    /// leave build mode. Not held by the close hold: it shares Space, and the hold lasts for whole frames, not one key.
+    /// </summary>
+    internal const int BuildingDeselect = 304;
+
+    /// <summary>
+    /// <c>Building_Exit</c>: Escape on keyboard and mouse (not offered for rebinding by the game's Controls page), B on a
+    /// gamepad. In build mode this is the Escape that leaves build mode and closes the build menu; <see cref="Back"/> and
+    /// <see cref="MenuClose"/> do not. See <see cref="MenuHotkeyGuard.BlockedBuildModeCloseActions"/>.
+    /// </summary>
+    internal const int BuildingExit = 309;
+
     /// <summary>Camera rotation. Allowed back on keyboard and mouse, exactly as chat does.</summary>
     internal const int RotateCamera = 500;
 }

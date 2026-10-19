@@ -378,6 +378,41 @@ internal static class MenuHotkeyGuard
     internal static bool NextCloseHold(bool captureOwnsEscape, bool dialogOpen, bool escapeHeld, bool wasHeld) =>
         WorkspaceInputPolicy.HoldsGameClose(captureOwnsEscape, dialogOpen, escapeHeld, wasHeld);
 
+    // ---- BUILDESC1: build mode's Escape is Building_Exit, not Menu_Close ----------------------
+
+    /// <summary>
+    /// The building actions the close hold also takes. Live (2026-10-18, client 2026.10.128): with the build search
+    /// filled by Copy building and the box unfocused, the hold took <c>Back</c> and <c>Menu_Close</c> and one Escape
+    /// still left build mode and closed the build menu. In build mode Escape is also <c>Building_Exit</c> (309),
+    /// which the hold did not take.
+    ///
+    /// <para>
+    /// The game's input asset binds Escape, on keyboard and mouse, to three actions: <c>Back</c> (Core map),
+    /// <c>Building_Deselect</c> and <c>Building_Exit</c> (Building map). <c>Building_Deselect</c> is left out on
+    /// purpose: <c>BuildMenuMapper</c> reads it only to drop the current placement (it does not leave build mode), and
+    /// it is also Space by default, so holding it for the whole hold (a dialog, a key capture, a filled build search)
+    /// would take the player's Space deselect away as well. An Escape that clears the search while a placement is
+    /// selected therefore also drops that placement, as the game's own Escape would.
+    /// </para>
+    ///
+    /// <para>
+    /// The live array, not a copy (the native mask must not allocate). Nothing may mutate it.
+    /// </para>
+    /// </summary>
+    private static readonly int[] BuildModeCloseActions = { ButtonInputActions.BuildingExit };
+
+    /// <summary>The building actions the 498 guard takes while <see cref="HoldsBuildModeClose"/>: <c>Building_Exit</c>.</summary>
+    internal static int[] BlockedBuildModeCloseActions() => BuildModeCloseActions;
+
+    /// <summary>
+    /// Whether the 498 guard takes <see cref="BlockedBuildModeCloseActions"/> this frame: while the close hold is on,
+    /// for every reason it has (a key capture or a framework dialog owns Escape, an unfocused build search has text,
+    /// a Progenitor window over a game window), on keyboard and mouse only. On a gamepad <c>Building_Exit</c> is B,
+    /// which none of those Escape paths reads, so B keeps leaving build mode. Outside build mode the action is
+    /// inert, so no build-mode test is needed; with no hold the ordinary Escape is untouched.
+    /// </summary>
+    internal static bool HoldsBuildModeClose(bool closeHeld, bool keyboardAndMouse) => closeHeld && keyboardAndMouse;
+
     // ---- job KEY3: which instance, and did it ever run ----------------------------------------
 
     /// <summary>

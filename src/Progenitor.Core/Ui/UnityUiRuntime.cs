@@ -5120,7 +5120,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // The window test only runs with a game window open (it reads the pointer for hover-captured panels).
             bool overGameWindow = GameWindowUnderPanel.IsInteractWindow(gameMenu) && GameWindowUnderPanel.HoldsClose(gameMenu, Ui.EscapeHidesAPanelOverGameWindow());
             // Build search: an Escape that clears a search the box does not have the keyboard for (Copy building filled
-            // it) is kept from the game, so the build menu stays open; the hold lasts until Escape is up.
+            // it) is kept from the game, so the build menu stays open; the hold lasts until Escape is up. It is on from the
+            // frames before the press (the state it reads is true before Escape goes down), so the press frame is covered
+            // whichever runs first, this pump or the game's input read. BUILDESC1: on keyboard and mouse the hold also takes
+            // Building_Exit, build mode's own Escape (MenuHotkeyGuard.HoldsBuildModeClose).
             buildEscape = BuildMenuSearch.EscapeClearsQuery;
             MenuHotkeyGuard.SetCloseHeld(MenuHotkeyGuard.NextCloseHold(
                 Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose || overGameWindow || buildEscape,

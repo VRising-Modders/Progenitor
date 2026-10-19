@@ -171,4 +171,14 @@ internal static class BuildSearchEscape
     internal static bool Takes(bool menuOpen, bool hasQuery, bool fieldFocused, bool captureOwnsEscape, bool dialogOpen,
         bool chatFocused, bool workspaceOpen) =>
         menuOpen && hasQuery && !fieldFocused && !captureOwnsEscape && !dialogOpen && !chatFocused && !workspaceOpen;
+
+    /// <summary>
+    /// BUILDESC1: whether the build search keeps a close-key input hold (<c>UiInputCapture.AcquireCloseKey</c>) this
+    /// frame. The menu-hotkey guard that applies the close hold is an input context that exists only while some input
+    /// hold or capturing panel wants one, and an unfocused build search had none, so the hold had nothing to apply
+    /// through. Kept while an unfocused Escape would clear the search (<paramref name="takes"/>, true from the frames
+    /// before the press, so the context is in place before the press), then while the close hold is still on
+    /// (<paramref name="closeHeld"/>: the clearing Escape is still down), so its release does not reach the game either.
+    /// </summary>
+    internal static bool HoldsCloseKey(bool takes, bool wasHeld, bool closeHeld) => takes || (wasHeld && closeHeld);
 }

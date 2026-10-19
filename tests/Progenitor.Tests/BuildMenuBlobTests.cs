@@ -329,6 +329,83 @@ public class BuildMenuResultsTests
         Assert.False(MenuHotkeyGuard.NextCloseHold(false, BuildSearchEscape.Takes(true, false, false, false, false, false, false), true, held));
     }
 
+    // ---- BUILDESC1: build mode's Escape is Building_Exit, not Menu_Close ----------------------------
+
+    [Fact]
+    public void The_close_hold_also_takes_Building_Exit_and_leaves_Building_Deselect_to_the_game()
+    {
+        // Client metadata: Building_Deselect = 304, Building_Exit = 309. The input asset binds Escape (keyboard and
+        // mouse) to Back, Building_Deselect and Building_Exit; Building_Exit is what leaves build mode.
+        Assert.Equal(304, ButtonInputActions.BuildingDeselect);
+        Assert.Equal(309, ButtonInputActions.BuildingExit);
+        Assert.Equal(new[] { 309 }, MenuHotkeyGuard.BlockedBuildModeCloseActions());
+        // The live array (the native mask must not allocate), and Deselect stays out: it is also Space by default.
+        Assert.Same(MenuHotkeyGuard.BlockedBuildModeCloseActions(), MenuHotkeyGuard.BlockedBuildModeCloseActions());
+        Assert.DoesNotContain(ButtonInputActions.BuildingDeselect, MenuHotkeyGuard.BlockedBuildModeCloseActions());
+        // The menu close set and the hotkey set are unchanged.
+        Assert.Equal(new[] { 17, 1004 }, InputMaskPlan.BlockedCloseActions());
+        Assert.DoesNotContain(309, MenuHotkeyGuard.BlockedActions());
+        Assert.DoesNotContain(309, InputMaskPlan.BlockedCloseActions());
+    }
+
+    [Theory]
+    // closeHeld, keyboardAndMouse -> holds Building_Exit
+    [InlineData(true, true, true)]
+    [InlineData(true, false, false)] // gamepad: Building_Exit is B, which no Escape hold reads
+    [InlineData(false, true, false)] // no hold: the ordinary Escape leaves build mode
+    [InlineData(false, false, false)]
+    public void Building_Exit_is_held_only_with_the_close_hold_on_keyboard_and_mouse(bool closeHeld, bool kbm, bool holds) =>
+        Assert.Equal(holds, MenuHotkeyGuard.HoldsBuildModeClose(closeHeld, kbm));
+
+    [Fact]
+    public void Every_close_hold_reason_takes_Building_Exit_on_keyboard_and_mouse()
+    {
+        // A key capture, a framework dialog (or any other dialogOpen term: an unfocused build search with text), and
+        // the Escape that started a hold while it is still down.
+        Assert.True(MenuHotkeyGuard.HoldsBuildModeClose(MenuHotkeyGuard.NextCloseHold(true, false, false, false), true));
+        Assert.True(MenuHotkeyGuard.HoldsBuildModeClose(MenuHotkeyGuard.NextCloseHold(false, true, false, false), true));
+        bool search = BuildSearchEscape.Takes(true, true, false, false, false, false, false);
+        Assert.True(MenuHotkeyGuard.HoldsBuildModeClose(MenuHotkeyGuard.NextCloseHold(false, search, false, false), true));
+        Assert.True(MenuHotkeyGuard.HoldsBuildModeClose(MenuHotkeyGuard.NextCloseHold(false, false, true, true), true));
+        // The search empty and Escape up: nothing held, so the next Escape is the game's own (it leaves build mode).
+        bool empty = BuildSearchEscape.Takes(true, false, false, false, false, false, false);
+        Assert.False(MenuHotkeyGuard.HoldsBuildModeClose(MenuHotkeyGuard.NextCloseHold(false, empty, false, true), true));
+    }
+
+    [Fact]
+    public void The_build_search_keeps_a_close_key_hold_so_the_guard_context_exists_before_the_press()
+    {
+        // Copy building filled the search, box unfocused: the close-key hold is taken (frames before the press).
+        bool takes = BuildSearchEscape.Takes(true, true, false, false, false, false, false);
+        bool hold = BuildSearchEscape.HoldsCloseKey(takes, wasHeld: false, closeHeld: false);
+        Assert.True(hold);
+        // The press clears the search; Escape still down, so the pump's close hold is still on: kept.
+        hold = BuildSearchEscape.HoldsCloseKey(takes: false, wasHeld: hold, closeHeld: true);
+        Assert.True(hold);
+        // Escape up: the close hold ends and so does the close-key hold.
+        hold = BuildSearchEscape.HoldsCloseKey(takes: false, wasHeld: hold, closeHeld: false);
+        Assert.False(hold);
+        // Another reason's close hold (a dialog) never starts a build-search close-key hold.
+        Assert.False(BuildSearchEscape.HoldsCloseKey(takes: false, wasHeld: false, closeHeld: true));
+        // The box focused: its own exclusive hold applies, not this one.
+        Assert.False(BuildSearchEscape.HoldsCloseKey(BuildSearchEscape.Takes(true, true, true, false, false, false, false), false, false));
+    }
+
+    [Fact]
+    public void The_native_guard_and_the_build_search_use_the_tested_decisions()
+    {
+        string blocker = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "GameInputBlocker.cs");
+        string guard = SourcePin.MethodBody(blocker, "private static void MaskGuard(");
+        SourcePin.AssertUncommented(guard,
+            "bool buildHeld = MenuHotkeyGuard.HoldsBuildModeClose(closeHeld, state.ControllerType == ControllerType.KeyboardAndMouse);");
+        SourcePin.AssertUncommented(guard, "int[] building = MenuHotkeyGuard.BlockedBuildModeCloseActions();");
+        SourcePin.AssertUncommented(guard, "state.BlockKeyDown((ButtonInputAction)building[i]);");
+        string search = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "BuildMenuSearch.cs");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(search, "private static void OnFrame("),
+            "HoldEscapeCloseKey(BuildSearchEscape.HoldsCloseKey(EscapeClearsQuery, _escapeCloseKey, MenuHotkeyGuard.CloseHeld));");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(search, "internal static void Uninstall("), "HoldEscapeCloseKey(false);");
+    }
+
     [Theory]
     [InlineData("w", 1)]
     [InlineData("  w  a ", 2)]
