@@ -147,7 +147,11 @@ internal static class ServerRulesDecisions
             : password ? (value.Length == 0 ? "Removed: the next player joins without a password." : "Applied now, to the next player who joins.")
             : spec.Key == ServerRules.ResetDaysInterval && value != "0" && before == "0"
                 ? "Saved: scheduled wipes are on from the next start, which may reset this world."
-                : "Saved: applies at the next restart.";
+                // WIPEDAY1: a day picked while no wipe is scheduled waits for one.
+                : spec.Key == ServerRules.DayOfReset
+                  && WipePlan.DayWaitsNote(ServerRulesStateBuilder.Int(state.Row(ServerRules.ResetDaysInterval)?.Next) ?? 0, value) is { } waits
+                    ? "Saved: " + waits + "."
+                    : "Saved: applies at the next restart.";
         if (!unchanged && row.Override.Length > 0) note += " " + row.Reason;
         return new ServerRulesDecision
         {

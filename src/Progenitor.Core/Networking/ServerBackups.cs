@@ -220,6 +220,12 @@ internal sealed class RestoreWipePlan
 internal static class ServerBackups
 {
     internal const string LocalFormat = "yyyy-MM-ddTHH:mm:ss";
+
+    /// <summary>
+    /// BACKUPROWS1: the reason the server's Backups push gives when a manual or scheduled backup finished (the restore request
+    /// did not change): the client asks once, so the Last backup and Backups rows show the result.
+    /// </summary>
+    internal const string BackupFinishedWhy = "backup finished";
     internal const int MaxEntries = 20;
 
     /// <summary>The setting ids of the lock list (<c>[ServerSettings] LockedInGame</c>): group <c>server-rules</c> locks both.</summary>

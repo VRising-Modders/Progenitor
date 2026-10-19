@@ -179,8 +179,18 @@ internal static class DialogLayout
     /// <inheritdoc cref="OptionHeadingFontSize"/>
     internal const float OptionHeadingHeight = 24f;
 
-    /// <summary>LISTROWS1: air above a heading that starts a later group.</summary>
+    /// <summary>
+    /// LISTROWS1: air above a group heading. BACKUPROWS1 (live 2026-10-19: the Backups popup's "Manual backups" heading sat
+    /// flush under the lines above it): the first heading takes it too, so the list starts apart from them.
+    /// </summary>
     internal const float OptionHeadingGap = 12f;
+
+    /// <summary>BACKUPROWS1: air between the last row option and the button row (the entry sat flush against Close).</summary>
+    internal const float OptionListEndGap = OptionHeadingGap;
+
+    /// <summary>BACKUPROWS1: the button row's gap above it: <see cref="OptionListEndGap"/> under a list of row options, else the ordinary gap (-1).</summary>
+    internal static float ButtonRowGapAbove(DialogContent content) =>
+        content is { OptionsAsRows: true, ExtrasStacked: false } ? OptionListEndGap : -1f;
 
     /// <summary>LISTROWS1: the inset cells either side of a row option's text (whose cell key stays <c>option-N</c>).</summary>
     internal const string OptionPadLeft = "pad-left";
@@ -218,7 +228,7 @@ internal static class DialogLayout
                 vAlign: CellVAlign.Bottom),
             new CellSpec(CellKind.Text, OptionPadRight).With(text: "", width: CellWidth.Px(OptionRowInset), minWidth: OptionRowInset),
         };
-        return new CellRowSpec(rowKey, cells, height: OptionHeadingHeight, plain: true, compact: true, gapAbove: first ? -1f : OptionHeadingGap);
+        return new CellRowSpec(rowKey, cells, height: OptionHeadingHeight, plain: true, compact: true, gapAbove: OptionHeadingGap);
     }
 
     /// <summary>LISTROWS1: the width a row option's text is placed at in a row <paramref name="rowWidth"/> wide.</summary>
@@ -446,7 +456,7 @@ internal static class DialogLayout
     /// The button row as a cell row: a spacer, the buttons in <see cref="Order"/> at one fixed width,
     /// and a spacer. The spacers share what is left equally, so the group's center is the row's.
     /// </summary>
-    internal static CellRowSpec ButtonRowSpec(string rowKey, IEnumerable<DialogButton> buttons, float rowWidth = RowWidth)
+    internal static CellRowSpec ButtonRowSpec(string rowKey, IEnumerable<DialogButton> buttons, float rowWidth = RowWidth, float gapAbove = -1f)
     {
         var ordered = Order(buttons);
         var captions = new List<string>(ordered.Count);
@@ -468,7 +478,7 @@ internal static class DialogLayout
         }
 
         cells.Add(new CellSpec(CellKind.Spacer, "dialog-right"));
-        return new CellRowSpec(rowKey, cells, height: ButtonRowHeight, plain: true);
+        return new CellRowSpec(rowKey, cells, height: ButtonRowHeight, plain: true, gapAbove: gapAbove);
     }
 
     /// <summary>A single centered cell (a text field, an option button, the error line) between two spacers.</summary>

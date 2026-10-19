@@ -513,7 +513,8 @@ internal sealed class UiDialogView
 
         var buttons = content.RowButtons();
         if (buttons.Count > 0)
-            view.Buttons = panel.CellRow(DialogLayout.ButtonRowSpec(content.RowKey, buttons, DialogLayout.ContentRowWidth(frameWidth)));
+            view.Buttons = panel.CellRow(DialogLayout.ButtonRowSpec(content.RowKey, buttons, DialogLayout.ContentRowWidth(frameWidth),
+                DialogLayout.ButtonRowGapAbove(content)));
         return view;
     }
 

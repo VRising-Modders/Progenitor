@@ -987,6 +987,76 @@ public sealed class ServerSettingsPageTests : IDisposable
             RepoRootForSource(), "src", "Progenitor.Dev", "Ops", "ModsUiOps.TextTest.cs")));
     }
 
+    /// <summary>
+    /// WIPEDAY1 (live 2026-10-19, release 2026.10.133): with Scheduled wipes every (days) at 0, picking Saturday in Wipe on asked
+    /// "Change: off → off" with a "Turn off the wipe" button. Nothing turns on or off, so the day is saved at once (no
+    /// confirmation) and the row says it waits for a scheduled wipe.
+    /// </summary>
+    [Fact]
+    public void Wipe_on_with_wipes_off_saves_the_day_without_a_question_and_says_it_waits_for_a_wipe()
+    {
+        var (rules, sent) = ServeRules();
+        ServerRulesRows.Today = () => new DateTime(2026, 10, 6, 12, 0, 0);
+        OpenPage();
+        var label = ServerRules.Find(ServerRules.DayOfReset)!.Label;
+        Assert.Null(ServerRulesRows.ConfirmFor(ServerRules.DayOfReset, "Any", "Saturday"));
+
+        Assert.True(_runtime.FireControlClick("choice", label));
+        Assert.True(UiChoiceHandle.OpenNow!.Choose("Saturday"));
+        Assert.Null(UiDialog.Current is { IsOpen: true } open ? open : null);
+        var write = sent.Single(r => r.Op == ServerRulesRequest.OpWrite);
+        Assert.Equal(ServerRules.DayOfReset, write.Key);
+        Assert.Equal("Saturday", write.Value);
+        Assert.False(write.Confirm);
+
+        // The server stored it for the next start: the row's line says it waits for a scheduled wipe.
+        rules.Row(ServerRules.DayOfReset)!.Next = "Saturday";
+        View.Reevaluate();
+        var row = Row(Content(), ServerRules.DayOfReset);
+        Assert.Contains("Wipe on Saturday · takes effect once a wipe is scheduled", row.GetProperty("helpLine").GetString(), StringComparison.Ordinal);
+        // Back to Any asks nothing either, and the note goes.
+        Assert.Null(ServerRulesRows.ConfirmFor(ServerRules.DayOfReset, "Saturday", "Any"));
+        rules.Row(ServerRules.DayOfReset)!.Next = "Any";
+        Assert.Null(ServerRulesRows.NoteFor(ServerRules.DayOfReset));
+    }
+
+    /// <summary>
+    /// WIPEDAY1: No on a wipe confirmation leaves the value as it was: nothing is written, the control shows the server's value
+    /// again, and the row is not marked as waiting for a restart. The main button names what Yes does: "Change the wipe" for a
+    /// new day while wipes are on, "Turn off the wipe" only when a scheduled wipe is turned off.
+    /// </summary>
+    [Fact]
+    public void No_on_a_wipe_confirmation_leaves_the_value_unchanged_and_the_button_says_what_yes_does()
+    {
+        var (rules, sent) = ServeRules();
+        ServerRulesRows.Today = () => new DateTime(2026, 10, 6, 12, 0, 0);
+        rules.Row(ServerRules.ResetDaysInterval)!.Next = "60";
+        OpenPage();
+        var label = ServerRules.Find(ServerRules.DayOfReset)!.Label;
+
+        Assert.True(_runtime.FireControlClick("choice", label));
+        Assert.True(UiChoiceHandle.OpenNow!.Choose("Saturday"));
+        var dialog = UiDialog.Current!;
+        Assert.Equal(WipePlan.Heading, dialog.Content.Title);
+        Assert.Equal(WipePlan.ConfirmCaption, dialog.Content.MainCaption);
+        Assert.DoesNotContain("off → off", dialog.Content.AllText, StringComparison.Ordinal);
+        UiDialog.ChooseForBridge("no");
+        Assert.DoesNotContain(sent, r => r.Op == ServerRulesRequest.OpWrite);
+        var row = Row(Content(), ServerRules.DayOfReset);
+        Assert.Equal("Any", row.GetProperty("value").GetString());
+        Assert.False(row.GetProperty("pending").GetBoolean());
+        Assert.Equal(ModSettingsView.AdminNotChangedNote, row.GetProperty("status").GetString());
+        Assert.DoesNotContain(ModSettingsView.PendingRestartNote, row.GetProperty("helpLine").GetString(), StringComparison.Ordinal);
+
+        // Turning the wipe off really turns something off: that button, and No writes nothing there either.
+        var wipeLabel = ServerRules.Find(ServerRules.ResetDaysInterval)!.Label;
+        View.ApplyForBridge(wipeLabel, "0");
+        Assert.Equal(WipePlan.TurnOffCaption, UiDialog.Current!.Content.MainCaption);
+        UiDialog.ChooseForBridge("no");
+        Assert.DoesNotContain(sent, r => r.Op == ServerRulesRequest.OpWrite);
+        Assert.Equal("60", rules.Row(ServerRules.ResetDaysInterval)!.Next);
+    }
+
     private static JsonElement AdminRowsByLabel(JsonElement rows, string label) =>
         AdminRows(rows).Single(s => s.GetProperty("label").GetString() == label);
 

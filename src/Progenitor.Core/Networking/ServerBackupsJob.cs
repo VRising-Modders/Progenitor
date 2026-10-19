@@ -250,6 +250,10 @@ internal static class ServerBackupsJob
         foreach (string w in outcome.Warnings) Plugin.Logger?.LogWarning("WorldBackup: " + w);
         try { run.Finished?.Invoke(outcome); }
         catch (Exception e) { Plugin.Logger?.LogWarning("WorldBackup: the finish callback threw: " + e.Message); }
+        // BACKUPROWS1 (live 2026-10-19: the Last backup row stayed on "saving the world…" after the backup was made): the
+        // admins who read the Backups are told, and their page asks once for the result.
+        try { ServerBackupsServer.RaisePendingChanged(ServerBackups.BackupFinishedWhy); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("WorldBackup: telling the admins threw: " + e.Message); }
     }
 
     private static void Drain(Running run)

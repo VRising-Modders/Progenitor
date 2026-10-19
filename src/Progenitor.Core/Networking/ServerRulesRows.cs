@@ -173,12 +173,27 @@ internal static class ServerRulesRows
             ReadOnlyReason = () => ReadOnlyReason(key),
             // Live 2026-10-06: a player who is not an admin reads the rules as every other server row, "Admin only · value".
             ViewOnly = () => !CanEdit(),
-            Note = () => Row(key) is { Editable: true, Reason.Length: > 0 } r ? r.Reason : null,
+            Note = () => NoteFor(key),
             Pending = () => Row(key)?.Pending ?? false,
             Display = v => DisplayOf(rule, v),
             Confirm = (current, next) => ConfirmFor(key, current, next),
             ExtraReadback = () => Readback(key),
         };
+    }
+
+    /// <summary>
+    /// The line under an editable rule: the server's reason (a start-command override), and for Wipe on with no scheduled
+    /// wipe, WIPEDAY1's <c>Wipe on Saturday · takes effect once a wipe is scheduled</c>. Null when there is nothing to say.
+    /// </summary>
+    internal static string? NoteFor(string key)
+    {
+        var row = Row(key);
+        string? reason = row is { Editable: true, Reason.Length: > 0 } ? row.Reason : null;
+        string? waits = key == ServerRules.DayOfReset && row != null
+            ? WipePlan.DayWaitsNote(ServerRulesStateBuilder.Int(Row(ServerRules.ResetDaysInterval)?.Next) ?? 0, row.Next)
+            : null;
+        if (waits == null) return reason;
+        return reason == null ? waits : waits + ". " + reason;
     }
 
     /// <summary>Why a rule is read-only for this player now, or null (an admin may edit it).</summary>
@@ -227,6 +242,9 @@ internal static class ServerRulesRows
             if (string.Equals(current, next, StringComparison.OrdinalIgnoreCase)) return null;
             int intervalBefore = ServerRulesStateBuilder.Int(Row(ServerRules.ResetDaysInterval)?.Next) ?? 0;
             int intervalAfter = key == ServerRules.ResetDaysInterval ? ServerRulesStateBuilder.Int(next) ?? 0 : intervalBefore;
+            // WIPEDAY1 (live 2026-10-19): with no scheduled wipe before or after, a new Wipe on day turns nothing on or off:
+            // it is saved without a question, and the row's note says it waits for a scheduled wipe (WipePlan.DayWaitsNote).
+            if (intervalBefore <= 0 && intervalAfter <= 0) return null;
             string? dayBefore = Row(ServerRules.DayOfReset)?.Next;
             string? dayAfter = key == ServerRules.DayOfReset ? next : dayBefore;
             return WipeConfirm(intervalBefore, dayBefore, intervalAfter, dayAfter);
@@ -256,7 +274,7 @@ internal static class ServerRulesRows
     {
         var o = WipeOutcome(intervalBefore, dayBefore, intervalAfter, dayAfter);
         // WIPEPOLISH1: no body paragraph; the facts carry the lines (the warning last, in the danger tone).
-        return new AdminSettingConfirm(WipePlan.Heading, "", o.Off ? "Turn off the wipe" : WipePlan.ConfirmCaption)
+        return new AdminSettingConfirm(WipePlan.Heading, "", WipePlan.YesCaption(intervalBefore, intervalAfter))
         {
             Word = o.Word,
             Danger = o.Due,
