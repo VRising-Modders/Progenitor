@@ -2663,8 +2663,9 @@ they throw `InvalidOperationException`. `ctx.Drops.TryPrefabs` works on both sid
 2026-10-19** (2026.10.147, main 34e782304, on the isolated test server, a Moo World copy, with the
 Steam client and a headless client, through the Autoloot mod): `TryGet` and `TakeInto` on stackable
 loot piles, `InFlight` clearing on landed piles, `OnGroundDrop` for drop-key drops, and `TryPrefabs`
-on the server. That evidence does not name `Near`. `OnDropAll`, drag-out drops, partial takes and
-the client side of `TryPrefabs` were not run. Results per step:
+on the server. That evidence does not name `Near`. `OnDropAll` was verified live later the same day
+(2026-10-19, a client on main 0e0472220 against test server 2026.10.147, through the Autoloot mod): step 5 below. Drag-out drops, partial takes and the client side of `TryPrefabs` were
+not run. Results per step:
 [live acceptance](#drops-live-acceptance-procedure-run-in-part-2026-10-19). API rows:
 [api.md, Drops](api.md#drops).
 
@@ -2867,7 +2868,10 @@ shared scan per pass serves every waiting drop and offers only containers the bo
 
 Proven and assumed: the handler and the prefab field are in the metadata (source-checked). That the
 container appears within 60 frames and within 8 m of the player, holds the bag's items, and carries one
-of the two inventory components, is **assumed**, and `OnDropAll` has **not been run live**; a bag
+of the two inventory components, was **verified live once** (2026-10-19, a client on main 0e0472220 against test server 2026.10.147, through the Autoloot mod): a `dropall` with
+`All` emptied a three-stack bag into one `Resource_PlayerEntireInventoryContainer_Drop` container at the
+character's spot (it carries `DestroyWhenInventoryIsEmpty`), and the consumer received a dropper with
+`HasContainer` true and `Ambiguous` false. Two players dropping all at once was not run. A bag
 that did not change (a refused request) raises nothing. The Dev bridge's `bot_event` kind `dropall`
 ([headless bot ops](../tools/bots/README.md#ops)) sends the game's request from a headless client for
 step 5 of the live acceptance below. A drop-all request in an update always takes its player's bag out of the ground-drop report,
@@ -2947,8 +2951,13 @@ Each step says what that run covered; a step with no **Run** note has not been r
    [headless bot ops](../tools/bots/README.md#ops)). Expect `drop all … container=<i:v> match items=…`,
    and the container on the ground holds what left the bag. Repeat with
    `"setting":"ExceptAnyEquipped"`: the line reports `ExceptAnyEquipped`; record what stayed. With a second player dropping all beside you in the same
-   moment, each line names that player's own container. Not run: until this bridge kind (2026-10-19)
-   there was no scripted drop-all.
+   moment, each line names that player's own container. **Run in part (2026-10-19, a client on main 0e0472220 against test server 2026.10.147, through the Autoloot mod):**
+   `dropall` with `All` emptied HeadlessOne's bag (Rugged Hide 200, Stone 40, Tainted Heart 2) into one
+   `Resource_PlayerEntireInventoryContainer_Drop` at the character's spot. `OnDropAll` named the dropper
+   with the container (`HasContainer` true, `Ambiguous` false); the consumer then emptied it into a
+   second player 2 m away and never into the dropper, and the game removed the empty container. The
+   Sample's own `drop all` log line, the `ExceptAnyEquipped` repeat and two simultaneous drop-alls were
+   not run.
 6. While casting, or in PvP combat with an action-bar slot: drop; nothing is logged.
 7. `.drops log` again to stop. Clean up: remove the Sample from the test server's reload folder
    and confirm the clean unload.
