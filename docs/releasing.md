@@ -44,10 +44,10 @@ After the switch, open the Security tab once as an outside reader would and conf
 1. Confirm `main` is green and the [roadmap](roadmap.md) and [api.md](api.md) match what ships.
 2. Versions are computed from git ([versioning.md](versioning.md)); do not edit version numbers by hand. Build the package with `powershell -File tools/package.ps1` (never `-IncludeDev` for a public release: the dev bridge must not ship).
 3. Inspect both zips' file lists: Bootstrap, Core and the preloader, and no `Progenitor.Dev.dll`, token or opt-in marker. `packaging/out/Progenitor-<version>.zip` is the manual install; its only root entry is `BepInEx/`. `packaging/out/Progenitor-<version>-thunderstore.zip` carries the Thunderstore root files, `BepInEx/plugins/` and `BepInEx/patchers/`, and Core's folder packed as `BepInEx/patchers/progenitor-files.zip`: V Rising's Thunderstore install rules only route `plugins`, `patchers`, `core`, `monomod` and `config`, and a mod manager flattens any other folder into `BepInEx/plugins/<package>/`. The preloader unpacks the archive into `BepInEx/progenitor-core` before Bootstrap starts. `tools/package.ps1` refuses a Thunderstore zip with any entry outside those routes or a loose `Progenitor.dll`.
-4. Create a **signed, annotated tag** on the release commit and push it:
+4. Create an **annotated tag** on the release commit and push it (release tags are not signed; the release assets carry `SHA256SUMS`):
 
    ```
-   git tag -s v<version> -m "Progenitor <version>"
+   git tag -a v<version> -m "Progenitor <version>"
    git push origin v<version>
    ```
 
