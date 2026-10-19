@@ -315,4 +315,4 @@ Native container/station tab hosting is implemented through `Ui.AttachPanelTabs`
 
 Find support: live search inputs with independent Enter submission and programmatic focus are implemented and live-verified. Paired server/client observation leases render distant ground-floor rooms without moving the real character; upstairs visibility and interruption qualification remain open. See [API status](api.md) and [search input](ui.md#search-input).
 
-- Debug castle teleport: select the base gameplay layer instead of descending one metre within quantized height bands; invalid base reads refuse the point. Regression coverage includes elevated terrain. Live landing verification pending.
+- Debug castle teleport: select the base gameplay layer instead of descending one metre within quantized height bands; invalid base reads refuse the point. Regression coverage includes elevated terrain. User verified the castle ground-level landing after the server hot reload (2026-10-19); other locations remain unverified.
