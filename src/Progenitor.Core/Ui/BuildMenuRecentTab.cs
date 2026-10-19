@@ -20,6 +20,9 @@ internal sealed class BuildMenuRecentTab : IDisposable
     private Action? _leave;
     private IntPtr _parent;
     private bool _searchDisabled;
+    private bool _selected;
+    // A clone is born painted like its donor (the selected category, say): repaint it once it is active.
+    private bool _repaint;
     private CanvasGroup? _fade;
 
     internal void Update(BuildMenu menu, bool selected, Action choose, Action leave)
@@ -52,6 +55,8 @@ internal sealed class BuildMenuRecentTab : IDisposable
                 _button = entry.Button;
                 if (!UnityAlive.Of(label) || !UnityAlive.Of(_button))
                     throw new InvalidOperationException("Recent category donor has no text or button.");
+                // The game's category refresh never writes ForceSelect; a copied one would outrank the highlight.
+                _button.ForceSelect = false;
                 _button.onClick = new SimpleStunButton.ButtonClickedEvent();
                 _button.onDoubleClick = new SimpleStunButton.ButtonClickedEvent();
                 if (entry.Highlight != null) entry.Highlight.gameObject.SetActive(false);
@@ -75,6 +80,7 @@ internal sealed class BuildMenuRecentTab : IDisposable
                 _root.transform.SetParent(parent, false);
                 _root.transform.SetAsLastSibling();
                 _parent = parent.Pointer;
+                _repaint = true;
                 built = true;
             }
             finally
@@ -85,6 +91,7 @@ internal sealed class BuildMenuRecentTab : IDisposable
         }
         _choose = choose;
         _leave = leave;
+        _selected = selected;
         // Either native pool may grow or replace entries without replacing the category parent.
         _seen.Clear();
         for (int i = 0; i < entries.Count; i++)
@@ -104,11 +111,30 @@ internal sealed class BuildMenuRecentTab : IDisposable
             DropWatch(_watches[id]);
             _watches.Remove(id);
         }
-        _button!.ForceSelect = selected && !_searchDisabled;
         _root!.SetActive(true);
-        if (selected)
-            for (int i = 0; i < entries.Count; i++)
-                if (UnityAlive.Of(entries[i]) && UnityAlive.Of(entries[i].Button)) entries[i].Button.ForceSelect = false;
+        Paint();
+    }
+
+    /// <summary>Repaints at once when Recent is chosen or left between updates; the next update agrees.</summary>
+    internal void ShowSelected(bool selected)
+    {
+        _selected = selected;
+        Paint();
+    }
+
+    /// <summary>
+    /// Draws Recent the way the game draws its own categories: selected is <c>ForceHighlight</c> on, unselected
+    /// is off (<see cref="BuildMenuTabLook"/>). The native categories and tags are drawn unselected by
+    /// <c>BuildMenuSearch.ApplyRecentTabLook</c>.
+    /// </summary>
+    private void Paint()
+    {
+        if (!UnityAlive.Of(_button) || !UnityAlive.Of(_root)) return;
+        if (_button!.ForceSelect) _button.ForceSelect = false;
+        bool lit = BuildMenuTabLook.RecentLit(_selected, _searchDisabled);
+        // The setter repaints only on a change; flip it once so a fresh clone drops its donor's look.
+        if (_repaint && _root!.activeInHierarchy) { _repaint = false; _button.ForceHighlight = !lit; }
+        _button.ForceHighlight = lit;
     }
 
     internal void SetSearchDisabled(bool disabled)
@@ -116,8 +142,6 @@ internal sealed class BuildMenuRecentTab : IDisposable
         _searchDisabled = disabled;
         if (!UnityAlive.Of(_button) || !UnityAlive.Of(_root)) return;
         _button!.SelectableWhenNotInteractable = false;
-        _button.ForceHighlight = false;
-        if (disabled) _button.ForceSelect = false;
         _button.interactable = !disabled;
         var events = EventSystem.current;
         var selectedObject = events?.currentSelectedGameObject;
@@ -127,6 +151,7 @@ internal sealed class BuildMenuRecentTab : IDisposable
         if (!UnityAlive.Of(_fade)) _fade = _root!.GetComponent<CanvasGroup>() ?? _root.AddComponent<CanvasGroup>();
         _fade!.alpha = disabled ? 0.45f : 1f;
         _fade.interactable = !disabled;
+        Paint();
     }
 
     private void WatchOriginal(Behaviour original, SimpleStunButton? button)
@@ -174,6 +199,8 @@ internal sealed class BuildMenuRecentTab : IDisposable
         _button = null;
         _fade = null;
         _searchDisabled = false;
+        _selected = false;
+        _repaint = false;
         _parent = IntPtr.Zero;
     }
 

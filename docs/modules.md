@@ -6805,6 +6805,18 @@ the game's cells, only when the history, the search or the cells change; leaving
 every cell back in its original place. The history file is written at most once every 3 seconds after a change, and
 at once when the menu closes.
 
+While Recent is shown it is the only category drawn selected, in the game's own selected look, and no tag is drawn
+selected (Recent has no tags); the tags keep their normal look and stay clickable, and a click on one leaves Recent for
+that tag. Typing a search over Recent dims every button, Recent included, as in any tab; clearing it shows Recent
+selected again. Leaving Recent (another category or tag, Copy building, Escape, closing the menu) or a Core unload or
+hot swap gives the selection look back to the game at once. Source-checked against the current client: the game draws a selected category or tag through the button's
+`ForceHighlight`, which its build-menu update rewrites on every entry each frame from the selected index; Progenitor
+turns it off on the game's buttons after that update while Recent shows, so the game's next update restores its
+own state by itself. `ForceSelect`, a stronger override the entries' refresh does not write, is never set (a
+leftover one is cleared when the menu opens). Game-free rules: `BuildMenuTabLook.cs` (`BuildMenuTabLookTests`).
+Built and unit-tested; not live-verified (a 2026-10-18 screenshot showed Castle and Foundation still drawn selected
+under Recent before this change).
+
 The server says which placements finished: a server running this Core sends each confirmed build back to its
 builder on the Core-reserved event `'PrRb'` (versioned; both sides drop a malformed packet). On a server without it,
 Recent stays empty and the rest of the menu is unchanged. A building the game turns into another piece when placed,
@@ -6851,7 +6863,8 @@ selector when that is shown, and above the selector when the row is too narrow f
 
 **Categories during a search.** While the box has text, every category and tag button, Recent included, is
 dimmed and cannot be clicked, the selected-category highlight is hidden, and a line under the box reads "Clear
-search to browse categories". Clearing the search brings them back.
+search to browse categories". Clearing the search brings them back, with the game's current category and tag drawn
+selected (or Recent, when the search was over Recent).
 
 ### Settings
 
@@ -6983,7 +6996,8 @@ unlocks every recipe for a test character.
 - Physical keystrokes into the box: the OS-typing run was interrupted when someone else used the client.
 - The settings switches with the menu open. (Closing with a search active and reopening unfiltered ran live through the bridge's `open` / `close` on 2026-10-04.)
 - Recent: a refused placement staying out, relocation staying out, the `RecentCount` trim, the history save
-  debounce, the list after a restart and across a Core hot swap, and filtering inside Recent. (A placement reaching
+  debounce, the list after a restart and across a Core hot swap, filtering inside Recent, and the category and tag
+  selection look while Recent shows and after leaving it. (A placement reaching
   the list, two items and the order after a rebuild were verified live on 2026-10-18.)
 - Copy building on the current main: Escape clearing the search while the box is not focused (the name fill was
   verified live on 2026-10-18), the build keybind share rule with a Progenitor gameplay key, a building inside a group, an item on another category, a locked item, a

@@ -30,6 +30,8 @@ internal static partial class BuildMenuSearch
     private static ConfigEntry<string>? _recentSaved;
     private static IKeybindHandle? _copyBind;
     private static bool _recentSelected;
+    // The category and tag buttons were put in the game's own state once since the menu opened.
+    private static bool _tabsSettled;
     private static string _recentEmptyKey = "", _recentQueryKey = "";
     private static int _recentEmptyUntil;
     private static int _recentCategory = -1, _recentTag = -1;
@@ -103,6 +105,9 @@ internal static partial class BuildMenuSearch
         _recentEmptyKey = "";
         _group?.ResetState();
         if (_field != null) UnityUiRuntime.BlurExternalField(_field);
+        // Drawn at once, not at the next update: Recent selected, the game's category and tag not.
+        RecentTab.ShowSelected(true);
+        PaintNativeTabs();
     }
 
     internal static Dictionary<string, object?> ShowRecentForTest()
@@ -122,6 +127,9 @@ internal static partial class BuildMenuSearch
         RestoreRecentOrder();
         RestoreResults("leave recent");
         RestoreHidden();
+        // The game's own selected category and tag come back now; a search keeps its own look.
+        RecentTab.ShowSelected(false);
+        if (SearchTabs.Count == 0) PaintNativeTabs();
     }
 
     /// <summary>
@@ -192,7 +200,14 @@ internal static partial class BuildMenuSearch
             BuildMenuCopyHint.Show(menu, _copyBind.Chord, world);
         else BuildMenuCopyHint.Hide();
         bool allSearch = BuildSearchMatch.QueryChars(_words) > 0;
+        if (!_tabsSettled)
+        {
+            // Clears a ForceSelect an earlier Core generation may have left on the selected category.
+            _tabsSettled = true;
+            PaintNativeTabs();
+        }
         SetSearchTabs(menu, allSearch);
+        ApplyRecentTabLook(menu, allSearch);
         if (_scopeHint == null && _root != null)
         {
             _scopeHint = BuildCountLabel(_root);
@@ -245,6 +260,66 @@ internal static partial class BuildMenuSearch
         _resultsNote = "Clear search to browse categories";
     }
 
+    /// <summary>
+    /// While Recent is shown, after the mapper's update: the game's categories and tags are drawn unselected,
+    /// so Recent is the only selected category and no tag is selected (Recent has none). The tags stay live:
+    /// clicking one leaves Recent for that tag. The mapper writes its own bit again next update, so ending
+    /// Recent (or unloading Core) hands the buttons back to the game; <see cref="PaintNativeTabs"/> does it at once.
+    /// </summary>
+    private static void ApplyRecentTabLook(BuildMenu menu, bool searchActive)
+    {
+        // A search owns every button while it shows (DisableSearchTab).
+        if (searchActive || BuildMenuTabLook.NativeOverride(_recentSelected, false) is not bool lit) return;
+        var categories = menu.CategorySelectionGroup?.Entries;
+        if (categories != null)
+            for (int i = 0; i < categories.Count; i++)
+                if (Alive(categories[i]) && Alive(categories[i].Button)) categories[i].Button.ForceHighlight = lit;
+        var tags = menu.TagSelectionGroup?.Entries;
+        if (tags != null)
+            for (int i = 0; i < tags.Count; i++)
+                if (Alive(tags[i]) && Alive(tags[i].Button)) tags[i].Button.ForceHighlight = lit;
+    }
+
+    /// <summary>
+    /// Draws the game's categories and tags as its own update would: the mapper's selected category and tag
+    /// highlighted, the rest not, or none while Recent is shown. <c>ForceHighlight</c> is the bit the game itself
+    /// owns. The game's refresh never writes <c>ForceSelect</c> on these buttons, and it outranks the highlight, so a
+    /// leftover one (a Core before this fix set it on the selected category after a search) is cleared, never set.
+    /// </summary>
+    private static void PaintNativeTabs()
+    {
+        try
+        {
+            if (!Alive(_menu) || _toolsWorld?.IsCreated != true) return;
+            var mapper = _toolsWorld.GetExistingSystemManaged<BuildMenuMapper>();
+            if (mapper == null) return;
+            bool? recent = BuildMenuTabLook.NativeOverride(_recentSelected, false);
+            var categories = _menu!.CategorySelectionGroup?.Entries;
+            if (categories != null)
+                for (int i = 0; i < categories.Count; i++)
+                    if (Alive(categories[i]) && Alive(categories[i].Button))
+                    {
+                        var button = categories[i].Button;
+                        if (button.ForceSelect) button.ForceSelect = false;
+                        button.ForceHighlight = recent ?? BuildMenuTabLook.NativeLit(categories[i].Index, mapper._SelectedCategoryIndex);
+                    }
+            var tags = _menu.TagSelectionGroup?.Entries;
+            if (tags != null)
+                for (int i = 0; i < tags.Count; i++)
+                    if (Alive(tags[i]) && Alive(tags[i].Button))
+                    {
+                        var button = tags[i].Button;
+                        if (button.ForceSelect) button.ForceSelect = false;
+                        button.ForceHighlight = recent ?? BuildMenuTabLook.NativeLit(tags[i].Index, mapper._SelectedTagIndex);
+                    }
+        }
+        catch (Exception e)
+        {
+            // The mapper's next update paints them anyway.
+            Plugin.Logger?.LogWarning("Build menu: restoring the category highlight failed: " + e.Message);
+        }
+    }
+
     private static void DisableSearchTab(SimpleStunButton? button)
     {
         if (!Alive(button)) return;
@@ -281,19 +356,8 @@ internal static partial class BuildMenuSearch
         SearchTabFades.Clear();
         foreach (var old in SearchEntries.Values) if (Alive(old.Entry)) old.Entry.enabled = old.Enabled;
         SearchEntries.Clear();
-        if (hadTabs && Alive(_menu) && _toolsWorld?.IsCreated == true)
-        {
-            var mapper = _toolsWorld.GetExistingSystemManaged<BuildMenuMapper>();
-            if (mapper != null)
-            {
-                var categories = _menu!.CategorySelectionGroup?.Entries;
-                if (categories != null) for (int i = 0; i < categories.Count; i++)
-                    if (Alive(categories[i].Button)) categories[i].Button.ForceSelect = !_recentSelected && categories[i].Index == mapper._SelectedCategoryIndex;
-                var tags = _menu.TagSelectionGroup?.Entries;
-                if (tags != null) for (int i = 0; i < tags.Count; i++)
-                    if (Alive(tags[i].Button)) tags[i].Button.ForceSelect = !_recentSelected && tags[i].Index == mapper._SelectedTagIndex;
-            }
-        }
+        // The saved highlight is from when the search began; the selection may have moved since.
+        if (hadTabs) PaintNativeTabs();
     }
 
     private static void DisableSearchEntry(Behaviour entry)
@@ -409,10 +473,14 @@ internal static partial class BuildMenuSearch
     {
         RestoreRecentOrder();
         FlushRecent(force: true);
+        bool wasRecent = _recentSelected;
+        _recentSelected = false;
+        bool hadSearchTabs = SearchTabs.Count > 0;
         RestoreSearchTabs();
+        if (wasRecent && !hadSearchTabs) PaintNativeTabs();
         RecentTab.Dispose();
         BuildMenuCopyHint.Release();
-        _recentSelected = false;
+        _tabsSettled = false;
         _recentCategory = _recentTag = -1;
         _recentEmptyKey = _recentQueryKey = "";
         _copyGuid = 0;
