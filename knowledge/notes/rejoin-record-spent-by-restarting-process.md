@@ -30,7 +30,7 @@ Source-checked cause: the start pickup is gated per Core generation, not per pro
 
 ## Verification
 
-Bug: observed live once on 2026-10-19 in both sessions' logs (lines above). Fix (REJOINSELF1): built and game-free tested in `InstallRestartTests` (a real restart marks the pickup done; a Core swap during the leave keeps the record; another process rejoins once) and `JoinFlowStage2Tests` (same-process record untouched, another process takes it once, records without `writer` still work). Not live-verified.
+Bug: observed live once on 2026-10-19 in both sessions' logs (lines above). Fix (REJOINSELF1): built and game-free tested in `InstallRestartTests` (a real restart marks the pickup done; a Core swap during the leave keeps the record; another process rejoins once) and `JoinFlowStage2Tests` (same-process record untouched, another process takes it once, records without `writer` still work). Verified live in part on 2026-10-19 (Steam client, Core 2026.10.150 (main 22bf979f6)): a mod uninstalled from the Mods page and the pending-restart bar's restart relaunched the game, which rejoined the server by itself. Not observed: the join screens' Restart and rejoin, and the start pickup answering `own-process`.
 
 ## Gotchas
 
