@@ -1,0 +1,15 @@
+<Project>
+  <!--
+    Reads the Progenitor version of the checkout in $(ProgenitorRepo) for the version check in Directory.Build.targets.
+    It runs that checkout's own tools/version/ProgenitorVersion.targets (local git, no network) without a project, so
+    the result is the checkout's repository version (docs/versioning.md in the Progenitor repository). It returns
+    nothing when the checkout has no version targets.
+  -->
+  <PropertyGroup>
+    <ProgenitorVersionTargets>$(ProgenitorRepo)\tools\version\ProgenitorVersion.targets</ProgenitorVersionTargets>
+    <ProgenitorVersionProbeDependsOn Condition="Exists('$(ProgenitorVersionTargets)')">ProgenitorComputeVersion</ProgenitorVersionProbeDependsOn>
+  </PropertyGroup>
+  <Import Project="$(ProgenitorVersionTargets)" Condition="Exists('$(ProgenitorVersionTargets)')" />
+
+  <Target Name="ReadProgenitorVersion" DependsOnTargets="$(ProgenitorVersionProbeDependsOn)" Returns="$(ProgenitorVersion)" />
+</Project>

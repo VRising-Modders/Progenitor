@@ -49,4 +49,14 @@
     <ProgenitorCoreProject>$(ProgenitorRepo)\src\Progenitor.Core\Progenitor.Core.csproj</ProgenitorCoreProject>
     <ProgenitorTestingProject>$(ProgenitorRepo)\src\Progenitor.Testing\Progenitor.Testing.csproj</ProgenitorTestingProject>
   </PropertyGroup>
+
+  <!--
+    The oldest Progenitor this mod's code builds against: the Progenitor version the template came from. Before
+    compiling, Directory.Build.targets reads the version of the ProgenitorRepo checkout and stops with one error when
+    it is older. Raise it when your mod starts using Progenitor API newer than this. Skip the check with
+    /p:ProgenitorSkipVersionCheck=true.
+  -->
+  <PropertyGroup>
+    <ProgenitorMinimumVersion>2026.10.139</ProgenitorMinimumVersion>
+  </PropertyGroup>
 </Project>

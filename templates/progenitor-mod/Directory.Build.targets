@@ -16,4 +16,36 @@
     <Error Condition="!Exists('$(ProgenitorCoreProject)')"
            Text="No Progenitor checkout found (looked for '$(ProgenitorCoreProject)'). Clone https://github.com/VRising-Modders/Progenitor and set ProgenitorRepo in Directory.Build.local.props, or set the PROGENITOR_REPO environment variable." />
   </Target>
+
+  <!--
+    The template and the Progenitor checkout must come from the same revision (or the checkout must be newer):
+    a template from a newer checkout uses Progenitor API an older checkout does not have, and the compiler's errors
+    do not say why. This compares ProgenitorMinimumVersion (Directory.Build.props) with the checkout's version, read
+    from its own git history by build/ProgenitorVersionProbe.proj, before anything compiles. A version that cannot be
+    read is a warning, not an error. Skip with /p:ProgenitorSkipVersionCheck=true.
+  -->
+  <Target Name="ModCheckProgenitorVersion" DependsOnTargets="ModCheckProgenitor"
+          BeforeTargets="ResolveProjectReferences;CollectPackageReferences"
+          Condition="'$(ProgenitorSkipVersionCheck)' != 'true'">
+    <MSBuild Projects="$(MSBuildThisFileDirectory)build\ProgenitorVersionProbe.proj" Targets="ReadProgenitorVersion"
+             Properties="ProgenitorRepo=$(ProgenitorRepo)"
+             RemoveProperties="ProgenitorVersion;ProgenitorVersionProjectFile;ProgenitorVersionExtraInputs;ProgenitorRepoRoot"
+             ContinueOnError="WarnAndContinue">
+      <Output TaskParameter="TargetOutputs" PropertyName="ProgenitorRepoVersion" />
+    </MSBuild>
+    <PropertyGroup>
+      <_ModVersionPattern>^\d+\.\d+\.\d+(\.\d+)?$</_ModVersionPattern>
+      <_ModMinimumValid>$([System.Text.RegularExpressions.Regex]::IsMatch('$(ProgenitorMinimumVersion)', '$(_ModVersionPattern)'))</_ModMinimumValid>
+      <_ModRepoValid>$([System.Text.RegularExpressions.Regex]::IsMatch('$(ProgenitorRepoVersion)', '$(_ModVersionPattern)'))</_ModRepoValid>
+      <_ModRepoValid Condition="'$(ProgenitorRepoVersion)' == '0.0.0.0'">False</_ModRepoValid>
+      <_ModRepoTooOld>False</_ModRepoTooOld>
+      <_ModRepoTooOld Condition="'$(_ModMinimumValid)' == 'True' and '$(_ModRepoValid)' == 'True'">$([MSBuild]::VersionLessThan('$(ProgenitorRepoVersion)', '$(ProgenitorMinimumVersion)'))</_ModRepoTooOld>
+    </PropertyGroup>
+    <Warning Condition="'$(_ModMinimumValid)' != 'True'"
+             Text="ProgenitorMinimumVersion '$(ProgenitorMinimumVersion)' is not year.month.release; the Progenitor version check is skipped." />
+    <Warning Condition="'$(_ModMinimumValid)' == 'True' and '$(_ModRepoValid)' != 'True'"
+             Text="Could not read the Progenitor version of '$(ProgenitorRepo)' (got '$(ProgenitorRepoVersion)'), so this build cannot check that it is $(ProgenitorMinimumVersion) or newer. If the build fails with missing Progenitor types, install the template from the same checkout as ProgenitorRepo (DEVELOPING.md)." />
+    <Error Condition="'$(_ModRepoTooOld)' == 'True'"
+           Text="This mod's template needs Progenitor $(ProgenitorMinimumVersion) or newer; ProgenitorRepo ('$(ProgenitorRepo)') is a checkout of $(ProgenitorRepoVersion). Point ProgenitorRepo at a newer checkout (or git pull in that one). Install the template from the checkout you build against (dotnet new install &lt;checkout&gt;\templates\progenitor-mod) and update both together. See DEVELOPING.md." />
+  </Target>
 </Project>

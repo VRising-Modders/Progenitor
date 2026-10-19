@@ -21,7 +21,8 @@ namespace ProgenitorMod;
 [ModAbout("Asks the server for its greeting. Open the window with **Ctrl+F8**.")]
 public sealed class Plugin : ProgenitorPlugin<ProgenitorModContext>
 {
-    /// <summary>The keybind id. It names the cfg key, so keep it after the first release.</summary>
+    /// <summary>The keybind id. It names the cfg key, so keep it after the first release. The Keybinds tab shows it
+    /// as "Toggle window"; the settings page row uses the same label.</summary>
     internal const string ToggleWindowBind = "ToggleWindow";
 
     protected override void OnLoad(ProgenitorModContext ctx)
@@ -74,7 +75,7 @@ internal sealed class ModSettings
     internal void Build(SettingsPageBuilder page) => page
         .Section("Display")
             .Toggle(ShowNotices, label: "Show notices")
-            .Keybind(Plugin.ToggleWindowBind, label: "Open the window")
+            .Keybind(Plugin.ToggleWindowBind, label: "Toggle window")
         .Section("Server")
             .Text(Greeting, label: "Greeting", scope: SettingScope.ServerWide, needsServerPart: true,
                 fallback: "Not on this server").MaxLength(ModRules.MaxGreetingLength);
