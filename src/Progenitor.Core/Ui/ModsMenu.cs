@@ -8704,11 +8704,14 @@ internal static class ModsMenuScene
         IReadOnlyList<Dictionary<string, object?>>? cameras,
         IReadOnlyList<Dictionary<string, object?>>? roots,
         Dictionary<string, object?>? stamp,
-        Dictionary<string, object?>? playBackdrop = null)
+        Dictionary<string, object?>? playBackdrop = null,
+        Dictionary<string, object?>? titleVideo = null)
     {
         return new Dictionary<string, object?>
         {
             ["view"] = view,
+            // TITLEVIDEO1: {players, retired, setting, still, why, lastQuit}.
+            ["titleVideo"] = titleVideo ?? TitleVideoPolicy.Readback(0, false, false),
             ["viewWhy"] = viewWhy,
             ["ambience"] = ambience ?? MissingObject(),
             ["music"] = music ?? MissingObject(),

@@ -127,6 +127,7 @@ public sealed class ConfigurationOrganizationTests : IDisposable
         var ui = new ConfigFile(Path.Combine(_dir, "progenitor.ui.cfg"), saveOnInit: true);
         CoreUiSettings.EditOtherModsSettings = ui.Bind(CoreUiSettings.EditOtherModsSection, CoreUiSettings.EditOtherModsKey, false, "x");
         CoreUiSettings.ServerBrowserProgenitorOnly = ui.Bind(CoreUiSettings.ServerBrowserSection, CoreUiSettings.ServerBrowserProgenitorOnlyKey, false, "x");
+        CoreUiSettings.TitleScreenVideo = ui.Bind(TitleVideoPolicy.Section, TitleVideoPolicy.Key, true, "x");
         OpenConfiguration();
         var rows = Content();
 
@@ -148,7 +149,7 @@ public sealed class ConfigurationOrganizationTests : IDisposable
         Assert.Equal(new[]
         {
             ConfigurationPane.ModsTabGroup, ConfigurationPane.InstallTabGroup, ConfigurationPane.SourcesGroup, ConfigurationPane.UpdatesGroup,
-            ConfigurationPane.JoinGameGroup, ConfigurationPane.LocalServerGroup,
+            ConfigurationPane.JoinGameGroup, ConfigurationPane.TitleScreenGroup, ConfigurationPane.LocalServerGroup,
         }, sections);
         Assert.Equal(sections, ConfigurationPane.ConfigGroups);
         var settings = All(rows, ModSettingsView.RowSetting).Where(s => s.GetProperty("kind").GetString() == "setting").ToList();
@@ -162,6 +163,8 @@ public sealed class ConfigurationOrganizationTests : IDisposable
                      "progenitor/Mods/UseThunderstore", "progenitor/Mods/ShowNsfwContent",
                      "progenitor/Install/MaxDownloadMB",
                      "progenitor/ServerBrowser/ProgenitorOnly",
+                     // TITLEVIDEO1: Preferences · Title screen.
+                     "progenitor/TitleScreen/Video",
                      // AUTOUPDATE1 (2026-10-09): Preferences · Updates.
                      "progenitor/AutoUpdate/Mods", "progenitor/AutoUpdate/PromptBeforeJoin",
                      // AUTOUPDATE2: Major versions.

@@ -999,6 +999,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingPlaces.cs" Link="Linked\SettingPlaces.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Settings.cs" Link="Linked\ModsMenu.Settings.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\CoreUiSettings.cs" Link="Linked\CoreUiSettings.cs" />
+    <!-- TITLEVIDEO1: the title video switch, the retire decision and the bounded quit delay (TitleVideoLive.cs is the game half). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\TitleVideoPolicy.cs" Link="Linked\TitleVideoPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsLinks.cs" Link="Linked\SettingsLinks.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallFilterMemory.cs" Link="Linked\InstallFilterMemory.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ProgenitorPage.cs" Link="Linked\ProgenitorPage.cs" />

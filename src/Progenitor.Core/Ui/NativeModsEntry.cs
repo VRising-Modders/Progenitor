@@ -5847,6 +5847,9 @@ internal static partial class NativeModsEntry
         {
             var view = Alive(_main) ? _main : TryFindTitleView();
             if (!Alive(view)) return null;
+            // TITLEVIDEO1: a retired title video (its player destroyed) is not playing; the wrapper's isPlaying would
+            // read the destroyed player.
+            if (TitleVideoLive.IsRetired(view)) return false;
             var stun = view!.VideoPlayer;
             if (stun == null) return null;
             try { return stun.isPlaying; }
@@ -5856,6 +5859,13 @@ internal static partial class NativeModsEntry
         {
             return null;
         }
+    }
+
+    /// <summary>TITLEVIDEO1: the title view the Mods entry holds, else the first live one in the scene; null off the title.</summary>
+    internal static MainMenuNewView? LiveTitleView()
+    {
+        try { return Alive(_main) ? _main : TryFindTitleView(); }
+        catch { return null; }
     }
 
     private static MainMenuNewView? TryFindTitleView()

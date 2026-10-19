@@ -37,6 +37,9 @@ internal static class CoreUiSettings
     /// <summary>BROWSERFILTER1: <c>[ServerBrowser] ProgenitorOnly</c> (default off), the Join Game browser's Progenitor filter.</summary>
     internal static ConfigEntry<bool>? ServerBrowserProgenitorOnly { get; set; }
 
+    /// <summary>TITLEVIDEO1: <c>[TitleScreen] Video</c> (default on), the title screen's moving background (<see cref="TitleVideoPolicy"/>).</summary>
+    internal static ConfigEntry<bool>? TitleScreenVideo { get; set; }
+
     /// <summary>Three homes: <c>[Ui] ClosedDrawers</c>, the settings drawers the player closed (<see cref="SettingsDrawers"/>).</summary>
     internal static ConfigEntry<string>? ClosedDrawers { get; set; }
 
@@ -78,5 +81,6 @@ internal static class CoreUiSettings
         TermMarkerAutoHide = null;
         SeenTips = null;
         ServerBrowserProgenitorOnly = null;
+        TitleScreenVideo = null;
     }
 }

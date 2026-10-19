@@ -109,7 +109,7 @@ public sealed class ConfigurationPaneTests : IDisposable
         Assert.Equal("Use Thunderstore", LabelOf(rows, ModsConfigKeys.UseThunderstore));
         Assert.Equal("Apply", LabelOf(rows, ConfigurationPane.ApplyFolderAction));
         // Three homes (decided 2026-10-06): the four groups of Preferences, in order.
-        Assert.Equal(new[] { "Mods tab", "Install Mods tab", "Sources and downloads", "Updates", "Join Game", "Local server" }, ConfigurationPane.ConfigGroups);
+        Assert.Equal(new[] { "Mods tab", "Install Mods tab", "Sources and downloads", "Updates", "Join Game", "Title screen", "Local server" }, ConfigurationPane.ConfigGroups);
         Assert.Equal(ConfigurationPane.ConfigGroups, ConfigurationPane.DetailSectionHeadings);
         Assert.False(ModsTabState.IsModCatalogueSidebar(ModsSidebarKind.ConfigGroups));
 

@@ -425,13 +425,15 @@ internal static class JoinFlowLive
         {
             Plugin.Logger?.LogInfo("JoinFlow: quitting V Rising for the restart in " + delaySeconds.ToString("0.#") + " s");
             // Called from a button (the main thread): with no delay, Quit now, so no Core swap can drop it.
+            // TITLEVIDEO1: every quit retires the title video first (a playback left for engine cleanup can hang the exit
+            // the relauncher waits for), then quits after at most a couple of frames. A Core unload mid-wait quits at once.
             if (delaySeconds <= 0)
             {
-                UnityEngine.Application.Quit();
+                Progenitor.Ui.TitleVideoQuit.Request("restart", () => UnityEngine.Application.Quit());
                 return;
             }
 
-            Dev.MainThread.PostDelayed(delaySeconds, () => UnityEngine.Application.Quit(), Owner);
+            Dev.MainThread.PostDelayed(delaySeconds, () => Progenitor.Ui.TitleVideoQuit.Request("restart", () => UnityEngine.Application.Quit()), Owner);
         }
 
         private static bool SteamUrlHandler() =>
