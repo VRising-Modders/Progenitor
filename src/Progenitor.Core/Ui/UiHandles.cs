@@ -372,6 +372,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
         _panel = panel;
     }
 
+    /// <summary>PANELKEY1: the title the panel was made with (<see cref="Ui.Panel"/>); a panel key's Keybinds-tab note names it.</summary>
+    internal string Title { get; init; } = "";
+
     public IUiButton Button(string text) =>
         AddChild(UiSlotKind.Click,
             // CSAMPLE1: on a custom mod page (the settings grid's page) a button is the game's compact button at the

@@ -611,7 +611,7 @@ window.HELP = {
 <li><span class="kbd">Alt</span>, <span class="kbd">Ctrl</span> or <span class="kbd">Shift</span> alone is shared with the game and with keys from a mod's own config file: both act on it, neither loses it, and it isn't counted as a conflict. Between two mods' Keybinds keys on it, the one installed first keeps it.</li>
 <li>A conflict clears as soon as either key changes or its mod is removed.</li></ul>` },
         { id: "dialog", title: "The Key conflict dialog",
-          html: `<p>When a mod loads wanting a taken key, <strong>Key conflict: &lt;mod&gt;</strong> asks once. It names the key, the mod that holds it and why that one comes first.</p>
+          html: `<p>When a mod loads wanting a taken key, <strong>Key conflict: &lt;mod&gt;</strong> asks once. It names the key, the mod that holds it and why that one comes first. It never interrupts play: it waits until you next open the Mods menu or go back to the title screen. Until then the key stays off and the Mods list marks the mod.</p>
 <table><thead><tr><th class="label">Choice</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Pick a new key for &lt;action&gt;</td><td>Opens the Keybinds tab, ready to press a key for the new mod.</td></tr>
 <tr><td>Give &lt;key&gt; to &lt;action&gt;</td><td>The new mod gets the key; the holder's action is unbound. Only offered against another mod.</td></tr>
@@ -624,6 +624,7 @@ window.HELP = {
 <tr><td>menus</td><td>Only while the Mods menu is open.</td></tr>
 <tr><td>map</td><td>Only while the world map is open.</td></tr>
 <tr><td>menus and windows</td><td>Progenitor's window keys (Back, Forward); a mod's key on the same chord always wins.</td></tr>
+<tr><td>while &lt;panel&gt; is open</td><td>Only while that mod's panel is open. If the panel holds your controls while it is open, the game's own keys don't conflict with it: <span class="kbd">Space</span> can keep a preview open even though the game uses it to respawn. Grouped under the panel's name.</td></tr>
 <tr><td>photo mode</td><td>Only inside [[photo-mode|photo mode]].</td></tr>
 <tr><td>chat</td><td>Only while typing in chat.</td></tr></tbody></table>
 <p>A game key used only while building or in the emote menu warns instead of conflicting: both fire there.</p>` },
@@ -999,7 +1000,7 @@ ctx.Settings.Page(page => page
         { id: "add-keybind", title: "Add a keybind",
           code: { lang: "c#", text: `ctx.Keybinds.RegisterOpener("ToggleWindow", new KeyChord(UiKey.F8),
     "Open or close the My Mod window.", ToggleWindow);` },
-          html: `{{code}}<ul><li><code>RegisterOpener</code>: opens or closes your UI; works at the title screen too.</li><li><code>Register</code>: acts in the world.</li><li>Both are [[keybind|remappable]] in the Keybinds tab.</li></ul>`,
+          html: `{{code}}<ul><li><code>RegisterOpener</code>: opens or closes your UI; works at the title screen too.</li><li><code>Register</code>: acts in the world.</li><li><code>RegisterWhileShown(panel, ...)</code>: acts only while that panel is open; with <code>CaptureMode = WhileShown</code> the game's keys don't conflict with it.</li><li>Both are [[keybind|remappable]] in the Keybinds tab.</li></ul>`,
           callout: { title: "Never read keys yourself", warn: true, text: "No <code>UnityEngine.Input</code>, <code>Keyboard.current</code> or gamepad polling." } },
         { id: "show-window", title: "Show a window",
           code: { lang: "c#", text: `var window = ctx.Windows.Create(UiWindowPreset.Basic, "My Mod");

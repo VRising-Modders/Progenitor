@@ -741,7 +741,76 @@ public static class Keybinds
         Action? onReleased,
         bool allowWhileCaptured,
         bool allowWhenChatUnknown,
-        KeybindScope scope)
+        KeybindScope scope) =>
+        RegisterCore(owner, pluginId, id, file, defaultKey, description, onPressed, whileHeld, onReleased,
+            allowWhileCaptured, allowWhenChatUnknown, scope, panel: null);
+
+    /// <summary>
+    /// PANELKEY1: a bind that works only while <paramref name="panel"/> is shown (<see cref="UiHandleState.Shown"/>; a
+    /// hidden or destroyed panel leaves it inactive). Where it meets other keys follows the panel's input mode, read each
+    /// frame: a panel that holds the input while shown (<see cref="UiCaptureMode.WhileShown"/>) blocks the game's keys, so
+    /// the bind is a <see cref="KeybindScope.Panel"/> claim and the game's gameplay actions never meet it; any other mode
+    /// leaves the game's keys live, so it is a <see cref="KeybindScope.Gameplay"/> claim and meets them as usual. It may
+    /// fire while a panel holds the input (its own does). Chat focus and a focused text field still suppress it.
+    /// <paramref name="panelName"/> is what the Keybinds tab calls the panel (<c>Works while &lt;name&gt; is open.</c>);
+    /// empty: the panel's title. A second registration of the same id by the same plugin replaces the first (a mod that
+    /// builds its panel anew each time it opens registers again with the new panel).
+    /// </summary>
+    internal static IKeybindHandle RegisterWhileShown(
+        object? owner,
+        string pluginId,
+        string id,
+        ConfigFile file,
+        IUiPanel panel,
+        KeyChord defaultKey,
+        string description,
+        Action? onPressed,
+        Action? whileHeld = null,
+        Action? onReleased = null,
+        string? panelName = null)
+    {
+        if (panel == null) throw new ArgumentNullException(nameof(panel));
+        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Keybind id is required.", nameof(id));
+        if (file == null) throw new ArgumentNullException(nameof(file));
+        if (onPressed == null && whileHeld == null && onReleased == null)
+            throw new ArgumentNullException(nameof(onPressed), "A keybind needs at least one of onPressed, whileHeld or onReleased.");
+        string name = (panelName ?? "").Trim();
+        if (name.Length == 0 && panel is UiPanelHandle handle) name = handle.Title;
+        if (name.Length == 0) name = DefaultPanelName;
+
+        // A mod that builds its panel each time it opens registers again; the old binding goes first, so one row stays.
+        Registration? previous = null;
+        string plugin = string.IsNullOrWhiteSpace(pluginId) ? "unowned" : pluginId.Trim();
+        lock (Gate)
+        {
+            for (int i = 0; i < Live.Count; i++)
+                if (Live[i].PanelBind != null && Live[i].Matches(plugin, (id ?? "").Trim())) { previous = Live[i]; break; }
+        }
+
+        previous?.Dispose();
+        var binding = new PanelBinding(panel, name);
+        binding.Captures = SafeHoldsInput(panel);
+        return RegisterCore(owner, pluginId, id, file, defaultKey, description, onPressed, whileHeld, onReleased,
+            allowWhileCaptured: true, allowWhenChatUnknown: false, KeybindScope.Panel, binding);
+    }
+
+    /// <summary>PANELKEY1: the Keybinds tab's name for a panel with no title.</summary>
+    internal const string DefaultPanelName = "its panel";
+
+    private static IKeybindHandle RegisterCore(
+        object? owner,
+        string pluginId,
+        string id,
+        ConfigFile file,
+        KeyChord defaultKey,
+        string description,
+        Action? onPressed,
+        Action? whileHeld,
+        Action? onReleased,
+        bool allowWhileCaptured,
+        bool allowWhenChatUnknown,
+        KeybindScope scope,
+        PanelBinding? panel)
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Keybind id is required.", nameof(id));
         if (file == null) throw new ArgumentNullException(nameof(file));
@@ -866,7 +935,8 @@ public static class Keybinds
 
         var registration = new Registration(
             owner, plugin, key, desc, entry, defaultKey, chord, onPressed, allowWhileCaptured, allowWhenChatUnknown,
-            whileHeld, onReleased) { Reserved = reserved, Scope = scope, File = file };
+            whileHeld, onReleased) { Reserved = reserved, Scope = scope, File = file, PanelBind = panel };
+        scope = registration.Scope;
 
         // PAD1: the controller chord: a saved <id>.Gamepad value, else the controller default (none for most binds).
         registration.DefaultGamepadChord = padDefault;
@@ -1463,6 +1533,7 @@ public static class Keybinds
     /// <summary><paramref name="holdFrames"/> &lt; 0: a press only. Otherwise press, hold that many frames, release.</summary>
     private static KeybindDispatch Dispatch(Registration reg, int holdFrames, bool gamepad)
     {
+        RefreshPanelScopes();
         KeybindArbiter.RefreshIfStale();
         var chord = gamepad ? reg.GamepadChord : reg.Chord;
         string chordText = chord.ToString();
@@ -1478,7 +1549,7 @@ public static class Keybinds
         }
 
         if (waiting) return Not("suppressed: a key capture is waiting for a key");
-        if (!ScopeOpen(reg.Scope)) return Not(ScopeClosedReason(reg.Scope));
+        if (!RegOpen(reg)) return Not(ClosedReasonOf(reg));
         if (UiInputCapture.IsFullyBlocking && !reg.AllowWhileCaptured) return Not("suppressed: a mod panel is taking input");
         if (ClickChordSuppressedReason(reg.Scope, chord, raycast: true) is { } click) return Not(click);
         ChatFocus focus;
@@ -1832,6 +1903,135 @@ public static class Keybinds
     /// <summary>KEYS4: a live bind's scope (<see cref="KeybindScope.Gameplay"/> for anything else).</summary>
     internal static KeybindScope ScopeOf(IKeybindInfo? bind) => bind is Registration r ? r.Scope : KeybindScope.Gameplay;
 
+    /// <summary>PANELKEY1: the panel a bind works in, as the Keybinds tab names it; empty for a bind that is not a panel bind.</summary>
+    internal static string PanelNameOf(IKeybindInfo? bind) => bind is Registration { PanelBind: { } p } ? p.Name : "";
+
+    /// <summary>
+    /// PANELKEY1: a <see cref="RegisterWhileShown"/> bind's panel. Holds the panel only while the bind is live
+    /// (<see cref="Detach"/> on dispose), and the panel's input mode as the pump last read it.
+    /// </summary>
+    internal sealed class PanelBinding
+    {
+        private IUiPanel? _panel;
+
+        internal PanelBinding(IUiPanel panel, string name)
+        {
+            _panel = panel;
+            Name = name;
+        }
+
+        internal string Name { get; }
+
+        /// <summary>The panel holds the input while it is shown (<see cref="UiCaptureMode.WhileShown"/>), as last read.</summary>
+        internal bool Captures { get; set; }
+
+        internal IUiPanel? Panel => _panel;
+
+        internal void Detach() => _panel = null;
+    }
+
+    /// <summary>
+    /// PANELKEY1: the panel holds the input whenever it is shown. Only <see cref="UiCaptureMode.WhileShown"/> does: a
+    /// <see cref="UiCaptureMode.WhenHovered"/> panel gives the keyboard back to the game while the pointer is elsewhere,
+    /// and a <see cref="UiCaptureMode.Never"/> panel never takes it.
+    /// </summary>
+    private static bool SafeHoldsInput(IUiPanel? panel)
+    {
+        if (panel == null) return false;
+        try { return !panel.IsDisposed && panel.CaptureMode == UiCaptureMode.WhileShown; }
+        catch { return false; }
+    }
+
+    private static bool PanelAlive(IUiPanel? panel)
+    {
+        if (panel == null) return false;
+        try { return !panel.IsDisposed; }
+        catch { return false; }
+    }
+
+    /// <summary>PANELKEY1: the live gate of a panel bind: its panel exists, is not destroyed and is shown.</summary>
+    internal static bool PanelShown(IUiPanel? panel)
+    {
+        if (panel == null) return false;
+        try { return !panel.IsDisposed && panel.State == UiHandleState.Shown; }
+        catch { return false; }
+    }
+
+    /// <summary>PANELKEY1: why a panel bind did not fire: its panel is hidden or gone.</summary>
+    internal static string PanelClosedReason(string panelName) => "suppressed: works only while " + panelName + " is open";
+
+    /// <summary>
+    /// PANELKEY1: a panel's input mode can change while it is open (<see cref="IUiPanel.CaptureMode"/> is settable), which
+    /// moves its binds between <see cref="KeybindScope.Panel"/> and <see cref="KeybindScope.Gameplay"/>. Read once a frame
+    /// from the pump; a change bumps <see cref="Version"/>, so the winner picture is rebuilt before the next press.
+    /// </summary>
+    internal static void RefreshPanelScopes()
+    {
+        Registration[] snapshot;
+        lock (Gate) snapshot = PumpSnapshotLocked();
+        RefreshPanelScopes(snapshot);
+    }
+
+    private static void RefreshPanelScopes(Registration[] snapshot)
+    {
+        bool changed = false;
+        for (int i = 0; i < snapshot.Length; i++)
+        {
+            var p = snapshot[i].PanelBind;
+            if (p == null || snapshot[i].Disposed) continue;
+            // A destroyed panel keeps the mode it last had: the bind is inactive by its gate, and flipping it to a
+            // gameplay claim then would report a clash for a panel that no longer exists.
+            if (!PanelAlive(p.Panel)) continue;
+            bool captures = SafeHoldsInput(p.Panel);
+            if (captures == p.Captures) continue;
+            p.Captures = captures;
+            changed = true;
+        }
+
+        if (changed) Bump();
+    }
+
+    /// <summary>A bind's own gate: its scope is open now and, for a panel bind, its panel is shown.</summary>
+    private static bool RegOpen(Registration reg) =>
+        reg.PanelBind is { } p ? PanelShown(p.Panel) : ScopeOpen(reg.Scope);
+
+    private static string ClosedReasonOf(Registration reg) =>
+        reg.PanelBind is { } p ? PanelClosedReason(p.Name) : ScopeClosedReason(reg.Scope);
+
+    /// <summary>PANELKEY1: why a gameplay key did not fire: a panel key on its chord acts while its panel is shown.</summary>
+    internal static string PanelYieldReason(string ownerId, string action, string panelName) =>
+        "suppressed: " + KeybindArbiter.DisplayNameOf(ownerId) + "'s " + KeybindArbiter.KeybindDisplayName(ownerId, action)
+        + " has this key while " + panelName + " is open";
+
+    /// <summary>
+    /// PANELKEY1: a Progenitor gameplay bind and a panel bind that holds the input never clash
+    /// (<see cref="KeybindArbiter.ScopesMeet"/>); they share the chord by press. While the panel is shown the panel bind
+    /// acts (if it still wins its own chord) and the gameplay bind stands aside, so one press never fires both. A gameplay
+    /// bind that may not fire under a panel holding the input never reaches this.
+    /// </summary>
+    private static string? PanelYieldNow(Registration reg, bool gamepad)
+    {
+        if (reg.PanelBind != null) return null;
+        var chord = gamepad ? reg.GamepadChord : reg.Chord;
+        if (!chord.IsBound) return null;
+        Registration[] snapshot;
+        lock (Gate) snapshot = PumpSnapshotLocked();
+        try
+        {
+            foreach (var other in snapshot)
+            {
+                if (ReferenceEquals(other, reg) || other.Disposed || other.PanelBind is not { } p) continue;
+                if (other.Scope != KeybindScope.Panel) continue;
+                if ((gamepad ? other.GamepadChord : other.Chord) != chord) continue;
+                if (!PanelShown(p.Panel)) continue;
+                if ((gamepad ? SafeGamepadWinnerGate(other) : SafeWinnerGate(other)) != null) continue;
+                return PanelYieldReason(other.PluginId, other.Id, p.Name);
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: panel key share check threw: " + e.Message); }
+        return null;
+    }
+
     /// <summary>
     /// The winner rule for a press, plus HUB2's rule for a window key (<see cref="KeybindScope.Window"/>): it gives way to
     /// another mod's key on its chord whenever that key can act now (<see cref="SharerActingNow"/>), in menus and in play
@@ -1843,7 +2043,7 @@ public static class Keybinds
     {
         string? blocked = SafeWinnerGate(reg);
         if (blocked != null) return blocked;
-        if (reg.Scope == KeybindScope.Gameplay) return BuildYieldNow(reg, gamepad: false);
+        if (reg.Scope == KeybindScope.Gameplay) return BuildYieldNow(reg, gamepad: false) ?? PanelYieldNow(reg, gamepad: false);
         if (reg.Scope != KeybindScope.Window) return null;
         try
         {
@@ -1871,7 +2071,7 @@ public static class Keybinds
             var other = FindLive(s.OwnerId, s.ActionId);
             if (other == null || other.Disposed || other.Chord != reg.Chord) continue;
             if (captured && !other.AllowWhileCaptured) continue;
-            if (!ScopeOpen(other.Scope)) continue;
+            if (!RegOpen(other)) continue;
             if (SafeWinnerGate(other) != null) continue;
             return s;
         }
@@ -1894,7 +2094,9 @@ public static class Keybinds
 
     /// <summary><see cref="GateNow"/> for the controller chord: the gamepad picture's verdict, then the build-menu share.</summary>
     private static string? GamepadGateNow(Registration reg) =>
-        SafeGamepadWinnerGate(reg) ?? (reg.Scope == KeybindScope.Gameplay ? BuildYieldNow(reg, gamepad: true) : null);
+        SafeGamepadWinnerGate(reg) ?? (reg.Scope == KeybindScope.Gameplay
+            ? BuildYieldNow(reg, gamepad: true) ?? PanelYieldNow(reg, gamepad: true)
+            : null);
 
     /// <summary>Why a gameplay key did not fire: a build key on its chord acts while the build menu is open.</summary>
     internal static string BuildYieldReason(KeybindClaim holder) =>
@@ -1939,6 +2141,9 @@ public static class Keybinds
         }
     }
 
+    /// <summary>PANELKEY1: a panel key's place in words, for the Keybinds tab (<c>While Object preview is open</c>).</summary>
+    internal static string PanelScopeText(string panelName) => "While " + panelName + " is open";
+
     /// <summary>Player-facing scope names; never expose enum spelling as UI copy.</summary>
     internal static string ScopeText(KeybindScope scope) => scope switch
     {
@@ -1948,6 +2153,7 @@ public static class Keybinds
         KeybindScope.Window => "Menus and windows",
         KeybindScope.Photo => "Photo mode",
         KeybindScope.Chat => "Chat",
+        KeybindScope.Panel => "Panels",
         _ => "Gameplay",
     };
 
@@ -2044,6 +2250,9 @@ public static class Keybinds
             rebinding = _rebinding;
             capture = _capture;
         }
+
+        // PANELKEY1: a panel bind's scope follows its panel's input mode (settable while it is open).
+        RefreshPanelScopes(snapshot);
 
         bool waitingForKey = rebinding != null || capture != null;
         long nowMs = waitingForKey ? Clock() : 0;
@@ -2207,7 +2416,7 @@ public static class Keybinds
             var reg = snapshot[i];
             if (reg.Disposed) continue;
             bool gated = !(captured && !reg.AllowWhileCaptured) && !(chatUnknown && !reg.AllowWhenChatUnknown)
-                && ScopeOpen(reg.Scope);
+                && RegOpen(reg);
             bool allowed = gated && !(typing && !TypingSafeChord(reg.Chord))
                 && !(ownedField && UiTypedKeys.FieldTakes(reg.Chord))
                 && ClickChordSuppressedReason(reg.Scope, reg.Chord) == null;
@@ -3017,8 +3226,21 @@ public static class Keybinds
         /// <summary>KEYS2: the reserved chord refused at registration, until the player picks a key.</summary>
         public ReservedNote? Reserved { get; set; }
 
-        /// <summary>KEYS4: where the bind works (<see cref="KeybindScope.Menu"/>: only while the Mods workspace is open).</summary>
-        public KeybindScope Scope { get; init; }
+        private KeybindScope _scope;
+
+        /// <summary>
+        /// KEYS4: where the bind works (<see cref="KeybindScope.Menu"/>: only while the Mods workspace is open). PANELKEY1: a
+        /// panel bind reads <see cref="KeybindScope.Panel"/> while its panel holds the input and
+        /// <see cref="KeybindScope.Gameplay"/> otherwise (the mode last read by the pump, <see cref="RefreshPanelScopes"/>).
+        /// </summary>
+        public KeybindScope Scope
+        {
+            get => PanelBind is { } p ? (p.Captures ? KeybindScope.Panel : KeybindScope.Gameplay) : _scope;
+            init => _scope = value;
+        }
+
+        /// <summary>PANELKEY1: the panel this bind works in, or null for any other bind. Cleared when the bind goes.</summary>
+        public PanelBinding? PanelBind { get; set; }
 
         public bool AllowWhileCaptured { get; }
 
@@ -3084,12 +3306,15 @@ public static class Keybinds
             if (System.Threading.Interlocked.Exchange(ref _disposed, 1) != 0) return;
             // Review 2026-09-29: a bind that goes while held is released, so a held action never sticks.
             Release();
+            PanelBind?.Detach();
         }
 
         public void Dispose()
         {
             if (System.Threading.Interlocked.Exchange(ref _disposed, 1) != 0) return;
             Release();
+            // PANELKEY1: the panel is not held past the bind (it may belong to a plugin generation that is unloading).
+            PanelBind?.Detach();
             Forget(this);
         }
     }

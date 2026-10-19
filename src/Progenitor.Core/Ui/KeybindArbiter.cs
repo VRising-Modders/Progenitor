@@ -58,6 +58,18 @@ internal enum KeybindScope
 
     /// <summary>Core only: active in the build menu. Shares PTT like Map, but still meets gameplay.</summary>
     Build = 6,
+
+    /// <summary>
+    /// PANELKEY1: a plugin's <c>ctx.Keybinds.RegisterWhileShown</c> bind whose panel holds the input while it is shown
+    /// (<see cref="UiCaptureMode.WhileShown"/>). It fires only while that panel is shown, and the game's input is blocked
+    /// then (<c>BlockAllKeys</c>), so the game's gameplay actions (Respawn on Space, say) never meet it: it clashes only
+    /// with the game's keys the panel's input mask lets through (the menu keys and Rotate Camera, which stop it), with
+    /// other panel keys, menu, map and build keys (first installed wins) and with ordinary mods' key settings (they read
+    /// the key themselves). A Progenitor gameplay key on its chord shares it by press: while the panel is shown the panel
+    /// key acts and the gameplay key stands aside. A panel bind whose panel does not hold the input (WhenHovered or Never)
+    /// is a <see cref="Gameplay"/> claim instead: the game's keys still reach the game then, so they meet it as usual.
+    /// </summary>
+    Panel = 7,
 }
 
 /// <summary>
@@ -71,9 +83,10 @@ internal sealed class KeybindClaim
         string chordText = "", string help = "", KeyChord? defaultChord = null, string defaultText = "",
         bool comparable = true, int slot = 0, string category = "", bool editable = false,
         string notEditableReason = "", object? entry = null, bool keyCodeOnly = false, string mode = "",
-        KeybindScope scope = KeybindScope.Gameplay, bool gameChanged = false, bool gameSlotExists = true)
+        KeybindScope scope = KeybindScope.Gameplay, bool gameChanged = false, bool gameSlotExists = true, string panel = "")
     {
         Scope = scope;
+        Panel = (panel ?? "").Trim();
         GameChanged = gameChanged;
         GameSlotExists = gameSlotExists;
         Mode = (mode ?? "").Trim();
@@ -99,6 +112,15 @@ internal sealed class KeybindClaim
 
     /// <summary>KEYS4: where the key works (<see cref="KeybindScope"/>); a game key is always gameplay.</summary>
     internal KeybindScope Scope { get; }
+
+    /// <summary>
+    /// PANELKEY1: the panel a <c>RegisterWhileShown</c> bind works in (its title, or the name the plugin gave), or empty
+    /// for any other key. Set whether or not the panel holds the input (<see cref="Scope"/> says which).
+    /// </summary>
+    internal string Panel { get; }
+
+    /// <summary>PANELKEY1: a panel bind (<see cref="Panel"/> is set).</summary>
+    internal bool IsPanelKey => Panel.Length > 0;
 
     /// <summary>
     /// A game key that works only in one mode (<c>while building</c>, <c>in the emote menu</c>), or empty
@@ -432,8 +454,33 @@ internal static class KeybindArbiter
             KeybindScope.Chat => false,
             // HUB2: a window key clashes like a menu key; outside menus it acts only while the game's input is blocked.
             KeybindScope.Window => game.Source == KeybindSource.Game && EnforceGameWins && IsGameMenuKey(game),
+            // PANELKEY1: a panel that holds the input blocks the game's keys (BlockAllKeys); what its mask lets through
+            // (the menu keys, camera rotation) still stops a panel key.
+            KeybindScope.Panel => game.Source == KeybindSource.Game && EnforceGameWins && PassesPanelMask(game),
             _ => GameWins(game),
         };
+
+    /// <summary>
+    /// PANELKEY1: the game's actions besides its menu keys that a panel holding the input still lets through to the game:
+    /// camera rotation, which the panel's mask allows back on keyboard and mouse as chat's does
+    /// (<see cref="ButtonInputActions.RotateCamera"/>). Every other gameplay action (Respawn, Interact, the skills) is
+    /// blocked while that panel is shown.
+    /// </summary>
+    internal static readonly string[] PanelMaskGameActions = { "RotateCamera" };
+
+    /// <summary>
+    /// PANELKEY1: game key <paramref name="c"/> still reaches the game under a panel that holds the input: a key that works
+    /// in menus (UI navigation is never blocked under a panel, so the panel's own widgets keep working) or one of
+    /// <see cref="PanelMaskGameActions"/>.
+    /// </summary>
+    internal static bool PassesPanelMask(KeybindClaim c)
+    {
+        if (c.Source != KeybindSource.Game) return false;
+        if (IsGameMenuKey(c)) return true;
+        foreach (var a in PanelMaskGameActions)
+            if (string.Equals(a, c.ActionId, StringComparison.Ordinal)) return true;
+        return false;
+    }
 
     private static bool IsGameMenuKey(KeybindClaim c) =>
         c.Source == KeybindSource.Game && string.Equals(c.Mode, GameKeybindCatalog.InMenus, StringComparison.Ordinal);
@@ -473,8 +520,17 @@ internal static class KeybindArbiter
         if (a.Source == KeybindSource.Game) return ScopesMeet(a, b.Scope);
         if (b.Source == KeybindSource.Game) return ScopesMeet(b, a.Scope);
         if (BuildShare(a.Source, a.Scope, b.Source, b.Scope)) return false;
+        if (PanelMeetsCfg(a.Source, a.Scope, b.Source, b.Scope)) return true;
         return ModScopesMeet(a.Scope, b.Scope);
     }
+
+    /// <summary>
+    /// PANELKEY1: an ordinary mod's key setting reads the key itself, also while a panel holds the input, so it meets a
+    /// panel key (reported; first installed wins). A Progenitor gameplay key does not: it shares the chord by press
+    /// (<see cref="Keybinds"/>' panel gate).
+    /// </summary>
+    internal static bool PanelMeetsCfg(KeybindSource aSource, KeybindScope a, KeybindSource bSource, KeybindScope b) =>
+        (a == KeybindScope.Panel && bSource == KeybindSource.Cfg) || (b == KeybindScope.Panel && aSource == KeybindSource.Cfg);
 
     /// <summary>
     /// A Progenitor build key (<see cref="KeybindScope.Build"/>) and a Progenitor gameplay key on one chord share it at
@@ -496,6 +552,15 @@ internal static class KeybindArbiter
         // keeps it, everywhere, and the window key gives way at press time whenever that key can act (Keybinds.GateNow).
         // Against the game's keys it clashes as a menu key does (ScopesMeet(game, scope)).
         if (a == KeybindScope.Window || b == KeybindScope.Window) return a == b;
+        // PANELKEY1: a panel key acts while its panel is shown, where other panels' keys and the Mods menu's, the map's and
+        // the build menu's keys can be live too. Gameplay keys share it by press (the panel gate), photo mode holds all
+        // input, and chat keys run only while typing.
+        if (a == KeybindScope.Panel || b == KeybindScope.Panel)
+        {
+            var other = a == KeybindScope.Panel ? b : a;
+            return other is KeybindScope.Panel or KeybindScope.Menu or KeybindScope.Map or KeybindScope.Build;
+        }
+
         return a == b
             || (a == KeybindScope.Map && b == KeybindScope.Menu)
             || (a == KeybindScope.Menu && b == KeybindScope.Map)
@@ -512,11 +577,13 @@ internal static class KeybindArbiter
     internal static bool ScopesMeet(KeybindClaim c, KeybindScope scope, KeybindSource source = KeybindSource.Progenitor)
     {
         if (c.Source != KeybindSource.Game)
-            return !BuildShare(c.Source, c.Scope, source, scope) && ModScopesMeet(c.Scope, scope);
+            return !BuildShare(c.Source, c.Scope, source, scope)
+                && (PanelMeetsCfg(c.Source, c.Scope, source, scope) || ModScopesMeet(c.Scope, scope));
         return scope switch
         {
             KeybindScope.Gameplay => true,
             KeybindScope.Menu or KeybindScope.Window => IsGameMenuKey(c),
+            KeybindScope.Panel => PassesPanelMask(c),
             KeybindScope.Map => IsGameMapKey(c) || IsGameMenuKey(c) || IsEveryScreenGameKey(c),
             KeybindScope.Build => c.Mode.Length == 0 || IsGameBuildKey(c) || IsGameMenuKey(c) || IsEveryScreenGameKey(c),
             KeybindScope.Chat => IsGameChatKey(c),
@@ -755,7 +822,7 @@ internal static class KeybindArbiter
             list.Add(new KeybindClaim(
                 KeybindSource.Progenitor, b.PluginId, b.Id, KeybindDisplayName(b.PluginId, b.Id), b.Chord,
                 help: b.Description, defaultChord: b.DefaultChord, defaultText: b.DefaultChord.DisplayText, editable: true,
-                scope: Keybinds.ScopeOf(b)));
+                scope: Keybinds.ScopeOf(b), panel: Keybinds.PanelNameOf(b)));
         }
 
         return list;
@@ -775,7 +842,7 @@ internal static class KeybindArbiter
             list.Add(new KeybindClaim(
                 KeybindSource.Progenitor, b.PluginId, b.Id, KeybindDisplayName(b.PluginId, b.Id), b.GamepadChord,
                 help: b.Description, defaultChord: b.DefaultGamepadChord, defaultText: b.DefaultGamepadChord.DisplayText,
-                editable: true, scope: Keybinds.ScopeOf(b)));
+                editable: true, scope: Keybinds.ScopeOf(b), panel: Keybinds.PanelNameOf(b)));
         }
 
         return list;

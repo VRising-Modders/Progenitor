@@ -1657,7 +1657,8 @@ internal sealed class KeybindsPane
             list.RemoveAll(c => string.Equals(c.Key, claim.Key, StringComparison.OrdinalIgnoreCase));
             var moved = new KeybindClaim(claim.Source, claim.OwnerId, claim.ActionId, claim.DisplayName, chord,
                 help: claim.Help, defaultChord: claim.DefaultChord, defaultText: claim.DefaultText, editable: claim.Editable,
-                notEditableReason: claim.NotEditableReason, entry: claim.Entry, keyCodeOnly: claim.KeyCodeOnly, scope: claim.Scope);
+                notEditableReason: claim.NotEditableReason, entry: claim.Entry, keyCodeOnly: claim.KeyCodeOnly, scope: claim.Scope,
+                panel: claim.Panel);
             list.Add(moved);
             var picture = KeybindArbiter.Compute(game.Available ? game.Claims : Array.Empty<KeybindClaim>(), progenitor, cfg);
             return picture.Find(moved.Key);

@@ -105,7 +105,7 @@ internal sealed class KeybindConflictCase
 /// becomes one clash, grouped into one dialog per losing mod. A clash already decided "later" in this Core
 /// generation is skipped. Nothing is shown while a key capture or a rebind waits, while any dialog is on
 /// screen or queued, while the player types, or before a screen can take it (<see cref="ScreenReady"/>: the
-/// Mods workspace open, the title screen's Mods entry up, or the HUD up in a world). Just before showing,
+/// Mods workspace open or the title screen's Mods entry up; never over the HUD in a world). Just before showing,
 /// each clash is checked again; one that has gone is dropped.</para>
 ///
 /// <para><b>The dialog</b> is the framework's own (<see cref="UiDialog"/>, a Choose with option rows; words in
@@ -159,8 +159,8 @@ internal static class KeybindConflictPrompt
 
     /// <summary>
     /// Whether a screen can take the dialog now (the capture, dialog and typing gates are checked
-    /// besides). Production: the Mods workspace is open, or the title screen's Mods entry is up, or a
-    /// world's HUD is up (a chat window can be read). Tests: false unless set.
+    /// besides). Production: the Mods workspace is open, or the title screen's Mods entry is up
+    /// (<see cref="ScreenReadyFor"/>; never over the HUD in a world). Tests: false unless set.
     /// </summary>
     internal static Func<bool> ScreenReady { get; set; } = DefaultScreenReady;
 
@@ -221,14 +221,21 @@ internal static class KeybindConflictPrompt
         try
         {
             if (!Ui.CurrentRuntime().IsClient) return false;
-            if (ModsMenu.IsOpen) return true;
-            if (string.Equals(NativeModsEntry.DescribeOwned().Site, "main-menu", StringComparison.Ordinal)) return true;
-            // In a world: the HUD is up once a chat window can be read (a loading screen reads as Unknown).
-            return Keybinds.ChatFocusNow == ChatFocus.NotFocused;
+            return ScreenReadyFor(ModsMenu.IsOpen,
+                string.Equals(NativeModsEntry.DescribeOwned().Site, "main-menu", StringComparison.Ordinal));
         }
         catch { return false; }
 #endif
     }
+
+    /// <summary>
+    /// PANELKEY1 (live feedback 2026-10-19: the dialog popped up over gameplay): where the dialog may appear. Only the Mods
+    /// workspace (opened from the title screen or in a world: the Keybinds tab is one of its tabs) and the title screen
+    /// with its Mods entry up. Never over the HUD in a world: a key conflict is not urgent, the losing key is already off,
+    /// and the Mods entry and the Mods list show it as a problem until then, so it waits until the player next opens the
+    /// Mods menu or goes back to the title screen.
+    /// </summary>
+    internal static bool ScreenReadyFor(bool modsMenuOpen, bool titleModsEntryUp) => modsMenuOpen || titleModsEntryUp;
 
     internal static string SignatureOf(string ownerId, string actionId, KeyChord chord) =>
         (ownerId ?? "").Trim() + "/" + (actionId ?? "").Trim() + "/" + chord;
@@ -499,6 +506,7 @@ internal static class KeybindConflictPrompt
                 : k.Mode.StartsWith("in ", StringComparison.Ordinal) ? k.Mode.Substring(3) : k.Mode;
         }
 
+        if (k.IsPanelKey) return "while " + k.Panel + " is open";
         return k.Scope switch
         {
             KeybindScope.Menu => "menus",
