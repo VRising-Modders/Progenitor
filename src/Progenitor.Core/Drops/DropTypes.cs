@@ -84,9 +84,13 @@ public readonly struct GroundPile
 {
     /// <summary>Make one. Public so tests and samples can describe one.</summary>
     public GroundPile(GroundPileId id, int item, int amount, float x, float y, float z, float distanceSquared,
-        bool disabled, int maxStack, int itemEntityIndex = 0, int itemEntityVersion = 0, bool inFlight = false)
+        bool disabled, int maxStack, int itemEntityIndex = 0, int itemEntityVersion = 0, bool inFlight = false,
+        bool itemHasInstanceEntity = false, bool hasOwnInventory = false, bool slotHasItemEntity = false)
     {
         InFlight = inFlight;
+        ItemHasInstanceEntity = itemHasInstanceEntity;
+        HasOwnInventory = hasOwnInventory;
+        SlotHasItemEntity = slotHasItemEntity;
         Id = id;
         Item = item;
         Amount = amount;
@@ -130,17 +134,29 @@ public readonly struct GroundPile
     /// <summary>The item's stack size from the server item table; 0 when the table does not know the item.</summary>
     public int MaxStack { get; }
 
-    /// <summary>The pile's own item entity <c>Entity.Index</c> (0 when it has none).</summary>
+    /// <summary>The item entity the pile's throw component names, <c>Entity.Index</c> (0 when none; gone once the pile lands).</summary>
     public int ItemEntityIndex { get; }
 
     /// <summary>The pile's own item entity <c>Entity.Version</c>.</summary>
     public int ItemEntityVersion { get; }
 
     /// <summary>
-    /// True when the pile names an item entity of its own (gear with rolled stats, a jewel): the
-    /// game's throw component on the pile (<c>DropItemThrowSystem.DropItem.ItemEntity</c>) names a live entity.
+    /// True when the pile holds an item entity of its own (gear with rolled stats, a jewel): a slot of
+    /// the pile's own inventory names one (<see cref="SlotHasItemEntity"/>, holds after landing), or
+    /// the game's throw component (<c>DropItemThrowSystem.DropItem.ItemEntity</c>) names a live entity
+    /// (<see cref="ItemEntityIndex"/>, only while the throw runs).
     /// </summary>
-    public bool HasItemEntity => ItemEntityIndex != 0 || ItemEntityVersion != 0;
+    public bool HasItemEntity => ItemEntityIndex != 0 || ItemEntityVersion != 0 || SlotHasItemEntity;
+
+    /// <summary>
+    /// The pile entity has an inventory of its own (<c>InventoryBuffer</c> or
+    /// <c>InventoryInstanceElement</c>), which holds the real item. <c>TakeInto</c> moves out of it with
+    /// the game's slot move, as the game's pickup does.
+    /// </summary>
+    public bool HasOwnInventory { get; }
+
+    /// <summary>A slot of the pile's own inventory holding the pile's item names an item entity.</summary>
+    public bool SlotHasItemEntity { get; }
 
     /// <summary>
     /// The game's throw is still running on this pile: it carries the throw component
@@ -152,20 +168,43 @@ public readonly struct GroundPile
     /// <summary>The item stacks (stack size above 1 in the server item table).</summary>
     public bool IsStackable => MaxStack > 1;
 
-    /// <summary>
-    /// The pile may carry state a plain copy would lose: it names its own item entity, or the item
-    /// does not stack (or is not in the item table). <c>TakeInto</c> refuses these piles.
-    /// </summary>
-    public bool IsUnique => HasItemEntity || !IsStackable;
+    /// <summary>The server item table knows the item (<see cref="MaxStack"/> above 0).</summary>
+    public bool IsItemKnown => MaxStack > 0;
 
-    /// <summary>What <c>TakeInto</c> accepts: a landed pile of a stackable item with no item entity of its own and units left.</summary>
-    public bool CanTake => !IsUnique && !InFlight && Amount > 0;
+    /// <summary>
+    /// The item's definition gives each inventory copy its own item entity: <c>ItemData.Entity</c> is
+    /// set in the server item table row, the field the game's inventory add checks
+    /// (<c>ItemCatalogEntry.HasInstanceEntity</c> is the same answer). Gear, jewels and other items
+    /// with per-copy state. Read from the item definition, not the pile, so it holds after landing.
+    /// </summary>
+    public bool ItemHasInstanceEntity { get; }
+
+    /// <summary>
+    /// The pile holds a copy with per-copy state a plain copy would lose: it holds an item entity
+    /// (<see cref="HasItemEntity"/>), or the item's definition gives each copy one
+    /// (<see cref="ItemHasInstanceEntity"/>). An item that only stacks to 1 (a blueprint book) is
+    /// not unique by itself.
+    /// </summary>
+    public bool IsUnique => GroundTakeRules.IsUnique(ItemEntityIndex != 0 || ItemEntityVersion != 0, SlotHasItemEntity, ItemHasInstanceEntity);
+
+    /// <summary>
+    /// How <c>TakeInto</c> would take this pile: <see cref="GroundTakeRoute.PileInventory"/> when it
+    /// has its own inventory, <see cref="GroundTakeRoute.Copy"/> for a stackable, not unique item on a
+    /// pile without one, else <see cref="GroundTakeRoute.None"/>.
+    /// </summary>
+    public GroundTakeRoute Route => GroundTakeRules.Route(HasOwnInventory, IsUnique, MaxStack);
+
+    /// <summary>
+    /// What <c>TakeInto</c> accepts: a landed pile with units left, of an item the server item table
+    /// knows, that has a route (<see cref="Route"/>).
+    /// </summary>
+    public bool CanTake => !InFlight && Amount > 0 && IsItemKnown && Route != GroundTakeRoute.None;
 
 #if !PROGENITOR_TESTS
     /// <summary>The pile entity (only meaningful in the epoch of <see cref="Id"/>).</summary>
     public Unity.Entities.Entity Entity => Id.Entity;
 
-    /// <summary>The pile's own item entity, <c>Entity.Null</c> when it has none.</summary>
+    /// <summary>The item entity the pile's throw component names, <c>Entity.Null</c> when none (always after landing; see <see cref="SlotHasItemEntity"/>).</summary>
     public Unity.Entities.Entity ItemEntity => new() { Index = ItemEntityIndex, Version = ItemEntityVersion };
 #endif
 
@@ -179,13 +218,34 @@ public readonly struct GroundPile
             + (Disabled ? " asleep" : "")
             + (InFlight ? " in-flight" : "")
             + (HasItemEntity ? " item-entity" : "")
-            + (IsStackable ? "" : " not-stackable");
+            + (ItemHasInstanceEntity ? " instance-item" : "")
+            + (HasOwnInventory ? " own-inventory" : "")
+            + (!IsItemKnown ? " unknown-item" : IsStackable ? "" : " not-stackable");
     }
+}
+
+/// <summary>How <c>ctx.Drops.TakeInto</c> takes a pile (<see cref="GroundPile.Route"/>).</summary>
+public enum GroundTakeRoute
+{
+    /// <summary>Not at all: a pile without its own inventory whose item cannot be copied without losing state.</summary>
+    None = 0,
+
+    /// <summary>
+    /// The game's slot move out of the pile's own inventory (the real item, its item entity
+    /// included), then <c>ItemPickup.ItemAmount</c> set to what is left, as the game's pickup does.
+    /// </summary>
+    PileInventory = 1,
+
+    /// <summary>A server add of fresh units, then the pile shrunk by what was added (a pile with no inventory of its own; stackable items only).</summary>
+    Copy = 2,
 }
 
 /// <summary>Result of <c>ctx.Drops.TakeInto</c>. Every count is read back from the world after the write.</summary>
 public sealed class GroundTakeResult
 {
+    /// <summary>The route the take used (<see cref="GroundTakeRoute.None"/> when refused before choosing one).</summary>
+    public GroundTakeRoute Route { get; init; }
+
     /// <summary>
     /// <c>Complete</c> (all requested), <c>Partial</c> (some), <c>Nothing</c> (the inventory took none;
     /// the pile is untouched), <c>Refused</c> (nothing touched), <c>Inconsistent</c> (the inventory
@@ -220,12 +280,16 @@ public sealed class GroundTakeResult
     /// <summary>Why it was not <c>Complete</c>; empty when it was.</summary>
     public string Reason { get; init; } = "";
 
-    /// <summary>The inventory add behind it (<c>ctx.Inventory.TryAdd</c>); null when refused before the add.</summary>
+    /// <summary>
+    /// The inventory call behind it: the transfer out of the pile's inventory
+    /// (<c>ctx.Inventory.Transfer</c>) on the <see cref="GroundTakeRoute.PileInventory"/> route, the add
+    /// (<c>ctx.Inventory.TryAdd</c>) on the <see cref="GroundTakeRoute.Copy"/> route; null when refused first.
+    /// </summary>
     public InventoryResult? Add { get; init; }
 
     /// <summary>One line for logs and chat.</summary>
     public override string ToString() =>
-        Outcome + " pile=" + Pile + " item=" + Item + " requested=" + Requested + " done=" + Done
+        Outcome + (Route == GroundTakeRoute.None ? "" : " via " + Route) + " pile=" + Pile + " item=" + Item + " requested=" + Requested + " done=" + Done
         + " pile " + PileBefore + "->" + PileAfter + (PileRemoved ? " removed" : "")
         + (Reason.Length > 0 ? " (" + Reason + ")" : "");
 

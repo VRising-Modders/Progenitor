@@ -19,14 +19,21 @@ namespace Progenitor.Drops;
 /// the position from <c>Translation</c>, else <c>LocalToWorld</c>; <c>Disabled</c> and
 /// <c>DestroyTag</c> by presence; the pile's own item entity from
 /// <c>DropItemThrowSystem.DropItem.ItemEntity</c> when the pile carries that component and it names a
-/// live entity. The stack size comes from the server item table.</para>
+/// live entity; the pile's own inventory (<c>InventoryBuffer</c> on the pile, or its
+/// <c>InventoryInstanceElement</c> row 0) through <c>ctx.Inventory</c>'s reader. The stack size and whether the item has an instance entity (<c>ItemData.Entity</c>
+/// set, the field the game's inventory add checks) come from the server item table row.</para>
 ///
-/// <para><b>The take.</b> <c>ctx.Inventory.TryAdd</c> first; the pile shrinks only by what the
-/// inventory read back as added. A pile left with units gets its new <c>ItemAmount</c> through the
-/// component overlay (<c>GetComponentDataRawRW</c>, the amount field alone). An emptied pile gets
-/// amount 0 first, so nothing can take it twice, then the replicated removal
-/// (<see cref="BuffSweep.DestroyUnitReplicated"/>, the game's own destroy). Everything on the main
-/// thread in one call, so no other mod call and no game system runs in between.</para>
+/// <para><b>The take.</b> A pile with its own inventory: <c>ctx.Inventory.Transfer</c> out of it
+/// (the game's slot move, which carries the item entity along), then <c>ItemAmount</c> set to what
+/// the pile's inventory still holds of the item. This is what the game's pickup
+/// (<c>ItemPickupSystem</c>) does: <c>TryGetInventory</c> on the pile, <c>TryMoveItem</c> per slot,
+/// <c>GetItemAmount</c>, then <c>SetComponentData&lt;ItemPickup&gt;</c>. A pile without one (stackable,
+/// not unique items only): <c>ctx.Inventory.TryAdd</c> first, and the pile shrinks only by what the
+/// inventory read back as added. <c>ItemAmount</c> is written through the component overlay
+/// (<c>GetComponentDataRawRW</c>, the amount field alone). An emptied pile gets amount 0 first, so
+/// nothing can take it twice, then the replicated removal (<see cref="BuffSweep.DestroyUnitReplicated"/>,
+/// the game's own destroy). Everything on the main thread in one call, so no other mod call and no
+/// game system runs in between.</para>
 /// </summary>
 internal static unsafe class GroundPiles
 {
@@ -96,10 +103,13 @@ internal static unsafe class GroundPiles
         if (e.Has<DestroyTag>(em)) { reason = GroundTakeRules.Removing; return false; }
         if (!TryItem(em, e, out int item, out int amount)) { reason = GroundTakeRules.Gone; return false; }
         if (item == 0 || amount <= 0) { reason = GroundTakeRules.Empty; return false; }
-        int maxStack = InventoryRuntime.TryItemInfo(item, out var info) ? info.MaxAmount : 0;
+        bool known = InventoryRuntime.TryItemInfo(item, out var info);
+        int maxStack = known ? info.MaxAmount : 0;
         var own = ItemEntityOf(em, e);
+        var contents = ReadContents(e, item);
         pile = new GroundPile(new GroundPileId(e.Index, e.Version, epoch), item, amount, x, y, z, d2,
-            e.Has<Disabled>(em), maxStack, own.Index, own.Version, InFlight(em, e));
+            e.Has<Disabled>(em), maxStack, own.Index, own.Version, InFlight(em, e), known && info.HasInstanceEntity,
+            contents.HasInventory, contents.SlotHasItemEntity);
         reason = "";
         return true;
     }
@@ -166,24 +176,91 @@ internal static unsafe class GroundPiles
         bool stale = id.IsStaleIn(epoch);
         bool exists = !id.IsNone && !stale && e.Exists(em);
         int item = 0, have = 0;
-        bool removing = false, own = false, known = false, flying = false;
-        int maxStack = 0;
+        bool removing = false, known = false, flying = false;
+        var route = GroundTakeRoute.None;
+        var contents = default(PileContents);
         if (exists)
         {
             removing = e.Has<DestroyTag>(em);
             if (!TryItem(em, e, out item, out have)) exists = false;
             else
             {
-                own = ItemEntityOf(em, e) != Entity.Null;
                 flying = InFlight(em, e);
                 known = InventoryRuntime.TryItemInfo(item, out var info);
-                maxStack = known ? info.MaxAmount : 0;
+                contents = ReadContents(e, item);
+                bool unique = GroundTakeRules.IsUnique(ItemEntityOf(em, e) != Entity.Null, contents.SlotHasItemEntity, known && info.HasInstanceEntity);
+                route = GroundTakeRules.Route(contents.HasInventory, unique, known ? info.MaxAmount : 0);
             }
         }
 
-        string? refusal = GroundTakeRules.Refusal(id.IsNone, stale, into.IsNone, amount, exists, removing, have, flying, own, known, maxStack);
+        string? refusal = GroundTakeRules.Refusal(id.IsNone, stale, into.IsNone, amount, exists, removing, have, flying, known, route);
         if (refusal != null) return GroundTakeResult.Refuse(id, item, amount, have, refusal);
+        return route == GroundTakeRoute.PileInventory
+            ? TakeFromPileInventory(em, e, id, into, item, amount, have, contents.Units)
+            : TakeAsCopy(em, e, id, into, item, amount, have);
+    }
 
+    /// <summary>
+    /// The game's pickup, done for a mod: the game's slot move out of the pile's own inventory
+    /// (<c>ctx.Inventory.Transfer</c>, which moves the slot with its item entity), then
+    /// <c>ItemPickup.ItemAmount</c> set to what the pile's inventory still holds of the item, and the
+    /// replicated removal once nothing is left.
+    /// </summary>
+    private static GroundTakeResult TakeFromPileInventory(EntityManager em, Entity e, GroundPileId id, InventoryRef into, int item,
+        int amount, int have, int units)
+    {
+        const GroundTakeRoute route = GroundTakeRoute.PileInventory;
+        if (units <= 0)
+            return Refused(id, item, amount, have, GroundTakeRules.NotInPileInventory, route);
+        var source = InventoryRef.For(e);
+        int ask = GroundTakeRules.Ask(amount, units);
+        var move = InventoryRuntime.Engine.Transfer(source, into, item, ask);
+        if (move.Outcome == InventoryOutcome.Inconsistent)
+            return new GroundTakeResult
+            {
+                Route = route, Outcome = InventoryOutcome.Inconsistent, Pile = id, Item = item, Requested = amount, Done = move.Done,
+                PileBefore = have, PileAfter = have, Add = move,
+                Reason = "the move out of the pile's inventory could not be read back (" + move.Reason + "); the pile was not changed",
+            };
+
+        if (move.Outcome == InventoryOutcome.Refused)
+            return new GroundTakeResult
+            {
+                Route = route, Outcome = InventoryOutcome.Refused, Pile = id, Item = item, Requested = amount,
+                PileBefore = have, PileAfter = have, Reason = move.Reason, Add = move,
+            };
+
+        int done = Math.Max(0, move.Done);
+        if (done <= 0)
+            return new GroundTakeResult
+            {
+                Route = route, Outcome = InventoryOutcome.Nothing, Pile = id, Item = item, Requested = amount,
+                PileBefore = have, PileAfter = have, Reason = move.Reason.Length > 0 ? move.Reason : "the inventory took none", Add = move,
+            };
+
+        // What the pile's inventory still holds becomes ItemAmount, as the game's pickup writes it.
+        int left = InventoryRuntime.Engine.TryCount(source, item, out int n, out _) ? n : Math.Max(0, units - done);
+        var (newAmount, remove) = GroundTakeRules.AfterMove(done, left);
+        string reason = done < amount ? (done < units ? move.Reason : "the pile held " + units) : "";
+        if (!TryWriteAmount(em, e, id, item, newAmount, done, out string writeError))
+            return new GroundTakeResult
+            {
+                Route = route, Outcome = InventoryOutcome.Inconsistent, Pile = id, Item = item, Requested = amount, Done = done,
+                PileBefore = have, PileAfter = have, Reason = "moved into the inventory but the pile could not be written: " + writeError, Add = move,
+            };
+
+        if (remove) Destroy(em, e, id);
+        return new GroundTakeResult
+        {
+            Route = route, Outcome = GroundTakeRules.Outcome(amount, done), Pile = id, Item = item, Requested = amount, Done = done,
+            PileBefore = have, PileAfter = newAmount, PileRemoved = remove, Reason = reason, Add = move,
+        };
+    }
+
+    /// <summary>A pile with no inventory of its own (stackable, not unique): a server add, then the pile shrinks by what was added.</summary>
+    private static GroundTakeResult TakeAsCopy(EntityManager em, Entity e, GroundPileId id, InventoryRef into, int item, int amount, int have)
+    {
+        const GroundTakeRoute route = GroundTakeRoute.Copy;
         int ask = GroundTakeRules.Ask(amount, have);
         var add = InventoryRuntime.Engine.TryAdd(into, item, ask);
         if (add.Outcome == InventoryOutcome.Inconsistent)
@@ -191,7 +268,7 @@ internal static unsafe class GroundPiles
             // The inventory could not be read back: the units may be in it already. The pile is not touched.
             return new GroundTakeResult
             {
-                Outcome = InventoryOutcome.Inconsistent, Pile = id, Item = item, Requested = amount, PileBefore = have, PileAfter = have,
+                Route = route, Outcome = InventoryOutcome.Inconsistent, Pile = id, Item = item, Requested = amount, PileBefore = have, PileAfter = have,
                 Reason = "the inventory could not be read back after the add (" + add.Reason + "); the pile was not changed", Add = add,
             };
         }
@@ -199,7 +276,7 @@ internal static unsafe class GroundPiles
         if (add.Outcome == InventoryOutcome.Refused)
             return new GroundTakeResult
             {
-                Outcome = InventoryOutcome.Refused, Pile = id, Item = item, Requested = amount, PileBefore = have, PileAfter = have,
+                Route = route, Outcome = InventoryOutcome.Refused, Pile = id, Item = item, Requested = amount, PileBefore = have, PileAfter = have,
                 Reason = add.Reason, Add = add,
             };
 
@@ -207,38 +284,152 @@ internal static unsafe class GroundPiles
         if (done <= 0)
             return new GroundTakeResult
             {
-                Outcome = InventoryOutcome.Nothing, Pile = id, Item = item, Requested = amount, PileBefore = have, PileAfter = have,
+                Route = route, Outcome = InventoryOutcome.Nothing, Pile = id, Item = item, Requested = amount, PileBefore = have, PileAfter = have,
                 Reason = add.Reason.Length > 0 ? add.Reason : "the inventory took none", Add = add,
             };
 
         string reason = done < amount ? (done < have ? add.Reason : "the pile held " + have) : "";
+        if (!TryWriteAmount(em, e, id, item, left, done, out string writeError))
+            return new GroundTakeResult
+            {
+                Route = route, Outcome = InventoryOutcome.Inconsistent, Pile = id, Item = item, Requested = amount, Done = done, PileBefore = have, PileAfter = have,
+                Reason = "added to the inventory but the pile could not be written: " + writeError, Add = add,
+            };
+
+        if (remove) Destroy(em, e, id);
+        return new GroundTakeResult
+        {
+            Route = route, Outcome = GroundTakeRules.Outcome(amount, done), Pile = id, Item = item, Requested = amount, Done = done,
+            PileBefore = have, PileAfter = left, PileRemoved = remove, Reason = reason, Add = add,
+        };
+    }
+
+    private static GroundTakeResult Refused(GroundPileId id, int item, int amount, int have, string reason, GroundTakeRoute route) =>
+        new()
+        {
+            Route = route, Outcome = InventoryOutcome.Refused, Pile = id, Item = item, Requested = amount,
+            PileBefore = have, PileAfter = have, Reason = reason,
+        };
+
+    /// <summary><c>ItemPickup.ItemAmount</c> through the component overlay, the amount field alone. Logs loudly on failure.</summary>
+    private static bool TryWriteAmount(EntityManager em, Entity e, GroundPileId id, int item, int value, int done, out string error)
+    {
         try
         {
             byte* p = AiRuntime.RW<ItemPickup>(em, e, Layout.ItemPickupItemAmountOffset + sizeof(int));
-            *(int*)(p + Layout.ItemPickupItemAmountOffset) = left;
+            *(int*)(p + Layout.ItemPickupItemAmountOffset) = value;
+            error = "";
+            return true;
         }
         catch (Exception ex)
         {
             // The units are in the inventory and the pile still shows them: say so loudly, once per call.
-            Plugin.Logger?.LogError("Drops: TakeInto added " + done + " of item " + item + " but could not shrink pile " + id + ": " + ex.Message);
-            return new GroundTakeResult
-            {
-                Outcome = InventoryOutcome.Inconsistent, Pile = id, Item = item, Requested = amount, Done = done, PileBefore = have, PileAfter = have,
-                Reason = "added to the inventory but the pile could not be written: " + ex.Message, Add = add,
-            };
+            Plugin.Logger?.LogError("Drops: TakeInto moved " + done + " of item " + item + " but could not write pile " + id + ": " + ex.Message);
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>The game's replicated destroy; a throw is logged, not raised (the pile already reads empty).</summary>
+    private static void Destroy(EntityManager em, Entity e, GroundPileId id)
+    {
+        try { BuffSweep.DestroyUnitReplicated(em, e, DestroyDebugReason.None, "Drops: pile taken"); }
+        catch (Exception ex) { Plugin.Logger?.LogWarning("Drops: pile " + id + " is empty but its removal threw: " + ex.Message); }
+    }
+
+    /// <summary>
+    /// Remove an emptied pile with the game's replicated destroy. True when it was removed now or was
+    /// already gone or being removed; false with a reason for a stale handle, an entity that is not a
+    /// pile, or a pile that still holds units.
+    /// </summary>
+    internal static bool Remove(GroundPileId id, out string reason)
+    {
+        int epoch = Progenitor.WorldState.WorldEpoch.Current;
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) { reason = "no server world"; return false; }
+        var em = world.EntityManager;
+        var e = id.IsNone ? Entity.Null : id.Entity;
+        bool stale = id.IsStaleIn(epoch);
+        bool exists = !id.IsNone && !stale && e.Exists(em);
+        bool isPile = false, removing = false;
+        int amount = 0, units = 0;
+        if (exists)
+        {
+            removing = e.Has<DestroyTag>(em);
+            isPile = TryItem(em, e, out int item, out amount);
+            if (isPile) units = ReadContents(e, 0).AllUnits;
         }
 
-        if (remove)
+        var (refusal, done) = GroundTakeRules.RemoveCheck(id.IsNone, stale, exists, isPile, removing, amount, units);
+        if (refusal != null) { reason = refusal; return false; }
+        if (done) { reason = exists ? GroundTakeRules.Removing : GroundTakeRules.Gone; return true; }
+        try
         {
-            try { BuffSweep.DestroyUnitReplicated(em, e, DestroyDebugReason.None, "Drops: pile taken"); }
-            catch (Exception ex) { Plugin.Logger?.LogWarning("Drops: pile " + id + " is empty but its removal threw: " + ex.Message); }
+            BuffSweep.DestroyUnitReplicated(em, e, DestroyDebugReason.None, "Drops: pile removed");
+            reason = "";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            reason = "the replicated removal threw: " + ex.Message;
+            return false;
+        }
+    }
+
+    /// <summary>What the pile's own inventory holds (read through <c>ctx.Inventory</c>'s reader).</summary>
+    private readonly struct PileContents
+    {
+        internal PileContents(bool hasInventory, int units, int allUnits, bool slotHasItemEntity)
+        {
+            HasInventory = hasInventory;
+            Units = units;
+            AllUnits = allUnits;
+            SlotHasItemEntity = slotHasItemEntity;
         }
 
-        return new GroundTakeResult
+        /// <summary>The pile entity has an inventory of its own.</summary>
+        internal bool HasInventory { get; }
+
+        /// <summary>Units of the pile's item in it.</summary>
+        internal int Units { get; }
+
+        /// <summary>Units of any item in it.</summary>
+        internal int AllUnits { get; }
+
+        /// <summary>A slot holding the pile's item names an item entity.</summary>
+        internal bool SlotHasItemEntity { get; }
+    }
+
+    private static InventorySlot[] _slots = new InventorySlot[8];
+
+    /// <summary>The pile's own inventory: present, units of <paramref name="item"/>, units in all, item entity. Main thread.</summary>
+    private static PileContents ReadContents(Entity e, int item)
+    {
+        var engine = InventoryRuntime.Engine;
+        var source = InventoryRef.For(e);
+        int n = engine.ReadInto(source, _slots);
+        if (n < 0) return default;
+        if (n > _slots.Length)
         {
-            Outcome = GroundTakeRules.Outcome(amount, done), Pile = id, Item = item, Requested = amount, Done = done,
-            PileBefore = have, PileAfter = left, PileRemoved = remove, Reason = reason, Add = add,
-        };
+            _slots = new InventorySlot[Math.Max(n, _slots.Length * 2)];
+            n = engine.ReadInto(source, _slots);
+            if (n < 0) return default;
+            n = Math.Min(n, _slots.Length);
+        }
+
+        int units = 0, all = 0;
+        bool entity = false;
+        for (int i = 0; i < n; i++)
+        {
+            var s = _slots[i];
+            if (s.IsEmpty || s.Amount <= 0) continue;
+            all += s.Amount;
+            if (s.Item != item) continue;
+            units += s.Amount;
+            entity |= s.HasItemEntity;
+        }
+
+        return new PileContents(true, units, all, entity);
     }
 }
 

@@ -11,8 +11,10 @@ namespace Progenitor.Items;
 public sealed class ItemCatalogEntry
 {
     /// <summary>Creates an entry. Plugins read entries; Core builds them.</summary>
-    public ItemCatalogEntry(int prefabGuid, string prefabName, string? displayName, int maxAmount, long itemCategory, int itemType, bool isCustom)
+    public ItemCatalogEntry(int prefabGuid, string prefabName, string? displayName, int maxAmount, long itemCategory, int itemType, bool isCustom,
+        bool hasInstanceEntity = false)
     {
+        HasInstanceEntity = hasInstanceEntity;
         PrefabGuid = prefabGuid;
         PrefabName = prefabName ?? "";
         DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName!.Trim();
@@ -46,6 +48,17 @@ public sealed class ItemCatalogEntry
 
     /// <summary>True for an item cloned by the content API (<c>DefineItem</c> or a data pack) in this process.</summary>
     public bool IsCustom { get; }
+
+    /// <summary>
+    /// True when a copy of this item in an inventory slot gets its own item entity (per-instance
+    /// state such as durability, rolled stats or a jewel's mods). The game decides this from the
+    /// item definition alone: its inventory add (<c>CreateInventoryItemEntity</c>) instantiates
+    /// <c>ItemData.Entity</c> for the new slot, and leaves the slot without an item entity when that
+    /// field is <c>Entity.Null</c>. Read from the item table row the game's add reads, else from the
+    /// prefab's own <c>ItemData</c>; see <see cref="ItemInstanceRule"/>. Independent of
+    /// <see cref="MaxAmount"/>: an item that stacks to 1 can still be a plain slot.
+    /// </summary>
+    public bool HasInstanceEntity { get; }
 
     /// <summary>
     /// True when <paramref name="filter"/> is blank, equals <see cref="PrefabGuid"/> (as an integer),
@@ -117,8 +130,10 @@ public readonly struct ItemCatalogInfo
 /// <summary>One raw row from the game, before the catalog normalizes it.</summary>
 internal readonly struct ItemCatalogRow
 {
-    internal ItemCatalogRow(int prefabGuid, string? prefabName, string? displayName, int maxAmount, long itemCategory, int itemType, bool isCustom)
+    internal ItemCatalogRow(int prefabGuid, string? prefabName, string? displayName, int maxAmount, long itemCategory, int itemType, bool isCustom,
+        bool hasInstanceEntity = false)
     {
+        HasInstanceEntity = hasInstanceEntity;
         PrefabGuid = prefabGuid;
         PrefabName = prefabName;
         DisplayName = displayName;
@@ -135,6 +150,35 @@ internal readonly struct ItemCatalogRow
     internal long ItemCategory { get; }
     internal int ItemType { get; }
     internal bool IsCustom { get; }
+    internal bool HasInstanceEntity { get; }
+}
+
+/// <summary>
+/// Whether an item gets its own item entity in an inventory slot. Game-free.
+///
+/// <para><b>The game's rule.</b> The server's inventory add
+/// (<c>InventoryUtilitiesServer.CreateInventoryItemEntity</c>, called for each new slot unless the
+/// add carries a previous item entity) looks the item up in the item table it is handed
+/// (<c>GameDataSystem.ItemHashLookupMap</c>). When the row's <c>ItemData.Entity</c> is
+/// <c>Entity.Null</c> it returns <c>Entity.Null</c> and the slot is pure data (item, amount). Otherwise
+/// it instantiates that entity, adds <c>Disabled</c>, and the slot names the copy. The post-load
+/// repair (<c>RepairBrokenInventoryItemsSystem</c>) applies the same test the other way: a slot whose
+/// row has <c>ItemData.Entity</c> set but whose own item entity is null is cleared as broken. The
+/// table row is a copy of the prefab's <c>ItemData</c> made when the prefab is registered. No other
+/// field (stack size, <c>ItemType</c>, category, durability or equipment components) takes part.</para>
+/// </summary>
+internal static class ItemInstanceRule
+{
+    /// <summary>True when the <c>ItemData.Entity</c> read (index, version) is not <c>Entity.Null</c>.</summary>
+    internal static bool FromItemDataEntity(int index, int version) => index != 0 || version != 0;
+
+    /// <summary>
+    /// The answer for one item: the item table row when the table has one (that row is what the
+    /// game's add reads), else the prefab's own <c>ItemData</c> when it was read, else true
+    /// (nothing read: assume the item carries state, the safe side for a copy).
+    /// </summary>
+    internal static bool Pick(bool inTable, bool tableEntitySet, bool prefabRead, bool prefabEntitySet) =>
+        inTable ? tableEntitySet : !prefabRead || prefabEntitySet;
 }
 
 /// <summary>Where the catalog reads item prefabs from. The game implementation lives in <c>UnityItemCatalogSource</c>.</summary>
@@ -354,7 +398,8 @@ internal sealed class ItemCatalogCache
         {
             var row = rows[i];
             if (row.PrefabGuid == 0 || byGuid.ContainsKey(row.PrefabGuid)) continue;
-            var entry = new ItemCatalogEntry(row.PrefabGuid, row.PrefabName ?? "", row.DisplayName, row.MaxAmount, row.ItemCategory, row.ItemType, row.IsCustom);
+            var entry = new ItemCatalogEntry(row.PrefabGuid, row.PrefabName ?? "", row.DisplayName, row.MaxAmount, row.ItemCategory, row.ItemType, row.IsCustom,
+                row.HasInstanceEntity);
             byGuid.Add(entry.PrefabGuid, entry);
             list.Add(entry);
             if (entry.DisplayName != null) named++;

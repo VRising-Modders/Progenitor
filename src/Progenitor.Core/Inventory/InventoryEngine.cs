@@ -8,11 +8,12 @@ namespace Progenitor.Inventory;
 internal readonly struct InventoryItemInfo
 {
     /// <summary>Construct item facts.</summary>
-    public InventoryItemInfo(int maxAmount, long category, int itemType)
+    public InventoryItemInfo(int maxAmount, long category, int itemType, bool hasInstanceEntity = false)
     {
         MaxAmount = maxAmount;
         Category = category;
         ItemType = itemType;
+        HasInstanceEntity = hasInstanceEntity;
     }
 
     /// <summary><c>ItemData.MaxAmount</c>: the stack size.</summary>
@@ -23,6 +24,12 @@ internal readonly struct InventoryItemInfo
 
     /// <summary><c>ItemData.ItemType</c> (0 is stackable).</summary>
     public int ItemType { get; }
+
+    /// <summary>
+    /// <c>ItemData.Entity</c> is set in the item table row: the game's inventory add gives each slot
+    /// of this item its own item entity (see <see cref="Progenitor.Items.ItemInstanceRule"/>).
+    /// </summary>
+    public bool HasInstanceEntity { get; }
 }
 
 /// <summary>

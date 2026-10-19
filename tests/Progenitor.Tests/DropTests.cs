@@ -14,7 +14,7 @@ namespace Progenitor.Tests;
 /// </summary>
 public class DropTests
 {
-    const int Ore = 100, Wood = 200, Sword = 300;
+    const int Ore = 100, Wood = 200, Sword = 300, Book = 400;
     const long Alice = (7L << 32) | 1, AliceChar = (8L << 32) | 1, Bob = (9L << 32) | 2, BobChar = (10L << 32) | 2;
     static readonly DateTime T0 = new(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
 
@@ -41,16 +41,52 @@ public class DropTests
 
     // ---- GroundPile -----------------------------------------------------------------------------
 
+    static GroundPile P(int item = Ore, int amount = 10, int maxStack = 4000, int throwEntity = 0, bool flying = false,
+        bool instance = false, bool inventory = false, bool slotEntity = false) =>
+        new(new GroundPileId(1, 1, 1), item, amount, 0, 0, 0, 0, false, maxStack, throwEntity, throwEntity == 0 ? 0 : 1, flying,
+            instance, inventory, slotEntity);
+
     [Theory]
-    [InlineData(4000, 0, 0, true)]   // stackable, no item entity: takeable
-    [InlineData(1, 0, 0, false)]     // stack size 1: unique
-    [InlineData(0, 0, 0, false)]     // not in the item table: unique
-    [InlineData(4000, 55, 1, false)] // names its own item entity: unique
-    public void A_pile_is_takeable_only_when_stackable_and_without_an_item_entity(int maxStack, int entityIndex, int entityVersion, bool canTake)
+    // maxStack, own inventory, slot item entity, definition instance, throw entity -> route, unique
+    [InlineData(4000, false, false, false, 0, GroundTakeRoute.Copy, false)]           // stackable, no inventory: copied
+    [InlineData(4000, true, false, false, 0, GroundTakeRoute.PileInventory, false)]   // stackable with inventory: the game's move
+    [InlineData(1, true, false, false, 0, GroundTakeRoute.PileInventory, false)]      // a blueprint book: moved, not unique
+    [InlineData(1, true, true, true, 0, GroundTakeRoute.PileInventory, true)]         // gear or a jewel: moved with its entity
+    [InlineData(1, false, false, false, 0, GroundTakeRoute.None, false)]              // a book on a pile with no inventory: no route
+    [InlineData(1, false, false, true, 0, GroundTakeRoute.None, true)]                // gear with no inventory: no route
+    [InlineData(4000, false, false, true, 0, GroundTakeRoute.None, true)]             // stacks, but per-copy state: no copy
+    [InlineData(4000, false, false, false, 55, GroundTakeRoute.None, true)]           // throw names an item entity: no copy
+    public void A_pile_route_follows_its_own_inventory_then_whether_a_copy_is_safe(int maxStack, bool inventory, bool slotEntity,
+        bool instance, int throwEntity, GroundTakeRoute route, bool unique)
     {
-        var p = new GroundPile(new GroundPileId(1, 1, 1), Ore, 10, 0, 0, 0, 0, false, maxStack, entityIndex, entityVersion);
-        Assert.Equal(canTake, p.CanTake);
-        Assert.Equal(!canTake, p.IsUnique);
+        var p = P(maxStack: maxStack, inventory: inventory, slotEntity: slotEntity, instance: instance, throwEntity: throwEntity);
+        Assert.Equal(route, p.Route);
+        Assert.Equal(unique, p.IsUnique);
+        Assert.Equal(route != GroundTakeRoute.None, p.CanTake);
+        Assert.Equal(route, GroundTakeRules.Route(inventory, unique, maxStack));
+    }
+
+    [Fact]
+    public void A_landed_gear_pile_stays_unique_through_its_inventory_slot()
+    {
+        // While the throw runs, the throw component names the item entity; once landed, the pile's
+        // own inventory slot does.
+        var flying = P(Sword, 1, 1, throwEntity: 55, flying: true, inventory: true);
+        var landed = P(Sword, 1, 1, inventory: true, slotEntity: true);
+        Assert.True(flying.IsUnique);
+        Assert.False(flying.CanTake);
+        Assert.Equal(0, landed.ItemEntityIndex);
+        Assert.True(landed.HasItemEntity);
+        Assert.True(landed.IsUnique);
+        Assert.True(landed.CanTake);
+        Assert.Contains("own-inventory", landed.ToString());
+        Assert.Contains("item-entity", landed.ToString());
+        var book = P(Book, 1, 1, inventory: true);
+        Assert.False(book.IsUnique);
+        Assert.True(book.CanTake);
+        Assert.Contains("not-stackable", book.ToString());
+        Assert.False(P(999, 1, 0, inventory: true).CanTake); // not in the item table
+        Assert.Contains("unknown-item", P(999, 1, 0).ToString());
     }
 
     [Fact]
@@ -67,10 +103,11 @@ public class DropTests
     public void Take_refusals_come_in_a_fixed_order()
     {
         string? Ref(bool none = false, bool stale = false, bool target = false, int req = 5, bool exists = true, bool removing = false,
-            int amount = 10, bool flying = false, bool entity = false, bool known = true, int max = 100) =>
-            GroundTakeRules.Refusal(none, stale, target, req, exists, removing, amount, flying, entity, known, max);
+            int amount = 10, bool flying = false, bool known = true, GroundTakeRoute route = GroundTakeRoute.Copy) =>
+            GroundTakeRules.Refusal(none, stale, target, req, exists, removing, amount, flying, known, route);
 
         Assert.Null(Ref());
+        Assert.Null(Ref(route: GroundTakeRoute.PileInventory));
         Assert.Equal(GroundTakeRules.NoPile, Ref(none: true, stale: true, req: 0));
         Assert.Equal(GroundTakeRules.NoTarget, Ref(target: true, req: 0));
         Assert.Equal(GroundTakeRules.BadAmount, Ref(req: 0, stale: true));
@@ -78,10 +115,38 @@ public class DropTests
         Assert.Equal(GroundTakeRules.Gone, Ref(exists: false, removing: true));
         Assert.Equal(GroundTakeRules.Removing, Ref(removing: true, amount: 0));
         Assert.Equal(GroundTakeRules.Empty, Ref(amount: 0, flying: true));
-        Assert.Equal(GroundTakeRules.InFlight, Ref(flying: true, entity: true));
-        Assert.Equal(GroundTakeRules.ItemEntity, Ref(entity: true, known: false));
-        Assert.Equal(GroundTakeRules.UnknownItem, Ref(known: false, max: 1));
-        Assert.Equal(GroundTakeRules.NotStackable, Ref(max: 1));
+        Assert.Equal(GroundTakeRules.InFlight, Ref(flying: true, known: false, route: GroundTakeRoute.None));
+        Assert.Equal(GroundTakeRules.UnknownItem, Ref(known: false, route: GroundTakeRoute.None));
+        Assert.Equal(GroundTakeRules.NoPileInventory, Ref(route: GroundTakeRoute.None));
+    }
+
+    [Theory]
+    [InlineData(1, 0, 0)]  // the only book moved: ItemAmount 0, pile removed
+    [InlineData(3, 2, 2)]  // part of a stack moved: the rest stays, the pile stays
+    [InlineData(0, 1, 1)]  // nothing moved (bag full): untouched, not removed
+    [InlineData(0, 0, 0)]
+    [InlineData(2, -1, 0)] // a bad read-back is clamped to 0
+    public void After_a_move_the_pile_amount_is_what_its_inventory_still_holds(int moved, int left, int newAmount)
+    {
+        var (amount, remove) = GroundTakeRules.AfterMove(moved, left);
+        Assert.Equal(newAmount, amount);
+        Assert.Equal(moved > 0 && newAmount == 0, remove);
+    }
+
+    [Fact]
+    public void Remove_is_idempotent_stale_safe_and_refuses_a_pile_with_items()
+    {
+        (string? R, bool Done) Check(bool none = false, bool stale = false, bool exists = true, bool pile = true, bool removing = false,
+            int amount = 0, int units = 0) => GroundTakeRules.RemoveCheck(none, stale, exists, pile, removing, amount, units);
+
+        Assert.Equal((null, false), Check());                                         // empty pile: remove it
+        Assert.Equal((null, true), Check(exists: false));                              // already gone: done
+        Assert.Equal((null, true), Check(removing: true, amount: 3));                  // being removed: done
+        Assert.Equal((GroundTakeRules.StalePile, false), Check(stale: true, exists: false));
+        Assert.Equal((GroundTakeRules.NoPile, false), Check(none: true));
+        Assert.Equal((GroundTakeRules.Gone, false), Check(pile: false));               // not an item pile
+        Assert.Equal((GroundTakeRules.HoldsItems, false), Check(amount: 1));
+        Assert.Equal((GroundTakeRules.HoldsItems, false), Check(units: 1));            // ItemAmount 0, inventory not empty
     }
 
     [Theory]
@@ -467,10 +532,13 @@ public class DropTests
         Assert.False(flying.CanTake);
         Assert.Contains("in-flight", flying.ToString());
         Assert.Equal(GroundTakeRules.InFlight,
-            GroundTakeRules.Refusal(false, false, false, 5, true, false, 10, true, false, true, 4000));
+            GroundTakeRules.Refusal(false, false, false, 5, true, false, 10, true, true, GroundTakeRoute.Copy));
         // Empty and removing piles are refused before the flight check; the item checks come after it.
-        Assert.Equal(GroundTakeRules.Empty, GroundTakeRules.Refusal(false, false, false, 5, true, false, 0, true, false, true, 4000));
-        Assert.Equal(GroundTakeRules.InFlight, GroundTakeRules.Refusal(false, false, false, 5, true, false, 10, true, true, false, 1));
+        Assert.Equal(GroundTakeRules.Empty, GroundTakeRules.Refusal(false, false, false, 5, true, false, 0, true, true, GroundTakeRoute.Copy));
+        Assert.Equal(GroundTakeRules.InFlight, GroundTakeRules.Refusal(false, false, false, 5, true, false, 10, true, false, GroundTakeRoute.None));
+        // A book or jewel in flight is refused for the flight, even with its own inventory.
+        Assert.Equal(GroundTakeRules.InFlight, GroundTakeRules.Refusal(false, false, false, 1, true, false, 1, true, true, GroundTakeRoute.PileInventory));
+        Assert.False(new GroundPile(new GroundPileId(1, 1, 1), Book, 1, 0, 0, 0, 0, false, 1, inFlight: true, hasOwnInventory: true).CanTake);
         Assert.Contains("in flight", GroundTakeRules.InFlight);
     }
 

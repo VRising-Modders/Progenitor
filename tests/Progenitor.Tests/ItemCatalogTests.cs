@@ -349,6 +349,50 @@ public class ItemCatalogTests
         Assert.False(ItemCatalogFacts.TryPick(false, default, false, default, true, out _));
     }
 
+    // ---- instance entity (ItemData.Entity) ---------------------------------------------------------
+
+    [Theory]
+    [InlineData(0, 0, false)]  // Entity.Null: the game's add leaves the slot without an item entity
+    [InlineData(812, 1, true)] // set: the add instantiates it for the slot
+    [InlineData(0, 1, true)]   // any non-null half counts, as in the game's test
+    [InlineData(5, 0, true)]
+    public void Instance_entity_is_item_data_entity_not_null(int index, int version, bool expected) =>
+        Assert.Equal(expected, ItemInstanceRule.FromItemDataEntity(index, version));
+
+    [Fact]
+    public void Instance_entity_comes_from_the_table_row_first_then_the_prefab_then_assumes_one()
+    {
+        // The table row is what the game's add reads: it wins over the prefab in both directions.
+        Assert.False(ItemInstanceRule.Pick(inTable: true, tableEntitySet: false, prefabRead: true, prefabEntitySet: true));
+        Assert.True(ItemInstanceRule.Pick(inTable: true, tableEntitySet: true, prefabRead: true, prefabEntitySet: false));
+        Assert.True(ItemInstanceRule.Pick(inTable: true, tableEntitySet: true, prefabRead: false, prefabEntitySet: false));
+        // No row (an applied custom item the client table missed): the prefab's own field.
+        Assert.False(ItemInstanceRule.Pick(false, false, true, false));
+        Assert.True(ItemInstanceRule.Pick(false, false, true, true));
+        // Nothing read: the conservative answer.
+        Assert.True(ItemInstanceRule.Pick(false, false, false, false));
+    }
+
+    [Fact]
+    public void Catalog_entries_carry_the_instance_flag_independent_of_stack_size()
+    {
+        const int Book = 1383064284, Sword = 3000, Jewel = 3001, Ore = 3002;
+        var s = new FakeSource();
+        // A blueprint book: stack size 1, ItemType Tech (5), category 4608, no instance entity.
+        s.Rows.Add(new ItemCatalogRow(Book, "Item_Ingredient_Book_Structure_Carpets_T01", null, 1, 4608, 5, false, hasInstanceEntity: false));
+        s.Rows.Add(new ItemCatalogRow(Sword, "Item_Weapon_Sword_T01_Bone", null, 1, 1, 2, false, hasInstanceEntity: true));
+        s.Rows.Add(new ItemCatalogRow(Jewel, "Item_Jewel_Test", null, 1, 0, 8, false, hasInstanceEntity: true));
+        s.Rows.Add(new ItemCatalogRow(Ore, "Item_Ingredient_Mineral_Test", null, 500, 0x10, 0, false));
+        var cache = new ItemCatalogCache(s);
+
+        Assert.False(cache.Find(Book)!.HasInstanceEntity);
+        Assert.Equal(1, cache.Find(Book)!.MaxAmount);
+        Assert.True(cache.Find(Sword)!.HasInstanceEntity);
+        Assert.True(cache.Find(Jewel)!.HasInstanceEntity);
+        Assert.False(cache.Find(Ore)!.HasInstanceEntity);
+        Assert.False(new ItemCatalogEntry(1, "Item_A", null, 1, 0, 0, false).HasInstanceEntity);
+    }
+
     [Fact]
     public void Item_data_edits_bump_the_catalog_version()
     {

@@ -48,18 +48,42 @@ public sealed class PluginDrops
 
     /// <summary>
     /// Move up to <paramref name="amount"/> units from the pile into <paramref name="into"/> (a player's
-    /// bag through <c>ctx.Inventory.Of(character)</c>, or any other inventory). The inventory add runs
-    /// first (<c>ctx.Inventory.TryAdd</c>, partial allowed); the pile then shrinks by exactly what the
-    /// inventory read back as added, or is emptied and removed with the game's replicated destroy.
-    /// Refused (nothing touched): a stale or empty handle, amount below 1, a pile that is gone, being
-    /// removed or empty, a pile with its own item entity, an item that does not stack or that the server
-    /// item table does not know. Only stackable items are taken: no proven path moves a unique item's
-    /// own entity into a bag yet.
+    /// bag through <c>ctx.Inventory.Of(character)</c>, or any other inventory). Partial takes allowed.
+    ///
+    /// <para><b>A pile with its own inventory</b> (<see cref="GroundPile.HasOwnInventory"/>; the
+    /// game's item pile holds the real item there): the game's slot move out of that inventory
+    /// (<c>ctx.Inventory.Transfer</c>), so gear, jewels and books arrive as the very copy that dropped,
+    /// item entity and rolled stats included. <c>ItemAmount</c> then becomes what the pile's inventory
+    /// still holds, as the game's own pickup writes it. Nothing moved (bag full): <c>Nothing</c>, pile
+    /// untouched. Part moved: <c>Partial</c>, the pile stays with the rest.</para>
+    ///
+    /// <para><b>A pile without one</b>: a stackable item with no per-copy state is added fresh
+    /// (<c>ctx.Inventory.TryAdd</c>) and the pile shrinks by what the inventory read back as added.
+    /// Anything else is refused (<see cref="GroundTakeRoute.None"/>).</para>
+    ///
+    /// <para>An emptied pile is removed with the game's replicated destroy. Refused (nothing
+    /// touched): a stale or empty handle, amount below 1, a pile that is gone, being removed, empty or
+    /// in flight, an item the server item table does not know, and a pile with no route.
+    /// <see cref="GroundTakeResult.Route"/> says which route ran.</para>
     /// </summary>
     public GroundTakeResult TakeInto(GroundPileId pile, InventoryRef into, int amount)
     {
         Require(nameof(TakeInto));
         return GroundPiles.TakeInto(pile, into, amount);
+    }
+
+    /// <summary>
+    /// Remove a pile that holds nothing, with the game's replicated destroy (the removal reaches
+    /// every client). True when the pile was removed now, or was already gone or being removed (the
+    /// call is idempotent). False with a reason for a stale handle (from an earlier world load), an
+    /// entity that is not an item pile, or a pile that still holds units in <c>ItemAmount</c> or its
+    /// own inventory: take them first with <see cref="TakeInto"/>. <c>TakeInto</c> already removes
+    /// the piles it empties; this is for a pile emptied another way.
+    /// </summary>
+    public bool Remove(GroundPileId pile, out string reason)
+    {
+        Require(nameof(Remove));
+        return GroundPiles.Remove(pile, out reason);
     }
 
     /// <summary>
