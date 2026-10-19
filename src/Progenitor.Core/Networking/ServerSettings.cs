@@ -105,7 +105,9 @@ public static partial class ServerSettings
             throw new ArgumentException("Server-editable plugin ids, sections and keys cannot contain '/'.");
         var id = pluginId + "/" + entry.Definition.Section + "/" + entry.Definition.Key;
         ServerSettingsWire.CheckText(id);
-        ServerSettingsWire.CheckText(SettingsEditors.Format(entry.BoxedValue));
+        // An item list may hold up to ItemLimitList.MaxEncodedBytes, more than this channel's text field: its stored
+        // value is not checked here. A PrSe answer about it carries no value when the value is too long (FitAnswer).
+        if (!ItemListSettings.Has(id)) ServerSettingsWire.CheckText(SettingsEditors.Format(entry.BoxedValue));
         if (Entries.TryGetValue(id, out var previous)) previous.Dispose();
         var registration = new Registration(id, pluginId, entry);
         Entries.Add(id, registration);
@@ -383,6 +385,15 @@ public static partial class ServerSettings
         // TEXTUNDO1 polish: trimmed before the length check, as the client does (a client that does not
         // trim cannot store a value the next cfg read would shorten).
         if (parsed is string untrimmed) parsed = UiCommitText.Trim(untrimmed);
+        // An item-list setting: the server's own rules decide it, and the canonical text is stored. Its size limit is
+        // the list's (ItemLimitList.MaxEncodedBytes), not a text row's.
+        if (parsed is string listText && ItemListSettings.TryGet(request.RowId, out var listRules))
+        {
+            if (!ItemListSettings.TryCanonical(listRules, listText, out var canonical, out var listError))
+                return new(false, current, listError);
+            parsed = canonical;
+        }
+        else
         // TEXTLIMIT1: the setting's own limit from the server's declaration (never one the client
         // sends), then the packet and ConfigSync byte limits (ServerSettingsLimits.Check).
         if (parsed is string sized && CheckText(request.RowId, sized) is { } tooLong)
@@ -403,6 +414,18 @@ public static partial class ServerSettings
     }
 
     internal const string ControlCharactersError = "The value contains control characters.";
+
+    /// <summary>
+    /// A result as the PrSe answer can carry it: an item list's value can be longer than the answer's text field
+    /// (<see cref="ServerSettingsWire.MaxTextBytes"/>), and is then left out (empty; a success stays a success, a
+    /// refusal keeps its reason) instead of failing the answer. The client gets the value through ConfigSync or PrSt.
+    /// </summary>
+    internal static ServerSettingResult FitAnswer(ServerSettingResult result)
+    {
+        static bool Fits(string? s) => s == null || System.Text.Encoding.UTF8.GetByteCount(s) <= ServerSettingsWire.MaxTextBytes;
+        if (Fits(result.Value) && Fits(result.Error)) return result;
+        return new(result.Success, "", result.Success ? "" : Fits(result.Error) ? result.Error : "The change was refused.");
+    }
 
     /// <summary>
     /// TEXTLIMIT1: true for a refusal of the value itself (too long, too many bytes, control
@@ -603,7 +626,7 @@ public static partial class ServerSettings
                 currentUser.IsAdmin, Progenitor.Install.ServerAdminList.AuthorizeShared(currentUser.PlatformId, currentUser.IsAdmin));
             var result = Apply(request, Handshake.UserAnswerStatus(currentUser.Index) == "ok"
                 && PeerAllows(currentUser.Index, request.RowId), actor);
-            var response = request.WithResult(result);
+            var response = request.WithResult(FitAnswer(result));
             var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
             if (bootstrap != null) CustomEvents.SendToUser(bootstrap, currentUser.Index, EventId, ServerSettingsWire.Encode(response, true));
         }

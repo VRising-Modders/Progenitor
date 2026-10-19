@@ -200,6 +200,9 @@ public sealed class SettingsRow
         return this;
     }
 
+    /// <summary>The registered or builder presentation, or null (a row merged with a server definition keeps its words).</summary>
+    internal SettingPresentation? Presentation => _presentation;
+
     /// <summary>True when a registered presentation names the control explicitly, rather than the type deciding it.</summary>
     internal bool HasPresentationHint => _presentation?.EditorHint != null;
 

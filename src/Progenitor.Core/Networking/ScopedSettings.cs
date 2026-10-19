@@ -38,6 +38,7 @@ internal static partial class ScopedSettings
         internal ulong Account;
         internal int Revision = -1;
         internal bool Admin;
+        internal bool Presentation; // declared Capability.ScopedSettingsPresentation: sent version 2 rows
         internal Guid Generation;
         internal Guid PreviousGeneration; // writes sent before the client received the newer snapshot
         internal double SendStarted;
@@ -60,6 +61,16 @@ internal static partial class ScopedSettings
         _disconnect = EventBus.On<PlayerDisconnected>(ev => { if (Peers.Remove(ev.User.Index)) CountSending(); });
         _world = EventBus.On<WorldReady>(_ => { Peers.Clear(); _sending = 0; ClearClient(); });
         Plugin.Frame += Tick;
+        if (!Plugin.IsServerProcess)
+            Progenitor.Ui.ScopedSettingsRows.ServerMods = guid =>
+            {
+                // The server's feature table lists every mod it runs (cleared on disconnect).
+                var table = ModCompatNet.PeerTables.Get(ModCompatNet.ServerPeer);
+                if (table == null || !RemoteInstallEvents.ClientConnected()) return null;
+                if (table.Mods.ContainsKey(guid)) return true;
+                return table.More ? null : false;
+            };
+        if (!Plugin.IsServerProcess) ModCompatNet.PeerTables.Changed += OnServerTable;
         _installed = true;
     }
 
@@ -69,7 +80,10 @@ internal static partial class ScopedSettings
         _disconnect?.Dispose(); _disconnect = null; _world?.Dispose(); _world = null;
         CustomEvents.RemoveHandler(EventId, OnResponse); CustomEvents.RemoveClientHandler(EventId, OnRequest);
         foreach (var row in new List<Registration>(Entries.Values)) row.Dispose();
-        Stores.Clear(); Peers.Clear(); _sending = 0; ClearClient(); Client.ClearSubscribers(); _installed = false;
+        Stores.Clear(); Peers.Clear(); _sending = 0; ClearClient(); Client.ClearSubscribers(); ResetPresentation();
+        Progenitor.Ui.ScopedSettingsRows.ServerMods = null;
+        ModCompatNet.PeerTables.Changed -= OnServerTable;
+        _installed = false;
     }
 
     internal static void OnHandshakeOk(World? world, Entity entity, Handshake.Capability capabilities)
@@ -77,9 +91,19 @@ internal static partial class ScopedSettings
         if (!_installed || world == null || !world.IsCreated || (capabilities & Handshake.Capability.ScopedSettings) == 0 || !world.EntityManager.HasComponent<User>(entity)) return;
         var user = world.EntityManager.GetComponentData<User>(entity);
         if (!user.IsConnected || user.PlatformId == 0) return;
-        Peers[user.Index] = new Peer { Entity = entity, Account = user.PlatformId };
+        Peers[user.Index] = new Peer
+        {
+            Entity = entity, Account = user.PlatformId,
+            Presentation = (capabilities & Handshake.Capability.ScopedSettingsPresentation) != 0,
+        };
         // Sent on the next frame, after the existing handshake/config/catalog sequence.
         _nextPoll = 0;
+    }
+
+    /// <summary>The server's feature table (its mod list) changed: re-evaluate rules that ask <c>ServerHasMod</c>.</summary>
+    private static void OnServerTable(int peer)
+    {
+        if (peer == ModCompatNet.ServerPeer) Progenitor.Ui.ModsMenu.MarkScopedValuesDirty();
     }
 
     private static void ClearClient() => Client.Clear("Disconnected from the server.");
@@ -114,6 +138,11 @@ internal static partial class ScopedSettings
         {
             bool editable = row.Schema.Personal || ServerSettings.IsEditable(row.Schema.Id);
             if (editable != row.Schema.Editable) { row.Schema.Editable = editable; _schemaRevision++; }
+        }
+        if (Peers.Count > 0)
+        {
+            try { CheckPresentation(now); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Scoped settings presentation: " + e.Message); }
         }
         StalePeers.Clear();
         foreach (var pair in Peers)
@@ -189,10 +218,8 @@ internal static partial class ScopedSettings
         {
             try
             {
-                var row = entry.Schema;
-                row.Value = entry.Read(peer.Account);
-                row.Editable = row.Personal || ServerSettings.IsEditable(row.Id);
-                rowPackets.Add(ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = generation, Row = row }));
+                var row = ForPeer(entry, peer.Account, peer.Presentation, Now());
+                rowPackets.Add(RowPacket(generation, row, peer.Presentation));
                 values[row.Id] = row.Value;
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("Setting omitted from catalog " + entry.Schema.Id + ": " + e.Message); }
@@ -212,7 +239,7 @@ internal static partial class ScopedSettings
             {
                 try
                 {
-                    entry.Schema.Value = entry.Read(peer.Account);
+                    entry.Schema.Value = SentValue(entry, peer.Account);
                     ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = peer.Generation, Row = entry.Schema });
                     peer.Revision = -1;
                 }
@@ -221,7 +248,7 @@ internal static partial class ScopedSettings
             }
             try
             {
-                string value = entry.Read(peer.Account);
+                string value = SentValue(entry, peer.Account);
                 if (peer.Values.TryGetValue(entry.Schema.Id, out var old) && value == old) continue;
                 peer.Outgoing.Enqueue(ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 4, Generation = peer.Generation, Id = entry.Schema.Id, Value = value, Personal = entry.Schema.Personal }));
                 peer.Values[entry.Schema.Id] = value;

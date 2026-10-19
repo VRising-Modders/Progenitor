@@ -35,7 +35,7 @@ namespace Progenitor.Ui;
 /// is not known to run on the joined server; <c>scope</c> declares the value local or server-set
 /// (<see cref="SettingScope.Server"/> also opts the synced entry into administrator edits).</para>
 /// </summary>
-public sealed class SettingsPageBuilder
+public sealed partial class SettingsPageBuilder
 {
     private readonly string _pluginId;
     private readonly List<PageSectionSpec> _sections = new();
@@ -320,6 +320,75 @@ public sealed class SettingsPageBuilder
         last.Options.CounterLimit = limit;
         return this;
     }
+
+    /// <summary>
+    /// Show the row added last only while <paramref name="condition"/> holds. Unlike a <c>showIf</c> delegate the rule
+    /// is data: a published setting carries it to clients without the mod's DLL, which evaluate it against the values
+    /// the server sent. Combined with the row's <c>showIf</c> (both must hold); calling it twice requires both rules.
+    /// Throws when no row was added yet or the last one is a divider.
+    /// </summary>
+    public SettingsPageBuilder ShowWhen(SettingCondition condition)
+    {
+        if (condition == null) throw new ArgumentNullException(nameof(condition));
+        var last = RuleTarget(nameof(ShowWhen));
+        var previous = last.Options.ShowIf;
+        last.Options.ShowWhen = last.Options.ShowWhen == null ? condition : last.Options.ShowWhen & condition;
+        last.Options.ShowIf = previous == null ? () => Holds(condition) : () => previous() && Holds(condition);
+        return this;
+    }
+
+    /// <summary>As <see cref="ShowWhen"/>, for graying the row (<c>enableIf</c>).</summary>
+    public SettingsPageBuilder EnableWhen(SettingCondition condition)
+    {
+        if (condition == null) throw new ArgumentNullException(nameof(condition));
+        var last = RuleTarget(nameof(EnableWhen));
+        var previous = last.Options.EnableIf;
+        last.Options.EnableWhen = last.Options.EnableWhen == null ? condition : last.Options.EnableWhen & condition;
+        last.Options.EnableIf = previous == null ? () => Holds(condition) : () => previous() && Holds(condition);
+        return this;
+    }
+
+    /// <summary>Shorthand for <c>ShowWhen(SettingCondition.Is(setting, value))</c>.</summary>
+    public SettingsPageBuilder ShowIf(ConfigEntryBase setting, object value) => ShowWhen(SettingCondition.Is(setting, value));
+
+    /// <summary>Shorthand for <c>EnableWhen(SettingCondition.Is(setting, value))</c>.</summary>
+    public SettingsPageBuilder EnableIf(ConfigEntryBase setting, object value) => EnableWhen(SettingCondition.Is(setting, value));
+
+    private PageItemSpec RuleTarget(string method)
+    {
+        var last = Last ?? throw new InvalidOperationException("Add a row before " + method + "().");
+        if (last.Kind == ModSettingsItemKind.Divider)
+            throw new InvalidOperationException(method + "() applies to a setting, button or info line, not a divider.");
+        return last;
+    }
+
+    /// <summary>Local evaluation of an authored rule: the bound entry, else this plugin's entry or received value by key.</summary>
+    private bool Holds(SettingCondition condition) =>
+        condition.Evaluate(c => ScopedSettingsRows.LocalValue(_pluginId, c), id => ScopedSettingsRows.ServerFact(_pluginId, id));
+
+    /// <summary>
+    /// A published setting placed by row id (<c>PerPlayer</c> settings and item lists; the typed overloads in
+    /// <c>ModSettingsPage.Player.cs</c>). Drawn while the joined server provides it; nothing otherwise.
+    /// </summary>
+    internal SettingsPageBuilder AddScoped(
+        string rowId, SettingControl? control, SettingPresentation? presentation, string? label, string? help,
+        Func<bool>? showIf, Func<bool>? enableIf)
+    {
+        if (string.IsNullOrWhiteSpace(rowId)) throw new ArgumentException("A setting id is required.", nameof(rowId));
+        var options = Options(label, help, showIf, enableIf, false, false, null, null);
+        options.Control = control;
+        options.ScopedRowId = rowId;
+        Current.Items.Add(new PageItemSpec(ModSettingsItemKind.Setting) { Presentation = presentation, Options = options });
+        return this;
+    }
+
+    /// <summary>The number presentation of a typed overload (min, max, step, units).</summary>
+    internal static SettingPresentation NumberHints(bool slider, double? min, double? max, double? step, string? units) =>
+        NumberPresentation(slider ? SettingsEditorHint.Slider : SettingsEditorHint.Numeric, min, max, step, units);
+
+    /// <summary>The choice presentation of a typed overload.</summary>
+    internal static SettingPresentation? ChoiceHints(bool dropdown, IReadOnlyList<string>? choices, IReadOnlyList<string>? labels) =>
+        ChoicePresentation(dropdown ? SettingsEditorHint.Dropdown : null, choices, labels);
 
     /// <summary>A thin rule between groups of rows in the current section.</summary>
     public SettingsPageBuilder Divider()
@@ -723,6 +792,19 @@ internal sealed class ModSettingsPageRegistration : IDisposable
                             ModSettingsPages.RegisterServerScope(this, PluginId, item, logMismatch: false);
                         items.Add(ModSettingsItem.ForRow(ModSettingsLayout.RowOf(PluginId, item.Entry, item.Presentation), item.Options));
                         break;
+                    case ModSettingsItemKind.Setting when item.Options.ScopedRowId != null:
+                        // A published setting placed by id: drawn from the server's definition while it has one.
+                        if (ScopedSettingsRows.Placed(item) is { } placed) items.Add(placed);
+                        else
+                        {
+                            // Not provided now: claim the id (this side's cfg row of a server-wide list is not drawn
+                            // raw in the automatic sections) and draw nothing.
+                            var claim = item.Options.Copy();
+                            claim.ClaimOnly = true;
+                            claim.ShowIf = () => false;
+                            items.Add(ModSettingsItem.ForInfo(item.Id, item.Options.Label ?? item.Id, () => "", 0, claim));
+                        }
+                        break;
                     case ModSettingsItemKind.Setting when item.KeybindId != null:
                     {
                         keybinds ??= KeybindRows();
@@ -832,6 +914,35 @@ internal static class ModSettingsPages
 
     internal static int Count => Pages.Count;
 
+    /// <summary>Changes whenever a page is registered or dropped (the server re-derives published presentation).</summary>
+    internal static int Epoch { get; private set; }
+
+    /// <summary>
+    /// Where <paramref name="pluginId"/>'s page places the setting <paramref name="rowId"/>: the first row whose id it is,
+    /// its section's title and index, and the row's index on the page (counting every item). False when no page places it.
+    /// </summary>
+    internal static bool TryPlacement(string pluginId, string rowId, out PageItemSpec item, out string sectionTitle,
+        out int sectionOrder, out int rowOrder)
+    {
+        item = null!; sectionTitle = ""; sectionOrder = -1; rowOrder = -1;
+        if (!TryGet(pluginId, out var page) || page == null) return false;
+        int n = 0;
+        for (int i = 0; i < page.SectionSpecs.Count; i++)
+        {
+            var section = page.SectionSpecs[i];
+            foreach (var it in section.Items)
+            {
+                if (it.Kind == ModSettingsItemKind.Setting && string.Equals(it.Id, rowId, StringComparison.Ordinal))
+                {
+                    item = it; sectionTitle = section.Title; sectionOrder = i; rowOrder = n;
+                    return true;
+                }
+                n++;
+            }
+        }
+        return false;
+    }
+
     /// <summary>
     /// Run <paramref name="build"/> once and register its page for <paramref name="pluginId"/>. A
     /// builder that throws registers nothing and the exception reaches the caller. Once per plugin:
@@ -862,6 +973,7 @@ internal static class ModSettingsPages
                     ModSettingsItemKind.Link => pluginId + "/link/" + item.LinkKey,
                     ModSettingsItemKind.Admin => item.Admin!.SettingId,
                     _ when item.AllKeybinds => builder.NextId("keybinds"),
+                    _ when item.Options.ScopedRowId != null => item.Options.ScopedRowId,
                     _ when item.RefKey != null => pluginId + "/" + item.RefSection + "/" + item.RefKey,
                     _ => item.Entry != null
                         ? pluginId + "/" + item.Entry.Definition.Section + "/" + item.Entry.Definition.Key
@@ -916,6 +1028,7 @@ internal static class ModSettingsPages
                 + "server's handshake request never names it and those rows stay grayed on every server.");
 
         Pages[pluginId] = registration;
+        Epoch++;
         ModsMenu.NotifySettingsPageChanged(pluginId);
         return registration;
     }
@@ -993,6 +1106,7 @@ internal static class ModSettingsPages
         if (registration == null) return;
         if (Pages.TryGetValue(registration.PluginId, out var current) && ReferenceEquals(current, registration))
             Pages.Remove(registration.PluginId);
+        Epoch++;
         ModsMenu.NotifySettingsPageRemoved(registration.PluginId);
     }
 

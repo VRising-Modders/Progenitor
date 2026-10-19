@@ -94,6 +94,9 @@ internal sealed class ScopedSettingsSnapshot
         Section = r.Section, Key = r.Key, Help = r.Help, Type = r.Type,
         Default = r.Default, Value = r.Value, Personal = r.Personal, Editable = r.Editable,
         Choices = r.Choices == null ? Array.Empty<string>() : (string[])r.Choices.Clone(),
-        Min = r.Min, Max = r.Max, MaxLength = r.MaxLength,
+        Min = r.Min, Max = r.Max, MaxLength = r.MaxLength, Presentation = r.Presentation?.Copy(),
     };
+
+    /// <summary>A detached copy of <paramref name="r"/> (the server's per-snapshot record).</summary>
+    internal static ScopedSettingRecord Clone(ScopedSettingRecord r) => Copy(r);
 }

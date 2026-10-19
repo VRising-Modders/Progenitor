@@ -215,7 +215,7 @@ public static partial class Handshake
         /// <summary>
         /// JOINADMIN1 (join flow stage 3): this client handles the admin "Players joining" channel
         /// (<c>'PrJa'</c>). The server sends its hello on that id after an ok handshake only to a client that
-        /// declared this. (Bits 16 and 32 are still free; 8 is <see cref="MaterialViews"/>.)
+        /// declared this. (Bit 32 is still free; 8 is <see cref="MaterialViews"/>, 16 <see cref="ScopedSettingsPresentation"/>.)
         /// </summary>
         JoinAdmin = 64,
 
@@ -362,6 +362,14 @@ public static partial class Handshake
 
         /// <summary>Server-delivered setting definitions and personal preferences (PrSt).</summary>
         ScopedSettings = 1073741824,
+
+        /// <summary>
+        /// Client only, in its answer, together with <see cref="ScopedSettings"/>: this client reads PrSt version 2 rows,
+        /// which carry presentation hints (control, label, section and order, units, choice labels, show/enable rules,
+        /// item lists). The server sends version 2 rows only to a client that declared it; any other client is sent
+        /// version 1 rows and draws its default editors. Bit 16 was free (8 is <see cref="MaterialViews"/>, 32 stays free).
+        /// </summary>
+        ScopedSettingsPresentation = 16,
     }
 
     /// <summary>This Core's version for a refusal's text, or empty when it cannot be read.</summary>
@@ -407,7 +415,7 @@ public static partial class Handshake
         | Capability.CommandHints | Capability.PolicyRuleUpdates | Capability.ModFeatures | Capability.ModMessages
         | Capability.ItemStatSync | Capability.ItemLedgerChunks | Capability.ItemDefinitionPriority
         | Capability.VersionRanges | Capability.ProgenitorExact | Capability.ModExchange | Capability.MaterialCharacterCraft
-        | Capability.MaterialRefineView | Capability.ScopedSettings;
+        | Capability.MaterialRefineView | Capability.ScopedSettings | Capability.ScopedSettingsPresentation;
 
     /// <summary>
     /// Reserved row carrying <see cref="Capability"/>. Reserved like

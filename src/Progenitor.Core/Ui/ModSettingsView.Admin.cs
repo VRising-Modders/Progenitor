@@ -97,6 +97,28 @@ internal sealed partial class ModSettingsView
                 break;
             }
 
+            case AdminSettingKind.Slider:
+            {
+                // Scoped settings: the slider with its exact number box, as a local slider row; a settled drag is sent.
+                var slider = panel.SliderField(caption, (float)spec.SliderMin, (float)spec.SliderMax, (float)spec.Step,
+                    (float)AdminNumber(binding.ServerShown, spec));
+                void Show(string? shown)
+                {
+                    if (!slider.IsDisposed) slider.Value = (float)AdminNumber(shown, spec);
+                }
+
+                slider.OnChanged(v => SendAdmin(binding, spec, AdminNumberText(v, spec), Show));
+                binding.Editor = "slider";
+                binding.Apply = () => SendAdmin(binding, spec, AdminNumberText(slider.Value, spec), Show);
+                binding.Sync = () => SyncAdmin(binding, spec, Show);
+                handle = slider;
+                break;
+            }
+
+            case AdminSettingKind.ItemList:
+                handle = AddItemListRow(panel, binding, spec, caption);
+                break;
+
             case AdminSettingKind.Choice:
             {
                 // OPTIONHOVER1: the options' explanations are not drawn in the list; the column shows the hovered one's.
@@ -200,6 +222,21 @@ internal sealed partial class ModSettingsView
         _bindings.Add(binding);
         WatchHover(panel, binding);
         add(handle, RowSetting, (Func<object?>)(() => DescribeAdmin(binding, spec)));
+    }
+
+    /// <summary>A slider row's value as a number (the bounds' low end while the server has not said).</summary>
+    private static double AdminNumber(string? text, AdminSettingSpec spec) =>
+        double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && !double.IsNaN(v) && !double.IsInfinity(v)
+            ? Math.Max(spec.SliderMin, Math.Min(spec.SliderMax, v)) : spec.SliderMin;
+
+    /// <summary>A slider value as the server parses it: a whole number, or the step's precision.</summary>
+    internal static string AdminNumberText(double value, AdminSettingSpec spec)
+    {
+        if (spec.Integer) return ((long)Math.Round(value)).ToString(CultureInfo.InvariantCulture);
+        double step = spec.Step > 0 ? spec.Step : 0;
+        if (step > 0) value = spec.SliderMin + Math.Round((value - spec.SliderMin) / step) * step;
+        value = Math.Max(spec.SliderMin, Math.Min(spec.SliderMax, value));
+        return Math.Round(value, 6).ToString("R", CultureInfo.InvariantCulture);
     }
 
     /// <summary>The value a read-only admin row shows: the server's, as a person reads it, or <see cref="AdminUnknownValue"/>.</summary>
@@ -441,6 +478,8 @@ internal sealed partial class ModSettingsView
                 AdminSettingKind.Toggle => "toggle",
                 AdminSettingKind.Choice => spec.ChoiceRadio ? "radio" : "dropdown",
                 AdminSettingKind.Number => "number",
+                AdminSettingKind.Slider => "slider",
+                AdminSettingKind.ItemList => "itemlist",
                 _ => "text",
             },
             ["label"] = spec.Label,
@@ -479,6 +518,16 @@ internal sealed partial class ModSettingsView
             d["choices"] = new List<string>(spec.Choices);
             d["choiceLabels"] = new List<string>(spec.ChoiceLabels);
         }
+
+        if (spec.Kind == AdminSettingKind.Slider)
+        {
+            d["min"] = spec.SliderMin;
+            d["max"] = spec.SliderMax;
+            d["step"] = spec.Step;
+            d["units"] = spec.Units;
+        }
+
+        if (spec.Kind == AdminSettingKind.ItemList) AddItemListReadback(d, binding, spec);
 
         if (spec.Kind == AdminSettingKind.Number)
         {

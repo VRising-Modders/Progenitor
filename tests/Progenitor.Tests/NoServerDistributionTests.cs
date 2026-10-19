@@ -180,8 +180,9 @@ public sealed class NoServerDistributionTests : IDisposable
         // mod compatibility C1/C2 added ModFeatures (32768) and ModMessages (65536); items added ItemStatSync (131072),
         // ItemLedgerChunks (262144) and ItemDefinitionPriority (2097152); C3 added VersionRanges (8388608); C4 added
         // ProgenitorExact (67108864); requests and subscriptions added ModExchange (134217728); material sources added
-        // MaterialCharacterCraft (268435456) and MaterialRefineView (536870912); scoped settings added ScopedSettings (1073741824).
-        Assert.Equal("17ca7a7c7", row.Version);
+        // MaterialCharacterCraft (268435456) and MaterialRefineView (536870912); scoped settings added ScopedSettings (1073741824)
+        // and ScopedSettingsPresentation (16).
+        Assert.Equal("17ca7a7d7", row.Version);
 
         // The handshake and the client policy both ask the same question.
         string hs = SourcePin.ReadFile("src", "Progenitor.Core", "Networking", "Handshake.cs");

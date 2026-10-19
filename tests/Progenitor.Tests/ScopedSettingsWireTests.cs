@@ -90,7 +90,7 @@ public sealed class ScopedSettingsWireTests
     public void Rejects_unknown_version_kind_empty_guids_and_noncanonical_booleans()
     {
         var bytes = ScopedSettingsWire.Encode(Packet(1));
-        bytes[0] = 2;
+        bytes[0] = 3; // versions 1 and 2 decode; anything else is refused
         Assert.False(ScopedSettingsWire.TryDecode(bytes, true, out _));
         bytes[0] = 1; bytes[1] = 7;
         Assert.False(ScopedSettingsWire.TryDecode(bytes, true, out _));

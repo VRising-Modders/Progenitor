@@ -1360,6 +1360,7 @@ internal sealed partial class ModSettingsView
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: settings editor close threw: " + e.Message); }
         if (ReferenceEquals(Drawn, this)) Drawn = null;
         CloseAdminConfirm();
+        ReleaseItemLists();
         for (int i = 0; i < _requests.Count; i++)
         {
             try { _requests[i].Dispose(); }
@@ -3198,7 +3199,7 @@ internal sealed partial class ModSettingsView
     }
 
     /// <summary>What the page drew for one item, and its current state.</summary>
-    private sealed class ItemBinding
+    internal sealed class ItemBinding
     {
         internal ItemBinding(ModSettingsItem item, ModSettingsSection section, SettingControl control)
         {
