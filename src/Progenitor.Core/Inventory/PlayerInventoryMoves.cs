@@ -253,8 +253,9 @@ internal readonly struct MoveSlotRow
 /// <summary>What one inventory's update did to one item.</summary>
 internal readonly struct ItemMoveDelta
 {
-    internal ItemMoveDelta(int item, int @in, int @out, int within, int before, int after)
+    internal ItemMoveDelta(int item, int @in, int @out, int within, int before, int after, int outWithEntity = 0)
     {
+        OutWithEntity = outWithEntity;
         Item = item;
         In = @in;
         Out = @out;
@@ -269,6 +270,9 @@ internal readonly struct ItemMoveDelta
     internal int Within { get; }
     internal int Before { get; }
     internal int After { get; }
+
+    /// <summary>Units of <see cref="Out"/> that left in rows with their own item entity (gear, jewels).</summary>
+    internal int OutWithEntity { get; }
 }
 
 /// <summary>
@@ -371,7 +375,7 @@ internal sealed class PlayerMoveDiffer
             int @out = acc.EntityOut + Math.Max(0, -plain);
             int within = @in == 0 && @out == 0 ? acc.Within : 0;
             if (@in == 0 && @out == 0 && within == 0) continue;
-            into.Add(new ItemMoveDelta(item, @in, @out, within, acc.Before, acc.After));
+            into.Add(new ItemMoveDelta(item, @in, @out, within, acc.Before, acc.After, acc.EntityOut));
         }
     }
 

@@ -1049,3 +1049,35 @@ offset ComponentTypeInArchetypeTypeIndexOffset         = 0x0   : ComponentTypeIn
 offset InventoryBufferItemEntityOffset              = 0x0  : InventoryBuffer.ItemEntity                   # NetworkedEntity
 offset InventoryBufferMaxAmountOverrideOffset       = 0x14 : InventoryBuffer.MaxAmountOverride            # last field
 size   EntityStride                                 = 8    : Unity.Entities.Entity                       # Index, Version
+
+# ---- Drops: ground piles, bag drops and the drop prefabs (src/Progenitor.Core/Drops) --------------
+# Server. ctx.Drops reads a pile's item and amount and TakeInto writes the amount field alone through
+# the component overlay; the pile's own item entity, when its throw component carries one, is read and
+# never written. The bag-drop observer reads the whole-inventory drop's setting from the event. Each
+# field below matches between the server and client metadata.
+dump server
+offset ItemPickupItemIdOffset                       = 0x4  : ItemPickup.ItemId                            # PrefabGUID, one int
+offset ItemPickupItemAmountOffset                   = 0x8  : ItemPickup.ItemAmount                        # int; the only field TakeInto writes
+offset DropItemThrowDropItemItemEntityOffset        = 0x0  : DropItemThrowSystem.DropItem.ItemEntity      # Entity {Index, Version}
+offset ServerDropEntireInventoryEventSettingOffset  = 0x0  : DropEntireInventoryEvent.Setting             # DropEntireInventorySetting, int
+enum   DropEntireInventorySettingAll                = 0    : DropEntireInventorySetting.All
+enum   DropEntireInventorySettingExceptAnyEquipped  = 1    : DropEntireInventorySetting.ExceptAnyEquipped
+enum   DropEntireInventorySettingExceptEquippedInActionBar = 2 : DropEntireInventorySetting.ExceptEquippedInActionBar
+enum   DropEntireInventorySettingExceptAnyWeaponInActionBar = 3 : DropEntireInventorySetting.ExceptAnyWeaponInActionBar
+enum   DropEntireInventorySettingExceptAnyWeaponInActionBarOrAnyEquipped = 4 : DropEntireInventorySetting.ExceptAnyWeaponInActionBarOrAnyEquipped
+enum   DropEntireInventorySettingExceptAnythingInActionBar = 5 : DropEntireInventorySetting.ExceptAnythingInActionBar
+enum   DropEntireInventorySettingExceptAnythingInActionBarOrEquipped = 6 : DropEntireInventorySetting.ExceptAnythingInActionBarOrEquipped
+# RootPrefabCollection (the prefab table singleton), read raw at these offsets, never written.
+offset RootPrefabDropItemOffset                     = 0x48 : RootPrefabCollection.DropItemPrefabGUID
+offset RootPrefabDeathContainerOffset               = 0x54 : RootPrefabCollection.DeathContainerPrefabGUID
+offset RootPrefabPlayerDeathContainerAnyoneOffset   = 0x58 : RootPrefabCollection.PlayerDeathContainerAnyonePrefabGUID
+offset RootPrefabPlayerDeathContainerClanMembersOffset = 0x5C : RootPrefabCollection.PlayerDeathContainerClanMembersPrefabGUID
+offset RootPrefabPlayerDeathContainerOnlySelfOffset = 0x60 : RootPrefabCollection.PlayerDeathContainerOnlySelfPrefabGUID
+offset RootPrefabPlayerInventoryDropContainerOffset = 0x68 : RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID
+dump client
+offset ClientRootPrefabDropItemOffset                     = 0x48 : RootPrefabCollection.DropItemPrefabGUID
+offset ClientRootPrefabDeathContainerOffset               = 0x54 : RootPrefabCollection.DeathContainerPrefabGUID
+offset ClientRootPrefabPlayerDeathContainerAnyoneOffset   = 0x58 : RootPrefabCollection.PlayerDeathContainerAnyonePrefabGUID
+offset ClientRootPrefabPlayerDeathContainerClanMembersOffset = 0x5C : RootPrefabCollection.PlayerDeathContainerClanMembersPrefabGUID
+offset ClientRootPrefabPlayerDeathContainerOnlySelfOffset = 0x60 : RootPrefabCollection.PlayerDeathContainerOnlySelfPrefabGUID
+offset ClientRootPrefabPlayerInventoryDropContainerOffset = 0x68 : RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID

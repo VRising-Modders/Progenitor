@@ -143,6 +143,11 @@
     <!-- ctx.Inventory.OnPlayerMove: the diff, attribution and delivery hub; PlayerMoveRuntime.cs (the
          hooks and raw reads) is not on this list. -->
     <Compile Include="..\..\src\Progenitor.Core\Inventory\PlayerInventoryMoves.cs" Link="Linked\PlayerInventoryMoves.cs" />
+    <!-- ctx.Drops and ctx.Inventory.OnGroundDrop / OnDropAll: the types, the take rules, the bag-drop
+         batch, the container matcher and the delivery hub; DropRuntime.cs, GroundPiles.cs and
+         PluginDrops.cs (the hooks, raw reads and the write) are not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Drops\DropTypes.cs" Link="Linked\DropTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Drops\DropLogic.cs" Link="Linked\DropLogic.cs" />
     <!-- ctx.Inventory.ChangeStamp: the stamp logic and the raw-read checks; ChunkVersions.cs and
          UnityInventoryStampSource.cs (the pointer walk and the game calls) are not on this list. -->
     <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryStamps.cs" Link="Linked\InventoryStamps.cs" />

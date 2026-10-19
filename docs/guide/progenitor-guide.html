@@ -1066,7 +1066,7 @@ window.Show();` },
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-compatibility.md">mod-compatibility.md</a>.</p>` } ] },
     { id: "developers/world", role: "developers", title: "Castles, Inventory, Materials", pages: [
       { id: "overview", title: "Castles, Inventory, Materials", soon: true,
-        html: `<ol class="outline"><li><code>ctx.Castles</code>: [[territory|plots]], tiles, buildings, the [[castle-heart|castle heart]]</li><li><code>ctx.Inventory</code> and [[container-id|<code>ContainerId</code>]]</li><li>Players' item moves in containers: <code>ctx.Inventory.OnPlayerMove</code></li><li>[[material-source|<code>ctx.MaterialSource</code>]]</li><li>Buttons on game panels</li><li>Entity references across world loads</li></ol>
+        html: `<ol class="outline"><li><code>ctx.Castles</code>: [[territory|plots]], tiles, buildings, the [[castle-heart|castle heart]]</li><li><code>ctx.Inventory</code> and [[container-id|<code>ContainerId</code>]]</li><li>Players' item moves in containers: <code>ctx.Inventory.OnPlayerMove</code></li><li>Loot on the ground: <code>ctx.Drops</code>; what players drop from their bag: <code>ctx.Inventory.OnGroundDrop</code> and <code>OnDropAll</code></li><li>[[material-source|<code>ctx.MaterialSource</code>]]</li><li>Buttons on game panels</li><li>Entity references across world loads</li></ol>
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md">api.md</a>.</p>` } ] },
     { id: "developers/lifecycle", role: "developers", title: "Hot reload and lifecycle", pages: [
       { id: "overview", title: "Hot reload and lifecycle", soon: true,

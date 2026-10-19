@@ -408,7 +408,7 @@ internal static unsafe class PlayerMoveRuntime
     }
 
     /// <summary>True when the words are the acting character's own id or one of its inventory entities' ids.</summary>
-    private static bool IsOwnPlayer(EntityManager em, Entity character, int index, int generation)
+    internal static bool IsOwnPlayer(EntityManager em, Entity character, int index, int generation)
     {
         if (character == Entity.Null || !character.Exists(em)) return false;
         if (Same(em, character, index, generation)) return true;
@@ -428,9 +428,15 @@ internal static unsafe class PlayerMoveRuntime
     // ---- rows -----------------------------------------------------------------------------------
 
     /// <summary>The slots of the inventory entity <paramref name="key"/> into <see cref="Rows"/>, read-only and raw.</summary>
-    private static bool ReadRows(EntityManager em, long key)
+    private static bool ReadRows(EntityManager em, long key) => ReadRowsInto(em, key, Rows);
+
+    /// <summary>
+    /// The slots of the inventory entity <paramref name="key"/> into <paramref name="into"/> (cleared
+    /// first), read-only and raw at the layout constants. Also used by the bag-drop observer.
+    /// </summary>
+    internal static bool ReadRowsInto(EntityManager em, long key, List<MoveSlotRow> into)
     {
-        Rows.Clear();
+        into.Clear();
         var e = new Entity { Index = (int)(key >> 32), Version = (int)key };
         if (!e.Exists(em) || !e.Has<InventoryBuffer>(em)) return false;
         var type = ComponentIndex.IndexOf<InventoryBuffer>();
@@ -447,7 +453,7 @@ internal static unsafe class PlayerMoveRuntime
             byte* ent = row + Layout.InventoryBufferItemEntityOffset + Layout.NetworkedEntityEntityOffset;
             int index = *(int*)ent, version = *(int*)(ent + 4);
             long itemEntity = index == 0 && version == 0 ? 0 : ((long)index << 32) | (uint)version;
-            Rows.Add(new MoveSlotRow(item, amount, itemEntity));
+            into.Add(new MoveSlotRow(item, amount, itemEntity));
         }
 
         return true;

@@ -344,6 +344,44 @@ public sealed partial class PluginInventory
         return sub;
     }
 
+    /// <summary>
+    /// Raise one <see cref="Progenitor.Drops.PlayerGroundDrop"/> per item each time a player drops
+    /// something from their own bag onto the ground: the inventory menu's drop key
+    /// (<c>DropItemAtSlotEvent</c>) or a slot dragged onto the ground (<c>DropInventoryItemEvent</c>
+    /// naming the player's own inventory). Amounts are read back from the bag around the game's
+    /// update; a refused drop raises nothing. Position: the character's <c>Translation</c> right after
+    /// the update. Drops from a container window are <see cref="OnPlayerMove"/>'s (<c>Kind = Drop</c>);
+    /// a whole-inventory drop is <see cref="OnDropAll"/>'s. Called on the main thread from the frame
+    /// tick after the drop. Tracked: unload stops it.
+    /// <b>Experimental</b>: source-checked and game-free tested, not live-verified.
+    /// </summary>
+    public IDisposable OnGroundDrop(Action<Progenitor.Drops.PlayerGroundDrop> handler)
+    {
+        Require(nameof(OnGroundDrop));
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        var sub = Progenitor.Drops.DropRuntime.Ground.Subscribe(handler);
+        _ctx.Track(sub);
+        return sub;
+    }
+
+    /// <summary>
+    /// Raise one <see cref="Progenitor.Drops.PlayerDropAll"/> each time a player drops their whole
+    /// inventory (<c>DropEntireInventoryEvent</c>, handled by <c>DropItemSystem</c>): the user, the
+    /// character, what left the bag, and the container the game left for it
+    /// (<c>PlayerInventoryDropContainerPrefabGUID</c>) once a new one near the player holds what left the bag, or
+    /// with <c>HasContainer</c> false and a reason after 60 frames. Called on the main thread from
+    /// the frame tick. Tracked: unload stops it.
+    /// <b>Experimental</b>: source-checked and game-free tested, not live-verified.
+    /// </summary>
+    public IDisposable OnDropAll(Action<Progenitor.Drops.PlayerDropAll> handler)
+    {
+        Require(nameof(OnDropAll));
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        var sub = Progenitor.Drops.DropRuntime.All.Subscribe(handler);
+        _ctx.Track(sub);
+        return sub;
+    }
+
     // ---- stable ids (P5) -------------------------------------------------------------------------
 
     /// <summary>
