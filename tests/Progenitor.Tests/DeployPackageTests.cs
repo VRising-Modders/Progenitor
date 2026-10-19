@@ -399,8 +399,142 @@ public sealed class DeployPackageTests
     {
         string s = ReadRepoFile("tools", "package.ps1");
         Assert.Contains("Assert-NoInstallScripts -Names @(Get-ChildItem -LiteralPath $stage", s);
-        Assert.Contains("Assert-NoInstallScripts -Names @($zip.Entries", s);
+        Assert.Contains("Assert-NoInstallScripts -Names @($entryNames) -Where $zipPath", s);
+        Assert.Contains("Assert-NoInstallScripts -Names $innerNames -Where $PayloadName", s);
         Assert.Contains("Assert-NoInstallScripts -Names $names -Where $ZipPath", s);
+    }
+
+    // ---- 2c. executed: the Thunderstore zip (what a mod manager installs) ------------------
+
+    private static readonly string[] ThunderstoreRequired =
+    {
+        "BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/patchers/progenitor-files.zip",
+        "manifest.json", "LICENSE",
+    };
+
+    /// <summary>
+    /// The Thunderstore zip routes only what V Rising's install rules know: root files, <c>BepInEx/plugins/</c> and
+    /// <c>BepInEx/patchers/</c>. Core's folder travels inside <c>BepInEx/patchers/progenitor-files.zip</c> with names
+    /// relative to <c>BepInEx/</c>. Then the zip is placed the way r2modman and Gale place a package (each routed file in
+    /// <c>&lt;route&gt;/&lt;package&gt;/</c>, root files with the plugins) and the preloader's own unpack is run on it: Core
+    /// ends up at <c>BepInEx/progenitor-core/Progenitor.dll</c> and no Progenitor.dll sits among the plugins.
+    /// What this would catch: a Thunderstore zip whose progenitor-core files a mod manager would flatten into plugins.
+    /// </summary>
+    [Fact]
+    public void ThunderstoreZipCarriesCoreInTheArchiveAndAModManagerLayoutUnpacksIt()
+    {
+        string shell = RequirePowerShell();
+        string tmp = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        string stage = Path.Combine(tmp, "stage");
+        string zip = Path.Combine(tmp, "ts.zip");
+        try
+        {
+            foreach (string f in new[]
+                     {
+                         "manifest.json", "README.md", "CHANGELOG.md", "icon.png", "LICENSE",
+                         "BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll",
+                         "BepInEx/progenitor-core/Progenitor.dll", "BepInEx/progenitor-core/LICENSE",
+                         "BepInEx/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json",
+                         "BepInEx/progenitor-core/docs/guide/progenitor-guide.html",
+                     })
+                Seed(stage, f);
+
+            var (exit, _, stderr) = RunNewThunderstoreZip(shell, stage, zip);
+            Assert.True(exit == 0, "New-ThunderstoreZip failed: " + stderr);
+
+            string[] inner;
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(zip))
+            {
+                var names = archive.Entries.Select(e => e.FullName).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+                Assert.Equal(new[]
+                {
+                    "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/patchers/progenitor-files.zip", "BepInEx/plugins/Progenitor.Bootstrap.dll",
+                    "CHANGELOG.md", "icon.png", "LICENSE", "manifest.json", "README.md",
+                }.OrderBy(n => n, StringComparer.Ordinal).ToArray(), names);
+                using var payload = new System.IO.Compression.ZipArchive(archive.GetEntry("BepInEx/patchers/progenitor-files.zip")!.Open());
+                inner = payload.Entries.Select(e => e.FullName).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+            }
+
+            Assert.Equal(new[]
+            {
+                "progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json",
+                "progenitor-core/docs/guide/progenitor-guide.html", "progenitor-core/LICENSE", "progenitor-core/Progenitor.dll",
+            }.OrderBy(n => n, StringComparer.Ordinal).ToArray(), inner);
+
+            // Placed as a mod manager places it, then unpacked by the preloader's code.
+            string bep = Path.Combine(tmp, "profile", "BepInEx");
+            const string package = "VRising_Modders-Progenitor";
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(zip))
+                foreach (var e in archive.Entries)
+                {
+                    string[] parts = e.FullName.Split('/');
+                    string dest = parts.Length == 3 && parts[0] == "BepInEx"
+                        ? Path.Combine(bep, parts[1], package, parts[2])
+                        : Path.Combine(bep, "plugins", package, e.FullName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                    System.IO.Compression.ZipFileExtensions.ExtractToFile(e, dest);
+                }
+
+            string? found = Progenitor.PluginActions.PackagePayload.Find(bep, Path.Combine(bep, "patchers", package));
+            Assert.NotNull(found);
+            Assert.Equal(Progenitor.PluginActions.PackagePayloadOutcome.Applied,
+                Progenitor.PluginActions.PackagePayload.Apply(bep, found, null, null, () => false));
+            Assert.Equal("seed", File.ReadAllText(Path.Combine(bep, "progenitor-core", "Progenitor.dll")));
+            Assert.True(File.Exists(Path.Combine(bep, "progenitor-core", "docs", "guide", "progenitor-guide.html")));
+            Assert.Empty(Directory.GetFiles(Path.Combine(bep, "plugins"), "Progenitor.dll", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>
+    /// A staged BepInEx folder the install rules do not route and the archive does not carry, or a Core DLL staged among
+    /// the plugins, fails packaging instead of shipping files a mod manager would flatten into plugins.
+    /// </summary>
+    [Theory]
+    [InlineData("BepInEx/progenitor-cache/x.json", "neither routed")]
+    [InlineData("BepInEx/plugins/Progenitor.dll", "loose file")]
+    [InlineData("BepInEx/stray.txt", "no install rule")]
+    public void ThunderstoreZipRefusesWhatAModManagerWouldMisplace(string extra, string expected)
+    {
+        string shell = RequirePowerShell();
+        string tmp = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        string stage = Path.Combine(tmp, "stage");
+        try
+        {
+            foreach (string f in new[] { "manifest.json", "LICENSE", "BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll" })
+                Seed(stage, f);
+            Seed(stage, extra);
+            var (exit, _, stderr) = RunNewThunderstoreZip(shell, stage, Path.Combine(tmp, "ts.zip"));
+            Assert.True(exit != 0, "New-ThunderstoreZip accepted " + extra);
+            Assert.Contains(expected, stderr);
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>The script builds the Thunderstore zip through New-ThunderstoreZip and checks the archive's entries too.</summary>
+    [Fact]
+    public void PackageBuildsTheThunderstoreZipWithTheArchive()
+    {
+        string s = ReadRepoFile("tools", "package.ps1");
+        Assert.Contains("New-ThunderstoreZip -Stage $stage -ZipPath $zipPath -PayloadName \"progenitor-files.zip\" -Required $tsRequired", s);
+        foreach (string entry in ThunderstoreRequired) Assert.Contains("\"" + entry + "\"", s);
+        Assert.DoesNotContain("CreateFromDirectory($stage", s);
+        Assert.Contains("$entryNames.Add(\"BepInEx/\" + $i.FullName)", s);
+        Assert.Equal(Progenitor.PluginActions.PackagePayload.FileName, "progenitor-files.zip");
+    }
+
+    private static (int Exit, string Out, string Err) RunNewThunderstoreZip(string shell, string stage, string zip)
+    {
+        string fn = ScriptGuardFunctions() + "\n" + ExtractPowerShellFunction(ReadRepoFile("tools", "package.ps1"), "New-ThunderstoreZip");
+        string script = "$ErrorActionPreference = 'Stop'\n" + fn + "\nNew-ThunderstoreZip -Stage $args[0] -ZipPath $args[1] -PayloadName 'progenitor-files.zip' -Required @("
+                        + PsList(ThunderstoreRequired) + ")\n";
+        return RunPowerShellScript(shell, script, stage, zip);
     }
 
     private static (int Exit, string Out, string Err) RunNewGameFolderZip(string shell, string stage, string zip)

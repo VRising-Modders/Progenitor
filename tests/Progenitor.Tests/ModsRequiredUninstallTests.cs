@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -9,6 +10,7 @@ using Progenitor.Bootstrap;
 using Progenitor.Config;
 using Progenitor.Install;
 using Progenitor.Networking;
+using Progenitor.PluginActions;
 using Progenitor.Plugins;
 using Progenitor.Ui;
 using BepInEx.Configuration;
@@ -279,6 +281,54 @@ public sealed class ModsRequiredUninstallTests : IDisposable
             load.IndexOf("UninstallAtStart.HonourIfRequested", StringComparison.Ordinal)
             < load.IndexOf("ProcessHost.Install", StringComparison.Ordinal),
             "the uninstall must be honored before ProcessHost.Install, which loads Core");
+    }
+
+    /// <summary>
+    /// A mod manager installs the package into folders of its own: Bootstrap in <c>plugins/&lt;package&gt;/</c>, the
+    /// preloader and <c>progenitor-files.zip</c> in <c>patchers/&lt;package&gt;/</c>. The plan names them (and the manual
+    /// install's top-level preloader); Bootstrap schedules both loaded DLLs for the next reboot and deletes the archive,
+    /// so the preloader cannot put Core back at the next start. What this would catch: a removal that leaves the archive
+    /// (Progenitor comes back), tries to delete a loaded DLL, or lists another mod's files in the package folders.
+    /// </summary>
+    [Fact]
+    public void A_mod_manager_install_is_removed_from_its_package_folders()
+    {
+        Write(Path.Combine(_bep, "progenitor-core", "Progenitor.dll"), new byte[] { 2 });
+        string boot = Write(Path.Combine(_bep, "plugins", "VRising_Modders-Progenitor", "Progenitor.Bootstrap.dll"), new byte[] { 3 });
+        string pre = Write(Path.Combine(_bep, "patchers", "VRising_Modders-Progenitor", "Progenitor.Preloader.dll"), new byte[] { 4 });
+        string archive = Write(Path.Combine(_bep, "patchers", "VRising_Modders-Progenitor", "progenitor-files.zip"), new byte[] { 5 });
+        string topPre = Write(Path.Combine(_bep, "patchers", "Progenitor.Preloader.dll"), new byte[] { 6 });
+        string otherMod = Write(Path.Combine(_bep, "plugins", "Someone-Mod", "Mod.dll"), new byte[] { 7 });
+        string flattenedCore = Write(Path.Combine(_bep, "plugins", "VRising_Modders-Progenitor", "Progenitor.dll"), new byte[] { 9 });
+        string otherCore = Write(Path.Combine(_bep, "plugins", "Someone-Mod", "Progenitor.dll"), new byte[] { 10 });
+        string otherPatcher = Write(Path.Combine(_bep, "patchers", "Someone-Patcher", "Patcher.dll"), new byte[] { 8 });
+
+        var files = ClientUninstall.Plan(_bep);
+        Assert.Contains("plugins/VRising_Modders-Progenitor/Progenitor.Bootstrap.dll", files);
+        Assert.Contains("patchers/VRising_Modders-Progenitor/Progenitor.Preloader.dll", files);
+        Assert.Contains("patchers/VRising_Modders-Progenitor/progenitor-files.zip", files);
+        Assert.Contains("patchers/Progenitor.Preloader.dll", files);
+        Assert.DoesNotContain("plugins/Someone-Mod/Mod.dll", files);
+        // An older layout's Core beside Bootstrap goes too; a Progenitor.dll in another mod's folder is not ours to remove.
+        Assert.Contains("plugins/VRising_Modders-Progenitor/Progenitor.dll", files);
+        Assert.DoesNotContain("plugins/Someone-Mod/Progenitor.dll", files);
+        Assert.DoesNotContain("patchers/Someone-Patcher/Patcher.dll", files);
+        Assert.Equal(PackagePayload.FileName, ClientUninstall.OwnedPatcherFileNames[1]);
+
+        Assert.True(ClientUninstall.TryWrite(_bep, files));
+        var scheduled = new List<string>();
+        UninstallAtStart.ScheduleDeleteOverride = path => { scheduled.Add(path); return true; };
+        var outcome = UninstallAtStart.Honour(_bep);
+
+        Assert.True(outcome.Honoured);
+        Assert.False(File.Exists(archive));
+        Assert.False(File.Exists(flattenedCore));
+        Assert.True(File.Exists(otherCore));
+        Assert.Equal(new[] { boot, pre, topPre }.OrderBy(p => p), scheduled.OrderBy(p => p));
+        Assert.True(File.Exists(otherMod));
+        Assert.True(File.Exists(otherPatcher));
+        Assert.False(UninstallAtStart.IsRunningImage("progenitor-core/Progenitor.Bootstrap.dll"));
+        Assert.False(UninstallAtStart.IsRunningImage("plugins/Progenitor.Preloader.dll"));
     }
 
     /// <summary>
