@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Install;
 
@@ -125,7 +126,7 @@ internal sealed class OrdinaryIdentityCache
         {
             string path = PathFor(ns, name, version);
             if (!File.Exists(path)) return null;
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            using var doc = JsonFiles.ParseFile(path);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
             return new OrdinaryIdentityRecord(

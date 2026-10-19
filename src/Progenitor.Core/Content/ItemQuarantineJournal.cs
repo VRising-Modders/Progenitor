@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Content;
 
@@ -40,7 +41,7 @@ internal sealed class ItemQuarantineJournal
             if (!File.Exists(path)) return result;
             var bytes = File.ReadAllBytes(path);
             result._loadedHash = Hash(bytes);
-            using var document = JsonDocument.Parse(bytes);
+            using var document = JsonFiles.Parse(bytes);
             var root = document.RootElement;
             if (root.GetProperty("schema").GetInt32() != 1 || root.GetProperty("worldId").GetString() != worldId)
                 throw new FormatException("Unsupported quarantine schema or mismatched world.");

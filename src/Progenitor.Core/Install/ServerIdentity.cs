@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Install;
 
@@ -139,7 +140,7 @@ internal sealed class ServerIdentity
             if (!File.Exists(candidate)) continue;
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllBytes(candidate));
+                using var doc = JsonFiles.ParseFile(candidate);
                 var root = doc.RootElement;
                 if (root.ValueKind != JsonValueKind.Object) continue;
                 if (root.TryGetProperty("Name", out var n) && n.ValueKind == JsonValueKind.String)

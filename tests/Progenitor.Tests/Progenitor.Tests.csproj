@@ -830,6 +830,7 @@
     <Compile Include="..\..\src\Progenitor.Bootstrap\WorkQueue.cs" Link="Linked\WorkQueue.cs" />
     <Compile Include="..\..\src\Progenitor.Bootstrap\PluginUnloadOrder.cs" Link="Linked\PluginUnloadOrder.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Plugins\NetworkCompatibility.cs" Link="Linked\NetworkCompatibility.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\JsonFiles.cs" Link="Linked\JsonFiles.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Persistence\IModStore.cs" Link="Linked\IModStore.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Persistence\ModStore.cs" Link="Linked\ModStore.cs" />
     <!-- JsonCacheSweep: game-free; drops System.Text.Json per-type caches for collectible types. -->

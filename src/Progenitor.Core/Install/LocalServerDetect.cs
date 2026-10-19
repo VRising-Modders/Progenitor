@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Install;
 
@@ -225,7 +226,7 @@ internal static class LocalServerDetector
         try
         {
             if (!File.Exists(path) || new FileInfo(path).Length > 1024 * 1024) return (0, "");
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            using var doc = JsonFiles.ParseFile(path);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return (0, "");
             int port = 0;

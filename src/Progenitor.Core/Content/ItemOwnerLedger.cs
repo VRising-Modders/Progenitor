@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Content;
 
@@ -180,7 +181,7 @@ internal sealed class ItemOwnerLedger
         try
         {
             ledger._loadedHash = hash;
-            using var doc = JsonDocument.Parse(bytes);
+            using var doc = JsonFiles.Parse(bytes);
             var root = doc.RootElement;
             if (root.GetProperty("schema").GetInt32() != 1) throw new FormatException("Unsupported item ownership schema.");
             var seen = new HashSet<int>();
