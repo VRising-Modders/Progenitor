@@ -1004,6 +1004,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModHeaderPanel.cs" Link="Linked\ModHeaderPanel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsLayout.cs" Link="Linked\ModSettingsLayout.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.cs" Link="Linked\ModSettingsView.cs" />
+    <!-- APPLYONCE1: the server Apply rows' baseline (each Apply's expected value). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ServerTextBaseline.cs" Link="Linked\ServerTextBaseline.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.Admin.cs" Link="Linked\ModSettingsView.Admin.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\AdminSettingRow.cs" Link="Linked\AdminSettingRow.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminRows.cs" Link="Linked\JoinAdminRows.cs" />

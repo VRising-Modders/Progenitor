@@ -2119,6 +2119,9 @@ internal sealed partial class ModSettingsView
                     DraftChanged?.Invoke(row.RowId);
                 });
                 bool pending = false;
+                // APPLYONCE1: the server value the field is based on (each Apply's expected value) follows every synced
+                // value, not only this row's own answers (ServerTextBaseline).
+                var baseline = new ServerTextBaseline(displayed);
                 binding.Status = AdminNote;
                 binding.Multiline = multiline;
                 void Send(string value)
@@ -2138,7 +2141,7 @@ internal sealed partial class ModSettingsView
                     pending = true;
                     binding.Status = WaitingNote;
                     WriteHelp(binding);
-                    _requests.Add(ServerSettings.Request(row.RowId, value, displayed, result =>
+                    _requests.Add(ServerSettings.Request(row.RowId, value, baseline.Shown, result =>
                     {
                         pending = false;
                         if (input.IsDisposed) return;
@@ -2146,19 +2149,33 @@ internal sealed partial class ModSettingsView
                         // refusal (its length, not an admin, a conflict, a timeout, a failed send) the
                         // typed text stays in the field, so nothing typed is lost; the next Apply is
                         // checked against the server's current value, and leaving the page discards it.
-                        displayed = result.Success ? result.Value : SafeRead(row);
+                        baseline.Answered(result.Success ? result.Value : SafeRead(row));
                         if (result.Success)
                         {
-                            LimitServerText(input, row, multiline, displayed);
-                            input.Value = displayed;
+                            LimitServerText(input, row, multiline, baseline.Shown);
+                            input.Value = baseline.Shown;
                         }
-                        binding.Status = result.Success ? ServerSavedNote : RefusalNote(result.Error, input.Value, displayed);
+                        binding.Status = result.Success ? ServerSavedNote : RefusalNote(result.Error, input.Value, baseline.Shown);
                         WriteHelp(binding);
                     }));
                 }
 
+                // APPLYONCE1: Apply sends the field's live text as it is at the click (an Insert token included: Insert
+                // writes the field itself), checked against the baseline.
                 apply.OnClick(() => Send(input.Value));
                 binding.Apply = () => Send(input.Value);
+                // APPLYONCE1: a value synced from anywhere (another admin, a bridge request, a cfg edit on the server) moves
+                // the baseline and, while nothing unsent is typed, the field and its Players see line.
+                binding.Sync = () =>
+                {
+                    if (input.IsDisposed) return;
+                    if (baseline.OnServerValue(SafeRead(row), input.Value, pending) is not { } show) return;
+                    LimitServerText(input, row, multiline, show);
+                    input.Value = show;
+                    SettingDrafts.Note(row.RowId, show);
+                    DraftChanged?.Invoke(row.RowId);
+                };
+                WatchServerValues(binding);
                 binding.Input = input;
                 binding.Handles.Add(apply);
                 if (multiline)
@@ -2958,6 +2975,23 @@ internal sealed partial class ModSettingsView
         binding.Editor = editor;
         binding.Status = AdminNote;
         binding.ServerShown = SafeRead(row);
+        WatchServerValues(binding);
+    }
+
+    /// <summary>
+    /// APPLYONCE1: re-read an administrator's request row (<see cref="ItemBinding.Sync"/>) whenever a synced value arrives,
+    /// for as long as the page is up, so its next request is checked against the value the server holds now.
+    /// </summary>
+    private void WatchServerValues(ItemBinding binding)
+    {
+        void OnApplied()
+        {
+            try { binding.Sync(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: settings server row re-read threw: " + e.Message); }
+        }
+
+        ConfigSync.RecordsApplied += OnApplied;
+        _requests.Add(new ActionLease(() => ConfigSync.RecordsApplied -= OnApplied));
     }
 
     /// <summary>An administrator's date-time row: Done sends the ISO UTC value to the server.</summary>

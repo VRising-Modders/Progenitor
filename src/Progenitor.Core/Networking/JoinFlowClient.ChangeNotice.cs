@@ -36,6 +36,18 @@ internal static class JoinChangeNoticePolicy
     /// <summary>A player's own Players joining edit answered within this many seconds: the change is theirs, no notice.</summary>
     public const double OwnEditSeconds = 10;
 
+    /// <summary>
+    /// JOINNOTICE2: the message hash a signed section carries for the stored message <paramref name="stored"/> (the server
+    /// signs it as <see cref="JoinServerSettings.BuildSection"/> cuts it): how this player's own accepted server-message
+    /// edit is recognized in the re-signed catalog it causes. Empty for an empty message.
+    /// </summary>
+    public static string StoredMessageHash(string? stored)
+    {
+        string text = (stored ?? "").Replace("\r\n", "\n");
+        if (text.Length > JoinSectionLimits.MaxMessageChars) text = text.Substring(0, JoinSectionLimits.MaxMessageChars);
+        return text.Trim().Length == 0 ? "" : JoinShowPolicy.MessageHash(text);
+    }
+
     /// <summary>The notice for what changed, or null when nothing did.</summary>
     public static JoinChangeNoticeState? For(bool modsChanged, bool messageChanged, string hash)
     {
@@ -108,6 +120,8 @@ internal static partial class JoinFlowClient
         _seenModsHash = _seenMessageHash = "";
         _lastChangeNoticeHash = "";
         _localAdminEditAt = double.NegativeInfinity;
+        // JOINNOTICE2: an edit sent to the server before this join is no change of this session's.
+        ServerSettings.ForgetOwnEdits();
         return had;
     }
 
@@ -125,9 +139,18 @@ internal static partial class JoinFlowClient
         bool modsChanged = !string.Equals(mods, _seenModsHash, StringComparison.Ordinal);
         // A removed message is nothing to view.
         bool messageChanged = message.Length > 0 && !string.Equals(message, _seenMessageHash, StringComparison.Ordinal);
+        // JOINNOTICE2: a new message this player's own Apply asked for (matched to that request, not to the time) is
+        // theirs: no notice for it. Anyone else's change, the bridge's or a cfg edit's, still shows.
+        bool ownMessage = messageChanged && ServerSettings.ClaimOwnEdit(JoinServerSettings.RowId(JoinServerSettings.MessageKey),
+            stored => string.Equals(JoinChangeNoticePolicy.StoredMessageHash(stored), message, StringComparison.Ordinal));
+        if (ownMessage) messageChanged = false;
         _seenModsHash = mods;
         _seenMessageHash = message;
-        if (!modsChanged && !messageChanged) { why = "nothing this session saw changed"; return null; }
+        if (!modsChanged && !messageChanged)
+        {
+            why = ownMessage ? "your own server message edit" : "nothing this session saw changed";
+            return null;
+        }
         if (screensOpen) { why = "the open screens refreshed in place"; return null; }
         if (FlowBusyLocked()) { why = "a join, install or rejoin is under way"; return null; }
         if (!messageChanged && Clock() - _localAdminEditAt <= JoinChangeNoticePolicy.OwnEditSeconds) { why = "your own Players joining edit"; return null; }

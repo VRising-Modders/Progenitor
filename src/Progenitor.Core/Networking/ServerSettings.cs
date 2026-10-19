@@ -130,14 +130,18 @@ public static partial class ServerSettings
 
     /// <summary>Use the value captured when the editor displayed the setting to detect unseen updates.</summary>
     public static IDisposable Request(string rowId, string value, string? expectedValue, Action<ServerSettingResult> completed)
-        => RequestCore(rowId, value, expectedValue, completed, clientCheck: true);
+        => RequestCore(rowId, value, expectedValue, completed, clientCheck: true, own: true);
 
     /// <summary>
     /// TEXTLIMIT1: <paramref name="clientCheck"/> false skips this side's length pre-check, as a client
     /// that does not run it would (the dev bridge's hostile-client test). The server's own check is
     /// unchanged; the wire still caps each field at <see cref="ServerSettingsWire.MaxTextBytes"/>.
+    /// JOINNOTICE2: <paramref name="own"/> records the request as this player's own edit (<see cref="ClaimOwnEdit"/>):
+    /// the public <see cref="Request(string, string, string, Action{ServerSettingResult})"/> (the settings pages, a mod
+    /// acting for the player) does; the dev bridge's request does not, so its change notifies like any outside change.
     /// </summary>
-    internal static IDisposable RequestCore(string rowId, string value, string? expectedValue, Action<ServerSettingResult> completed, bool clientCheck)
+    internal static IDisposable RequestCore(
+        string rowId, string value, string? expectedValue, Action<ServerSettingResult> completed, bool clientCheck, bool own = false)
     {
         if (completed == null) throw new ArgumentNullException(nameof(completed));
         if (!CanRequest(rowId)) return Refuse(completed, "This setting has no active server edit registration.");
@@ -167,6 +171,7 @@ public static partial class ServerSettings
         catch (Exception e) { return Refuse(completed, e.Message); }
         var request = new Pending(message.Id, registration, completed, Now() + TimeoutSeconds);
         Requests.Add(message.Id, request);
+        if (own) NoteOwnSent(message.Id, rowId, value, message.Expected);
         try
         {
             if (!Send(packet)) Complete(message.Id, new ServerSettingResult(false, "", "The connection did not accept the request."));
@@ -249,6 +254,90 @@ public static partial class ServerSettings
         RateAudited.Clear();
         Audit = null;
         AuditClock = () => DateTime.UtcNow;
+        ForgetOwnEdits();
+    }
+
+    // ---- JOINNOTICE2: this player's own edits --------------------------------------------------------------------
+
+    /// <summary>At most this many own edits are remembered (the oldest goes first).</summary>
+    internal const int MaxOwnEdits = 16;
+
+    private static readonly object OwnGate = new();
+    private static readonly List<OwnEdit> OwnEdits = new();
+
+    private sealed class OwnEdit
+    {
+        internal Guid Id;
+        internal string RowId = "";
+        internal string Value = "";
+        internal string Before = "";
+    }
+
+    private static void NoteOwnSent(Guid id, string rowId, string value, string before)
+    {
+        lock (OwnGate)
+        {
+            if (OwnEdits.Count >= MaxOwnEdits) OwnEdits.RemoveAt(0);
+            OwnEdits.Add(new OwnEdit { Id = id, RowId = rowId ?? "", Value = value ?? "", Before = before ?? "" });
+        }
+    }
+
+    // An accepted answer replaces the sent value with the stored one; one that stored what was already there changes
+    // nothing (no re-signed catalog follows it) and is dropped, as is every refusal.
+    private static void NoteOwnAnswer(Guid id, string? rowId, bool success, string stored)
+    {
+        lock (OwnGate)
+        {
+            for (int i = 0; i < OwnEdits.Count; i++)
+            {
+                var edit = OwnEdits[i];
+                if (edit.Id != id) continue;
+                if (rowId != null && !string.Equals(rowId, edit.RowId, StringComparison.Ordinal)) return;
+                if (!success || string.Equals(stored ?? "", edit.Before, StringComparison.Ordinal)) OwnEdits.RemoveAt(i);
+                else edit.Value = stored ?? "";
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// JOINNOTICE2: whether a change of row <paramref name="rowId"/> that the client just received is one this player's
+    /// own request asked for: a request this client sent through <see cref="Request(string, string, string, Action{ServerSettingResult})"/>,
+    /// still waiting or accepted, whose value <paramref name="isThisChange"/> recognizes. The match is consumed (one
+    /// request accounts for one change). Correlated by the request, never by time: a change nobody here asked for, or
+    /// the same text set later by someone else, is not claimed.
+    /// </summary>
+    internal static bool ClaimOwnEdit(string rowId, Func<string, bool> isThisChange)
+    {
+        if (string.IsNullOrEmpty(rowId) || isThisChange == null) return false;
+        lock (OwnGate)
+        {
+            for (int i = 0; i < OwnEdits.Count; i++)
+            {
+                var edit = OwnEdits[i];
+                if (!string.Equals(edit.RowId, rowId, StringComparison.Ordinal)) continue;
+                bool match;
+                try { match = isThisChange(edit.Value); }
+                catch { match = false; }
+                if (!match) continue;
+                OwnEdits.RemoveAt(i);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>JOINNOTICE2: forget this player's own edits (a new join, Core unload).</summary>
+    internal static void ForgetOwnEdits()
+    {
+        lock (OwnGate) OwnEdits.Clear();
+    }
+
+    /// <summary>JOINNOTICE2: the own edits remembered now (readback and tests).</summary>
+    internal static int OwnEditCount
+    {
+        get { lock (OwnGate) return OwnEdits.Count; }
     }
 
     private static string CurrentText(string rowId)
@@ -359,6 +448,8 @@ public static partial class ServerSettings
 
     internal static void AcceptResponse(ServerSettingsMessage response)
     {
+        // JOINNOTICE2: the answer to this player's own edit counts even when the page that sent it has closed.
+        NoteOwnAnswer(response.Id, response.RowId, response.Success, response.Value);
         if (!Requests.TryGetValue(response.Id, out var pending) || pending.Registration == null
             || pending.Registration.Id != response.RowId) return;
         Complete(response.Id, new ServerSettingResult(response.Success, response.Value, response.Error));
@@ -366,6 +457,8 @@ public static partial class ServerSettings
 
     private static void Complete(Guid id, ServerSettingResult result)
     {
+        // JOINNOTICE2: a refusal, a timeout or a failed send stored nothing: no change of this player's to expect.
+        if (!result.Success) NoteOwnAnswer(id, null, success: false, "");
         if (!Requests.TryGetValue(id, out var pending)) return;
         var callback = pending.Callback;
         pending.Dispose();
