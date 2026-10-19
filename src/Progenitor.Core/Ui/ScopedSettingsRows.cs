@@ -255,7 +255,17 @@ internal static class ScopedSettingsRows
         return ScopedSettings.ReadClient(pluginId + "/" + c.Section + "/" + c.Key);
     }
 
-    /// <summary>The joined server's answer to <c>ServerHasMod(<paramref name="modId"/>)</c>, from any rule of the mod it sent; null when it sent none.</summary>
+    /// <summary>
+    /// The joined server's mod list as this client knows it (its feature table): true or false for a GUID, null while
+    /// it is unknown (not connected, no table yet, or a table that left mods out). Core sets it; null in tests.
+    /// </summary>
+    internal static Func<string, bool?>? ServerMods { get; set; }
+
+    /// <summary>
+    /// The joined server's answer to <c>ServerHasMod(<paramref name="modId"/>)</c>: the answer it sent with a rule of
+    /// this mod, else the server's mod list this client received (so a rule on a row only this client has works too);
+    /// null when neither says.
+    /// </summary>
     internal static bool? ServerFact(string pluginId, string modId)
     {
         foreach (var row in Records)
@@ -264,7 +274,8 @@ internal static class ScopedSettingsRows
             if (Answer(row.Presentation.ShowIf, modId) is bool a) return a;
             if (Answer(row.Presentation.EnableIf, modId) is bool b) return b;
         }
-        return null;
+        try { return ServerMods?.Invoke(modId); }
+        catch { return null; }
     }
 
     private static bool? Answer(SettingCondition? c, string modId)

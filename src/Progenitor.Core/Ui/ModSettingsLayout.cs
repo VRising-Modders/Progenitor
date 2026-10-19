@@ -83,6 +83,12 @@ internal sealed class ModSettingOptions
     /// <summary>A published setting placed on the page by id (a <c>PerPlayer</c> setting): its row id.</summary>
     internal string? ScopedRowId { get; set; }
 
+    /// <summary>
+    /// A placed published setting the server does not provide now (offline, or a server without it): the item only
+    /// claims <see cref="ScopedRowId"/>, so this side's cfg row of the same id is not drawn as a raw field, and draws nothing.
+    /// </summary>
+    internal bool ClaimOnly { get; set; }
+
     internal bool NeedsRestart { get; set; }
 
     internal bool NeedsServerPart { get; set; }
@@ -1750,6 +1756,11 @@ internal static class ModSettingsLayout
                     // A published setting the page placed by id (an item list, a PerPlayer setting): its cfg row, if
                     // this side has one, is not drawn again in the automatic sections.
                     if (item.Kind == ModSettingsItemKind.Admin && item.Admin is { Manifest: true } && !claimed.Add(item.Id)) continue;
+                    if (item.Options.ClaimOnly)
+                    {
+                        if (item.Options.ScopedRowId is { } claim) claimed.Add(claim);
+                        continue;
+                    }
                     items.Add(item);
                 }
 

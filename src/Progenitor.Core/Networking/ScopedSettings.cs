@@ -61,6 +61,16 @@ internal static partial class ScopedSettings
         _disconnect = EventBus.On<PlayerDisconnected>(ev => { if (Peers.Remove(ev.User.Index)) CountSending(); });
         _world = EventBus.On<WorldReady>(_ => { Peers.Clear(); _sending = 0; ClearClient(); });
         Plugin.Frame += Tick;
+        if (!Plugin.IsServerProcess)
+            Progenitor.Ui.ScopedSettingsRows.ServerMods = guid =>
+            {
+                // The server's feature table lists every mod it runs (cleared on disconnect).
+                var table = ModCompatNet.PeerTables.Get(ModCompatNet.ServerPeer);
+                if (table == null || !RemoteInstallEvents.ClientConnected()) return null;
+                if (table.Mods.ContainsKey(guid)) return true;
+                return table.More ? null : false;
+            };
+        if (!Plugin.IsServerProcess) ModCompatNet.PeerTables.Changed += OnServerTable;
         _installed = true;
     }
 
@@ -70,7 +80,10 @@ internal static partial class ScopedSettings
         _disconnect?.Dispose(); _disconnect = null; _world?.Dispose(); _world = null;
         CustomEvents.RemoveHandler(EventId, OnResponse); CustomEvents.RemoveClientHandler(EventId, OnRequest);
         foreach (var row in new List<Registration>(Entries.Values)) row.Dispose();
-        Stores.Clear(); Peers.Clear(); _sending = 0; ClearClient(); Client.ClearSubscribers(); ResetPresentation(); _installed = false;
+        Stores.Clear(); Peers.Clear(); _sending = 0; ClearClient(); Client.ClearSubscribers(); ResetPresentation();
+        Progenitor.Ui.ScopedSettingsRows.ServerMods = null;
+        ModCompatNet.PeerTables.Changed -= OnServerTable;
+        _installed = false;
     }
 
     internal static void OnHandshakeOk(World? world, Entity entity, Handshake.Capability capabilities)
@@ -85,6 +98,12 @@ internal static partial class ScopedSettings
         };
         // Sent on the next frame, after the existing handshake/config/catalog sequence.
         _nextPoll = 0;
+    }
+
+    /// <summary>The server's feature table (its mod list) changed: re-evaluate rules that ask <c>ServerHasMod</c>.</summary>
+    private static void OnServerTable(int peer)
+    {
+        if (peer == ModCompatNet.ServerPeer) Progenitor.Ui.ModsMenu.MarkScopedValuesDirty();
     }
 
     private static void ClearClient() => Client.Clear("Disconnected from the server.");
@@ -220,7 +239,7 @@ internal static partial class ScopedSettings
             {
                 try
                 {
-                    entry.Schema.Value = entry.Read(peer.Account);
+                    entry.Schema.Value = SentValue(entry, peer.Account);
                     ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = peer.Generation, Row = entry.Schema });
                     peer.Revision = -1;
                 }
@@ -229,7 +248,7 @@ internal static partial class ScopedSettings
             }
             try
             {
-                string value = entry.Read(peer.Account);
+                string value = SentValue(entry, peer.Account);
                 if (peer.Values.TryGetValue(entry.Schema.Id, out var old) && value == old) continue;
                 peer.Outgoing.Enqueue(ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 4, Generation = peer.Generation, Id = entry.Schema.Id, Value = value, Personal = entry.Schema.Personal }));
                 peer.Values[entry.Schema.Id] = value;

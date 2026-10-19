@@ -64,12 +64,10 @@ internal static partial class ScopedSettings
         ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = row.Schema });
         if (ItemListSettings.Has(row.Schema.Id))
         {
-            // An item list's value can reach its full size: the row must still fit one packet with the hints of a list.
-            var full = ScopedSettingsSnapshot.Clone(row.Schema);
-            full.Value = new string('0', ItemLimitList.MaxEncodedBytes);
-            full.Presentation = new ScopedSettingPresentation { Widget = ScopedWidget.ItemList, Label = new string('x', ScopedSettingPresentation.MaxLabelBytes) };
+            // An item list's value, help and kept hints can all reach their limits: the row must still fit one packet.
+            var full = ScopedSettingPresentation.WorstCaseListRow(row.Schema);
             try { ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = full }, ScopedSettingsWire.PresentationVersion); }
-            catch (ArgumentException) { throw new ArgumentException("This item list's help or default is too long to send with a full list."); }
+            catch (ArgumentException) { throw new ArgumentException("This item list's default or names are too long to send with a full list."); }
         }
         Entries.Add(row.Schema.Id, row); _schemaRevision++;
     }

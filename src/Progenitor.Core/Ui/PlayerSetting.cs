@@ -47,7 +47,11 @@ public sealed class PlayerSetting<T> : IDisposable
     {
         Check();
         if (presentation == null) throw new ArgumentNullException(nameof(presentation));
-        if (_registration != null) _registration.Catalog = presentation;
+        if (_registration != null)
+        {
+            _registration.Catalog = presentation;
+            ScopedSettings.PresentationChanged(); // connected players are sent the new definition
+        }
         return this;
     }
 

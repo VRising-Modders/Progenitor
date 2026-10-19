@@ -170,7 +170,14 @@ public sealed class SettingCondition
     {
         if (parts == null || parts.Length == 0) throw new ArgumentException("Give at least one condition.", nameof(parts));
         foreach (var p in parts) if (p == null) throw new ArgumentNullException(nameof(parts));
-        var c = new SettingCondition(op, "", "", "", (SettingCondition[])parts.Clone(), null);
+        // Same-kind groups are flattened, so chained & / | and repeated ShowWhen calls stay one level deep.
+        var flat = new List<SettingCondition>(parts.Length);
+        foreach (var p in parts)
+        {
+            if (p.Kind == op) flat.AddRange(p._parts);
+            else flat.Add(p);
+        }
+        var c = new SettingCondition(op, "", "", "", flat.ToArray(), null);
         c.CheckShape();
         return c;
     }
@@ -265,6 +272,28 @@ public sealed class SettingCondition
         if (Kind == Op.ServerMod) yield return Key;
         foreach (var p in _parts)
             foreach (var m in p.ServerMods()) yield return m;
+    }
+
+    /// <summary>
+    /// This condition without the comparisons <paramref name="keep"/> refuses (settings a client without the DLL
+    /// cannot read): a group keeps its other parts, a group left with one part becomes that part, and null means
+    /// nothing is left (no rule). The parts that remain are evaluated as before.
+    /// </summary>
+    internal SettingCondition? Prune(Func<SettingCondition, bool> keep)
+    {
+        if (Kind == Op.ServerMod) return this;
+        if (Kind is not (Op.All or Op.Any)) return keep(this) ? this : null;
+        var parts = new List<SettingCondition>(_parts.Length);
+        bool changed = false;
+        foreach (var p in _parts)
+        {
+            var kept = p.Prune(keep);
+            if (!ReferenceEquals(kept, p)) changed = true;
+            if (kept != null) parts.Add(kept);
+        }
+        if (!changed) return this;
+        if (parts.Count == 0) return null;
+        return parts.Count == 1 ? parts[0] : new SettingCondition(Kind, "", "", "", parts.ToArray(), null);
     }
 
     /// <summary>A copy for the wire, with the server's answers filled in, the local entry dropped.</summary>

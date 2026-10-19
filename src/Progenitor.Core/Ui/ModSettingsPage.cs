@@ -795,6 +795,15 @@ internal sealed class ModSettingsPageRegistration : IDisposable
                     case ModSettingsItemKind.Setting when item.Options.ScopedRowId != null:
                         // A published setting placed by id: drawn from the server's definition while it has one.
                         if (ScopedSettingsRows.Placed(item) is { } placed) items.Add(placed);
+                        else
+                        {
+                            // Not provided now: claim the id (this side's cfg row of a server-wide list is not drawn
+                            // raw in the automatic sections) and draw nothing.
+                            var claim = item.Options.Copy();
+                            claim.ClaimOnly = true;
+                            claim.ShowIf = () => false;
+                            items.Add(ModSettingsItem.ForInfo(item.Id, item.Options.Label ?? item.Id, () => "", 0, claim));
+                        }
                         break;
                     case ModSettingsItemKind.Setting when item.KeybindId != null:
                     {

@@ -74,6 +74,42 @@ internal sealed class ScopedSettingPresentation
         return copy;
     }
 
+    /// <summary>The last <see cref="Reduced"/> step: what is left is always sent.</summary>
+    internal const int MaxReduction = 4;
+
+    /// <summary>
+    /// A copy with the optional parts dropped, in order, up to <paramref name="level"/>: 1 category names (the ids are
+    /// shown), 2 the categories, 3 the choice labels (the stored values are shown), 4 the show/enable rules. The
+    /// control, label, section, order, step, units and list bounds are never dropped.
+    /// </summary>
+    internal ScopedSettingPresentation Reduced(int level)
+    {
+        var p = Copy();
+        if (level >= 1) p.CategoryLabels = (string[])p.CategoryIds.Clone();
+        if (level >= 2) { p.CategoryIds = Array.Empty<string>(); p.CategoryLabels = Array.Empty<string>(); }
+        if (level >= 3) p.ChoiceLabels = Array.Empty<string>();
+        if (level >= 4) { p.ShowIf = null; p.EnableIf = null; }
+        return p;
+    }
+
+    /// <summary>What <see cref="Reduced"/> drops at <paramref name="level"/>, for the log.</summary>
+    internal static string ReductionWords(int level) => level switch
+    {
+        1 => "category names",
+        2 => "categories",
+        3 => "categories and choice labels",
+        _ => "categories, choice labels and show/enable rules",
+    };
+
+    /// <summary>The block's encoded size for a row with <paramref name="choices"/> choices.</summary>
+    internal int EncodedBytes(int choices)
+    {
+        using var ms = new MemoryStream();
+        using (var w = new BinaryWriter(ms, Utf8, leaveOpen: true)) WriteUnchecked(w);
+        Validate(choices);
+        return (int)ms.Length;
+    }
+
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     /// <summary>
@@ -85,6 +121,12 @@ internal sealed class ScopedSettingPresentation
     {
         Validate(choices);
         long start = w.BaseStream.Position;
+        WriteUnchecked(w);
+        if (w.BaseStream.Position - start > MaxBlockBytes) throw new ArgumentException("Presentation hints exceed their byte limit.");
+    }
+
+    private void WriteUnchecked(BinaryWriter w)
+    {
         w.Write((byte)Widget);
         Text(w, Label); Text(w, SectionTitle);
         w.Write(SectionOrder); w.Write(RowOrder);
@@ -97,7 +139,6 @@ internal sealed class ScopedSettingPresentation
         w.Write((ushort)CategoryIds.Length);
         for (int i = 0; i < CategoryIds.Length; i++) { Text(w, CategoryIds[i]); Text(w, CategoryLabels[i]); }
         w.Write(AllowCategories); w.Write(MaxEntries); w.Write(MaxCount); Text(w, CountLabel);
-        if (w.BaseStream.Position - start > MaxBlockBytes) throw new ArgumentException("Presentation hints exceed their byte limit.");
     }
 
     internal static ScopedSettingPresentation Read(BinaryReader r, int choices)
@@ -172,6 +213,26 @@ internal sealed class ScopedSettingPresentation
         byte value = r.ReadByte();
         if (value > 1) throw new InvalidDataException("Invalid boolean.");
         return value == 1;
+    }
+
+    /// <summary>
+    /// The largest item-list row the server can send for <paramref name="schema"/>: a full list as its value, the
+    /// longest help a page can give it (the field limit), and the hints that are never dropped at their limits
+    /// (control, label, section, step, units, count label, orders and bounds). A row is accepted at registration only
+    /// when this fits one packet, so every later snapshot fits with at least those hints.
+    /// </summary>
+    internal static ScopedSettingRecord WorstCaseListRow(ScopedSettingRecord schema)
+    {
+        var row = ScopedSettingsSnapshot.Clone(schema);
+        row.Value = new string('0', ItemLimitList.MaxEncodedBytes);
+        row.Help = new string('h', ScopedSettingsWire.MaxFieldBytes);
+        row.Presentation = new ScopedSettingPresentation
+        {
+            Widget = ScopedWidget.ItemList, Label = new string('l', MaxLabelBytes), SectionTitle = new string('s', MaxLabelBytes),
+            SectionOrder = int.MaxValue, RowOrder = int.MaxValue, Step = new string('1', 32), Units = new string('u', MaxUnitsBytes),
+            CountLabel = new string('c', MaxUnitsBytes), AllowCategories = true, MaxEntries = ItemLimitList.MaxEntries, MaxCount = int.MaxValue,
+        };
+        return row;
     }
 
     // ---- derivation (server; game-free) ---------------------------------------------------------------------

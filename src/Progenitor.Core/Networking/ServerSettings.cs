@@ -105,7 +105,8 @@ public static partial class ServerSettings
             throw new ArgumentException("Server-editable plugin ids, sections and keys cannot contain '/'.");
         var id = pluginId + "/" + entry.Definition.Section + "/" + entry.Definition.Key;
         ServerSettingsWire.CheckText(id);
-        // An item list may hold up to ItemLimitList.MaxEncodedBytes; its edits travel over PrSt, not this channel.
+        // An item list may hold up to ItemLimitList.MaxEncodedBytes, more than this channel's text field: its stored
+        // value is not checked here. A PrSe answer about it carries no value when the value is too long (FitAnswer).
         if (!ItemListSettings.Has(id)) ServerSettingsWire.CheckText(SettingsEditors.Format(entry.BoxedValue));
         if (Entries.TryGetValue(id, out var previous)) previous.Dispose();
         var registration = new Registration(id, pluginId, entry);
@@ -415,6 +416,18 @@ public static partial class ServerSettings
     internal const string ControlCharactersError = "The value contains control characters.";
 
     /// <summary>
+    /// A result as the PrSe answer can carry it: an item list's value can be longer than the answer's text field
+    /// (<see cref="ServerSettingsWire.MaxTextBytes"/>), and is then left out (empty; a success stays a success, a
+    /// refusal keeps its reason) instead of failing the answer. The client gets the value through ConfigSync or PrSt.
+    /// </summary>
+    internal static ServerSettingResult FitAnswer(ServerSettingResult result)
+    {
+        static bool Fits(string? s) => s == null || System.Text.Encoding.UTF8.GetByteCount(s) <= ServerSettingsWire.MaxTextBytes;
+        if (Fits(result.Value) && Fits(result.Error)) return result;
+        return new(result.Success, "", result.Success ? "" : Fits(result.Error) ? result.Error : "The change was refused.");
+    }
+
+    /// <summary>
     /// TEXTLIMIT1: true for a refusal of the value itself (too long, too many bytes, control
     /// characters) — the editor keeps the typed text so it can be corrected — rather than a refusal
     /// of the request (not an admin, a conflict, a timeout), after which it shows the server's value.
@@ -613,7 +626,7 @@ public static partial class ServerSettings
                 currentUser.IsAdmin, Progenitor.Install.ServerAdminList.AuthorizeShared(currentUser.PlatformId, currentUser.IsAdmin));
             var result = Apply(request, Handshake.UserAnswerStatus(currentUser.Index) == "ok"
                 && PeerAllows(currentUser.Index, request.RowId), actor);
-            var response = request.WithResult(result);
+            var response = request.WithResult(FitAnswer(result));
             var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
             if (bootstrap != null) CustomEvents.SendToUser(bootstrap, currentUser.Index, EventId, ServerSettingsWire.Encode(response, true));
         }

@@ -120,6 +120,35 @@ internal static class ScopedSettingsWire
         { throw new ArgumentException("Scoped settings packet exceeds its byte limit.", nameof(packet), e); }
     }
 
+    /// <summary>
+    /// Encode a row (kind 2) so it fits: at version 2 its hints are reduced step by step
+    /// (<see cref="ScopedSettingPresentation.Reduced"/>) until the block and the packet fit, never dropping the control,
+    /// label, section or order; only a row that does not fit even then is sent without hints. <paramref name="reduced"/>
+    /// is the step used (0: whole, <see cref="ScopedSettingPresentation.MaxReduction"/> + 1: no hints). The packet's row
+    /// keeps the hints that were sent. Throws when the row itself does not fit.
+    /// </summary>
+    internal static byte[] EncodeRowFitted(ScopedSettingsPacket packet, byte version, out int reduced)
+    {
+        reduced = 0;
+        var row = packet.Row ?? throw new ArgumentException("A row packet is required.", nameof(packet));
+        var full = row.Presentation;
+        if (version != PresentationVersion || full == null) return Encode(packet, version);
+        for (int level = 0; level <= ScopedSettingPresentation.MaxReduction; level++)
+        {
+            row.Presentation = level == 0 ? full : full.Reduced(level);
+            try
+            {
+                var bytes = Encode(packet, version);
+                reduced = level;
+                return bytes;
+            }
+            catch (ArgumentException) { /* the next step drops more */ }
+        }
+        row.Presentation = null;
+        reduced = ScopedSettingPresentation.MaxReduction + 1;
+        return Encode(packet, version);
+    }
+
     internal static bool TryDecode(ReadOnlySpan<byte> bytes, bool fromServer, out ScopedSettingsPacket packet)
     {
         packet = null!;

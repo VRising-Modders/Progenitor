@@ -22,7 +22,7 @@ internal static partial class ScopedSettings
     private static ScopedSettingRecord ForPeer(Registration entry, ulong account, bool hints, double now)
     {
         var row = ScopedSettingsSnapshot.Clone(entry.Schema);
-        row.Value = entry.Read(account);
+        row.Value = SentValue(entry, account);
         row.Editable = row.Personal || ServerSettings.IsEditable(row.Id);
         PageItemSpec? item = null;
         string title = "";
@@ -48,26 +48,38 @@ internal static partial class ScopedSettings
         return row;
     }
 
+    /// <summary>The value a peer is sent: the stored one, except that a list edited by hand past its limit reads as empty.</summary>
+    private static string SentValue(Registration entry, ulong account)
+    {
+        string value = entry.Read(account);
+        if (!ItemListSettings.Has(entry.Schema.Id) || System.Text.Encoding.UTF8.GetByteCount(value) <= ItemLimitList.MaxEncodedBytes) return value;
+        if (WarnedConditions.Add(entry.Schema.Id + "|oversize"))
+            Plugin.Logger?.LogWarning("Settings: the stored list " + entry.Schema.Id + " is longer than " + ItemLimitList.MaxEncodedBytes + " bytes; it is shown as empty.");
+        return "";
+    }
+
     /// <summary>
-    /// A condition as sent: every setting it names must be a published setting of the same mod (else it is dropped,
-    /// with one warning), and its server facts carry the server's answers.
+    /// A condition as sent. A comparison that names a setting this mod does not publish is left out (clients without the
+    /// DLL cannot read it; one note in the log), and the rest of the rule is kept; a client with the DLL evaluates the
+    /// whole rule from its own page. Server facts carry the server's answers.
     /// </summary>
     private static SettingCondition? Publishable(ScopedSettingRecord row, SettingCondition? condition, double now)
     {
         if (condition == null) return null;
-        foreach (var (section, key) in condition.References())
+        var pruned = condition.Prune(c =>
         {
             string id;
-            try { id = RowId(row.PluginId, section, key); }
+            try { id = RowId(row.PluginId, c.Section, c.Key); }
             catch { id = ""; }
-            if (id.Length > 0 && Entries.ContainsKey(id)) continue;
-            if (WarnedConditions.Add(row.Id + "|" + section + "/" + key))
-                Plugin.Logger?.LogWarning("Settings: the rule on " + row.Id + " names " + section + "/" + key
-                    + ", which this mod does not publish; clients without the mod's DLL ignore the rule.");
-            return null;
-        }
-        foreach (var mod in condition.ServerMods()) WatchedMods.Add(mod);
-        return condition.Resolved(mod => ServerRuns(mod, now));
+            if (id.Length > 0 && Entries.ContainsKey(id)) return true;
+            if (WarnedConditions.Add(row.Id + "|" + c.Section + "/" + c.Key))
+                Plugin.Logger?.LogInfo("Settings: the rule on " + row.Id + " names " + c.Section + "/" + c.Key
+                    + ", which this mod does not publish; clients without the mod's DLL evaluate the rule without that part.");
+            return false;
+        });
+        if (pruned == null) return null;
+        foreach (var mod in pruned.ServerMods()) WatchedMods.Add(mod);
+        return pruned.Resolved(mod => ServerRuns(mod, now));
     }
 
     private static void DescribeList(ScopedSettingPresentation p, ItemListRules rules)
@@ -138,22 +150,26 @@ internal static partial class ScopedSettings
         if (signature != _factsSignature) { _factsSignature = signature; _schemaRevision++; }
     }
 
+    /// <summary>A published setting's presentation changed outside the page and catalog (a late <c>Present</c>): re-send the catalog.</summary>
+    internal static void PresentationChanged() => _schemaRevision++;
+
     private static void ResetPresentation()
     {
         WatchedMods.Clear(); WarnedConditions.Clear(); _loadedMods = null; _loadedModsAt = double.NegativeInfinity;
         _presentationEpoch = int.MinValue; _factsSignature = "";
     }
 
-    /// <summary>A row packet for a peer: version 2 with hints, falling back to the row without them when they do not fit.</summary>
+    /// <summary>
+    /// A row packet for a peer: version 2 with hints, reduced until they fit (<see cref="ScopedSettingsWire.EncodeRowFitted"/>).
+    /// A reduction is logged once per row and step, not per peer or snapshot.
+    /// </summary>
     private static byte[] RowPacket(Guid generation, ScopedSettingRecord row, bool hints)
     {
         byte version = hints ? ScopedSettingsWire.PresentationVersion : ScopedSettingsWire.Version;
-        try { return ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = generation, Row = row }, version); }
-        catch (ArgumentException e) when (row.Presentation != null)
-        {
-            Plugin.Logger?.LogWarning("Settings: presentation of " + row.Id + " omitted: " + e.Message);
-            row.Presentation = null;
-            return ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = generation, Row = row }, version);
-        }
+        var bytes = ScopedSettingsWire.EncodeRowFitted(new ScopedSettingsPacket { Kind = 2, Generation = generation, Row = row }, version, out int reduced);
+        if (reduced > 0 && WarnedConditions.Add(row.Id + "|reduced" + reduced))
+            Plugin.Logger?.LogWarning("Settings: the hints of " + row.Id + " do not fit one packet; sent without its "
+                + (reduced > ScopedSettingPresentation.MaxReduction ? "hints" : ScopedSettingPresentation.ReductionWords(reduced)) + ".");
+        return bytes;
     }
 }

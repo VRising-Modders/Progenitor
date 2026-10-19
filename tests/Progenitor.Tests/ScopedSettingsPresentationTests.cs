@@ -201,9 +201,122 @@ public sealed class ScopedSettingsPresentationTests : IDisposable
         var sixteen = Enumerable.Range(0, 15).Select(i => SettingCondition.Is("S", "K" + i, i)).ToArray();
         Assert.NotNull(SettingCondition.Any(sixteen)); // 15 parts and the group: 16
         Assert.Throws<ArgumentException>(() => SettingCondition.Any(sixteen.Append(SettingCondition.Is("S", "K", 1)).ToArray()));
+        // Alternating groups nest; same-kind groups flatten (chained & and repeated ShowWhen stay one level).
         var deep = SettingCondition.Is("S", "K", 1);
-        for (int i = 0; i < 3; i++) deep = SettingCondition.All(deep);
-        Assert.Throws<ArgumentException>(() => SettingCondition.All(deep));
+        for (int i = 0; i < 3; i++)
+            deep = i % 2 == 0 ? SettingCondition.Any(deep, SettingCondition.Is("S", "A" + i, 1)) : SettingCondition.All(deep, SettingCondition.Is("S", "A" + i, 1));
+        Assert.Throws<ArgumentException>(() => SettingCondition.All(deep, SettingCondition.Is("S", "Z", 1)));
+        var chained = SettingCondition.Is("S", "K0", 0);
+        for (int i = 1; i < 15; i++) chained = chained & SettingCondition.Is("S", "K" + i, i);
+        Assert.Equal(15, chained.Parts.Count);
+        Assert.All(chained.Parts, p => Assert.Equal(SettingCondition.Op.Equal, p.Kind));
+    }
+
+    [Fact]
+    public void Pruning_keeps_the_rest_of_a_rule()
+    {
+        var local = SettingCondition.IsNot("Me", "Local", "x");
+        var published = SettingCondition.Is("Server", "Enabled", true);
+        var fact = SettingCondition.ServerHasMod("satis");
+        bool Published(SettingCondition c) => c.Section == "Server";
+        Assert.Same(fact, SettingCondition.Any(local, fact).Prune(Published));
+        Assert.Equal("(Server/Enabled == true || server has satis)", SettingCondition.Any(local, published, fact).Prune(Published)!.ToString());
+        Assert.Null(local.Prune(Published));
+        Assert.Null(SettingCondition.All(local, SettingCondition.IsNot("Me", "Other", 1)).Prune(Published));
+        var whole = SettingCondition.All(published, fact);
+        Assert.Same(whole, whole.Prune(Published));
+    }
+
+    [Fact]
+    public void A_server_fact_falls_back_to_the_servers_mod_list()
+    {
+        try
+        {
+            Assert.Null(ScopedSettingsRows.ServerFact("auto", "satis"));
+            ScopedSettingsRows.ServerMods = guid => guid == "satis" ? true : guid == "unknown" ? null : false;
+            Assert.True(ScopedSettingsRows.ServerFact("auto", "satis"));
+            Assert.False(ScopedSettingsRows.ServerFact("auto", "other"));
+            Assert.Null(ScopedSettingsRows.ServerFact("auto", "unknown"));
+            // A client-only row's rule reads it through the page's local evaluation.
+            var (enabled, _, _, _) = Autoloot();
+            var registration = ModSettingsPages.Register(this, "auto", page => page.Section("Me")
+                .Toggle(enabled).ShowWhen(SettingCondition.ServerHasMod("satis"))
+                .Toggle(enabled).ShowWhen(SettingCondition.Any(SettingCondition.IsNot(enabled, true), SettingCondition.ServerHasMod("other"))));
+            var items = registration.SectionSpecs[0].Items;
+            Assert.True(items[0].Options.ShowIf!());
+            Assert.False(items[1].Options.ShowIf!());
+            enabled.Value = false;
+            Assert.True(items[1].Options.ShowIf!());
+            // An answer the server sent with a rule wins over the list.
+            var row = Record("Hint", "System.Boolean", "true");
+            row.Presentation = new ScopedSettingPresentation { ShowIf = SettingCondition.ServerHasMod("satis").Resolved(_ => false) };
+            ScopedSettings.SetForUiTests(true, false, row);
+            Assert.False(ScopedSettingsRows.ServerFact("auto", "satis"));
+        }
+        finally { ScopedSettingsRows.ServerMods = null; }
+    }
+
+    [Fact]
+    public void Hints_that_overflow_drop_optional_parts_first()
+    {
+        var choices = Enumerable.Range(0, 100).Select(i => "c" + i).ToArray();
+        var row = Record("Filter", "System.String", "", false, choices);
+        row.Presentation = new ScopedSettingPresentation
+        {
+            Widget = ScopedWidget.ItemList, Label = "Pickup filter", SectionTitle = "Me", SectionOrder = 1, RowOrder = 4,
+            AllowCategories = true, MaxEntries = 10, MaxCount = 50,
+            CategoryIds = Enumerable.Range(0, 64).Select(i => "cat" + i).ToArray(),
+            CategoryLabels = Enumerable.Range(0, 64).Select(_ => new string('n', 64)).ToArray(),
+            ChoiceLabels = choices.Select(_ => new string('l', 60)).ToArray(),
+            ShowIf = SettingCondition.Is("Server", "Enabled", true),
+        };
+        var packet = RowPacket(row);
+        var bytes = ScopedSettingsWire.EncodeRowFitted(packet, 2, out int reduced);
+        Assert.InRange(reduced, 1, ScopedSettingPresentation.MaxReduction);
+        Assert.True(ScopedSettingsWire.TryDecode(bytes, true, out var decoded));
+        var p = decoded.Row!.Presentation!;
+        Assert.Equal((ScopedWidget.ItemList, "Pickup filter", "Me", 1, 4, 10, 50), (p.Widget, p.Label, p.SectionTitle, p.SectionOrder, p.RowOrder, p.MaxEntries, p.MaxCount));
+        // Step by step: names, then categories, then choice labels, then rules.
+        var full = new ScopedSettingPresentation { CategoryIds = new[] { "a" }, CategoryLabels = new[] { "A" }, ChoiceLabels = new[] { "x" }, ShowIf = SettingCondition.Is("S", "K", 1) };
+        Assert.Equal("a", full.Reduced(1).CategoryLabels[0]);
+        Assert.Empty(full.Reduced(2).CategoryIds);
+        Assert.Single(full.Reduced(2).ChoiceLabels);
+        Assert.Empty(full.Reduced(3).ChoiceLabels);
+        Assert.NotNull(full.Reduced(3).ShowIf);
+        Assert.Null(full.Reduced(4).ShowIf);
+        // A small row is sent whole.
+        var small = Record("Radius", "System.Int32", "1");
+        small.Presentation = new ScopedSettingPresentation { Widget = ScopedWidget.Slider };
+        ScopedSettingsWire.EncodeRowFitted(RowPacket(small), 2, out reduced);
+        Assert.Equal(0, reduced);
+    }
+
+    [Fact]
+    public void The_registration_check_uses_the_largest_row_a_list_can_send()
+    {
+        var schema = Record("Filter", "System.String", "");
+        var worst = ScopedSettingPresentation.WorstCaseListRow(schema);
+        Assert.Equal(ItemLimitList.MaxEncodedBytes, worst.Value.Length);
+        Assert.Equal(ScopedSettingsWire.MaxFieldBytes, worst.Help.Length);
+        Assert.True(ScopedSettingsWire.Encode(RowPacket(worst), 2).Length <= ScopedSettingsWire.MaxPacketBytes);
+        schema.Default = new string('1', 4096);
+        schema.ModName = new string('m', 4096);
+        Assert.ThrowsAny<ArgumentException>(() => ScopedSettingsWire.Encode(RowPacket(ScopedSettingPresentation.WorstCaseListRow(schema)), 2));
+    }
+
+    [Fact]
+    public void A_long_list_is_answered_on_the_admin_channel_without_its_value()
+    {
+        string big = new string('9', 3000);
+        var ok = ServerSettings.FitAnswer(new ServerSettingResult(true, big, ""));
+        Assert.True(ok.Success);
+        Assert.Equal("", ok.Value);
+        var refused = ServerSettings.FitAnswer(new ServerSettingResult(false, big, "Counts are 0 to 10."));
+        Assert.Equal(("", "Counts are 0 to 10."), (refused.Value, refused.Error));
+        var small = new ServerSettingResult(true, "5=1", "");
+        Assert.Equal(small.Value, ServerSettings.FitAnswer(small).Value);
+        var bytes = ServerSettingsWire.Encode(new ServerSettingsMessage(Guid.NewGuid(), "auto/Server/Filter", "System.String", "", "", ok.Success, ok.Error), true);
+        Assert.NotEmpty(bytes);
     }
 
     [Fact]
@@ -611,9 +724,26 @@ public sealed class ScopedSettingsPresentationTests : IDisposable
         var groups = ModSettingsScopes.Regroup(merged);
         Assert.Contains(groups, g => g.Heading == "Your settings on this server");
 
-        // Without a server providing it, the placed row is not drawn.
+        // Without a server providing it, the placed row is not drawn (it only claims its id).
         ScopedSettings.SetForUiTests(false, false);
-        Assert.Empty(registration.Sections()[0].Items);
+        Assert.True(Assert.Single(registration.Sections()[0].Items).Options.ClaimOnly);
+        Assert.DoesNotContain(ModSettingsLayout.Build(registration.Sections(), null, null), s => s.Title == "Me");
+    }
+
+    [Fact]
+    public void A_placed_server_wide_list_offline_claims_its_cfg_row()
+    {
+        var file = new ConfigFile(Path.Combine(_dir, "offline.cfg"), false);
+        var entry = file.Bind("Server", "Filter", "5=1", "");
+        ScopedSettings.SetForUiTests(false, false);
+        var registration = ModSettingsPages.Register(this, "auto", page => page.Section("Server")
+            .AddScoped("auto/Server/Filter", null, null, "Pickup filter", null, null, null));
+        var built = ModSettingsLayout.Build(registration.Sections(), null, new[] { SettingsRow.ForEntry("auto", entry, true) });
+        Assert.Empty(built.SelectMany(s => s.Items)); // no raw text field holding the encoded list
+        // Once a server provides it, the list row is drawn in its place.
+        ScopedSettings.SetForUiTests(true, true, ListRecord("5=1", personal: false));
+        built = ModSettingsLayout.Build(registration.Sections(), null, new[] { SettingsRow.ForEntry("auto", entry, true) });
+        Assert.Equal(AdminSettingKind.ItemList, Assert.Single(built.SelectMany(s => s.Items)).Admin!.Kind);
     }
 
     [Fact]
@@ -716,6 +846,70 @@ public sealed class ScopedSettingsPresentationTests : IDisposable
         view.Release();
         Assert.False(editor.IsOpen);
         _view = null;
+    }
+
+    [Fact]
+    public void Changes_made_while_the_server_answers_are_queued_not_lost()
+    {
+        string stored = "11=5";
+        var answers = new List<Action>();
+        var hints = ListRecord("").Presentation!;
+        var spec = new AdminSettingSpec
+        {
+            Manifest = true, Personal = true, PluginId = "auto", SettingId = "auto/Server/Filter", Key = "auto/Server/Filter",
+            Label = "Pickup filter", Kind = AdminSettingKind.ItemList, ListHints = hints, DefaultValue = "",
+            Read = () => stored,
+            SendExpected = (value, expected, done) =>
+            {
+                answers.Add(() => { stored = value; done(true, ""); });
+                return new Lease();
+            },
+        };
+        ScopedSettings.SetForUiTests(true, false); // connected: a manifest row is available
+        var item = ModSettingsItem.ForAdmin(spec.SettingId, spec, new ModSettingOptions { Scope = SettingScope.Personal });
+        _view = new ModSettingsView("auto", new[] { new ModSettingsSection("S", ModSettingsSectionKind.Group, new List<ModSettingsItem> { item }) }, "",
+            () => ServerPartState.Running, () => new SettingsScopeContext { Connection = SettingConnection.Progenitor, ServerPart = ServerPartState.Running });
+        _view.Build(UiApi.Panel("Queue", this, "auto"), (_, _, _) => { });
+        var editor = _view.ItemListFor(spec.SettingId)!;
+        Assert.True(editor.Add(new[] { "i:12" }));
+        Assert.True(editor.Add(new[] { "i:13" }));                      // the first change is still waiting
+        Assert.True(editor.Apply(l => ModSettingsView.ItemListEditor.WithCount(l, "i:11", 9)));
+        Assert.Equal(2, editor.QueuedCount);
+        Assert.Single(answers);
+        answers[0]();                                                      // the server answers: the queue goes out together
+        Assert.Equal(0, editor.QueuedCount);
+        Assert.Equal(2, answers.Count);
+        answers[1]();
+        Assert.Equal("11=9;12=0;13=0", stored);
+    }
+
+    private sealed class Lease : IDisposable { public void Dispose() { } }
+
+    [Fact]
+    public void A_count_limit_of_zero_means_zero_on_both_sides()
+    {
+        var record = ListRecord("11=0");
+        record.Presentation!.MaxCount = 0;
+        var view = DrawList(record);
+        var editor = view.ItemListFor(record.Id)!;
+        Assert.False(editor.Commit(ItemLimitList.Of(new[] { ItemLimit.ForItem(11, 1) })));
+        Assert.Empty(ScopedSettings.Requests);
+        Assert.False(ItemLimitList.TryParse("11=1", new ItemListRules { MaxCount = 0 }, out _, out _));
+        Assert.True(editor.Add(new[] { "i:12" }));
+        Assert.Equal("11=0;12=0", record.Value);
+    }
+
+    [Fact]
+    public void A_resent_catalog_with_the_same_rows_is_not_a_page_rebuild()
+    {
+        var a = ListRecord("11=5");
+        var b = ListRecord("12=9;13=1");
+        b.Default = a.Default; // only the value differs
+        Assert.Equal(ModsMenu.ScopedShape(new[] { a }), ModsMenu.ScopedShape(new[] { b }));
+        b.Presentation!.Label = "Other";
+        Assert.NotEqual(ModsMenu.ScopedShape(new[] { a }), ModsMenu.ScopedShape(new[] { b }));
+        b = ListRecord("x"); b.Editable = false;
+        Assert.NotEqual(ModsMenu.ScopedShape(new[] { a }), ModsMenu.ScopedShape(new[] { b }));
     }
 
     [Fact]
