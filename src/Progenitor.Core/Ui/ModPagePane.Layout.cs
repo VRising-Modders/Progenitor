@@ -702,7 +702,10 @@ internal sealed partial class ModPagePane
         panel.CellRow(SectionHeading("about", AboutHeading));
         float m = ModPageSpacing.Margin;
         float width = Math.Max(CellLayout.MinTextWidth, Math.Min(ModPageSpacing.ReadableWidth, RowWidth - 2f * m - HeadBlockLayout.RightColumnInset));
-        if (blocks.Count == 0)
+        // ABOUTMD1: each block in its own look (a heading larger, a list item indented by its depth, a quote as an
+        // indented muted note, a table as aligned columns when they fit), from the game-free ModAboutLayout.
+        var rows = ModAboutLayout.Rows(blocks, width, _model.Name);
+        if (rows.Count == 0)
         {
             var none = panel.CellRow(new CellRowSpec("page-about-0", ModPageSpacing.WithLead(new[]
             {
@@ -712,14 +715,14 @@ internal sealed partial class ModPagePane
             return;
         }
 
-        for (int i = 0; i < blocks.Count; i++)
+        int tables = 0;
+        foreach (var r in rows)
+            if (r.Key.EndsWith(ModAboutLayout.TableHeadSuffix, StringComparison.Ordinal)) tables++;
+        for (int i = 0; i < rows.Count; i++)
         {
-            string text = blocks[i].Text;
-            int lines = MenuPanelLayout.WrappedLines(text, width, CellLayout.TextFontSize, 40);
-            var row = panel.CellRow(new CellRowSpec("page-about-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture), ModPageSpacing.WithLead(new[]
-            {
-                new CellSpec(CellKind.Text, "text").With(text: text, width: CellWidth.Px(width), wrap: CellWrap.Wrap, vAlign: CellVAlign.Top),
-            }), height: AboutRowHeight(lines), rightInset: HeadBlockLayout.RightColumnInset, plain: true));
+            var spec = rows[i];
+            var row = panel.CellRow(new CellRowSpec(spec.Key, ModPageSpacing.WithLead(spec.Cells), height: spec.Height,
+                rightInset: HeadBlockLayout.RightColumnInset, plain: true, gapAbove: spec.GapAbove));
             if (i == 0)
                 Add(row, RowReadme, new Dictionary<string, object?>
                 {
@@ -727,6 +730,8 @@ internal sealed partial class ModPagePane
                     ["chars"] = MarkdownPlain.ContentLength(blocks),
                     ["blocks"] = blocks.Count,
                     ["source"] = source,
+                    ["rows"] = rows.Count,
+                    ["tables"] = tables,
                 });
         }
     }
@@ -781,5 +786,241 @@ internal sealed partial class ModPagePane
     }
 
     /// <summary>An About paragraph's height: its wrapped lines at the body size, plus a small pad.</summary>
-    internal static float AboutRowHeight(int lines) => Math.Max(1, lines) * (CellLayout.TextFontSize * 1.45f) + 8f;
+    internal static float AboutRowHeight(int lines) => ModAboutLayout.LineHeight(lines, CellLayout.TextFontSize);
+}
+
+/// <summary>ABOUTMD1: one About row: its readback key, its cells after the page margin, its height and the space above it.</summary>
+internal readonly struct ModAboutRow
+{
+    internal ModAboutRow(string key, List<CellSpec> cells, float height, float gapAbove = -1f)
+    {
+        Key = key;
+        Cells = cells;
+        Height = height;
+        GapAbove = gapAbove;
+    }
+
+    internal string Key { get; }
+    internal List<CellSpec> Cells { get; }
+    internal float Height { get; }
+
+    /// <summary>The space above the row; negative for the panel's ordinary row gap.</summary>
+    internal float GapAbove { get; }
+}
+
+/// <summary>
+/// ABOUTMD1 (live 2026.10.136: a template mod's About showed its README's blockquote marker and its settings table as
+/// pipe text): the About section's rows from the README's blocks (<see cref="MarkdownPlain.RenderBlocks"/>). Game-free.
+/// <list type="bullet">
+/// <item>a heading is a line at <see cref="HeadingFontSize"/> with <see cref="HeadingGapAbove"/> above it; a leading
+/// level-1 heading that only repeats the mod's name (the page's own title) is dropped;</item>
+/// <item>a list item is indented <see cref="ListIndent"/> per nesting level, its bullet or number kept;</item>
+/// <item>a quote is an indented note (<see cref="QuoteIndent"/>) in the muted tone, without its <c>&gt;</c>;</item>
+/// <item>a code line is muted and indented like a quote;</item>
+/// <item>a table is aligned columns (a muted header row, then one row per data row, each cell wrapping in its column)
+/// when its columns fit the text width (<see cref="TableColumns"/>); otherwise each data row is one line, its cells labeled
+/// by the header row (<see cref="MarkdownPlain.TableRowLine"/>).</item>
+/// </list>
+/// Every cell is a plain text cell, so every <c>&lt;</c> reaches its label escaped.
+/// </summary>
+internal static class ModAboutLayout
+{
+    internal const string KeyPrefix = "page-about-";
+
+    /// <summary>The header row of an aligned table: <c>page-about-&lt;first row's block&gt;-head</c>.</summary>
+    internal const string TableHeadSuffix = "-head";
+
+    /// <summary>The first cell's key on every row (a table's first column too); a table's other columns are <c>col-1</c>, <c>col-2</c>, ….</summary>
+    internal const string TextKey = "text";
+
+    internal const string ColumnKeyPrefix = "col-";
+
+    /// <summary>The empty cell that indents a list item, quote or code line.</summary>
+    internal const string IndentKey = "indent";
+
+    /// <summary>A README heading inside About: between the body (20) and the section headings (24).</summary>
+    internal const float HeadingFontSize = 22f;
+
+    /// <summary>The space above a heading that is not the section's first row.</summary>
+    internal const float HeadingGapAbove = 14f;
+
+    internal const float ListIndent = 24f;
+
+    internal const float QuoteIndent = 24f;
+
+    /// <summary>The narrowest column an aligned table keeps; below it the table is drawn as labeled lines.</summary>
+    internal const float MinColumnWidth = 96f;
+
+    /// <summary>The most columns drawn aligned.</summary>
+    internal const int MaxColumns = 5;
+
+    /// <summary>What a column adds to its widest caption's estimate.</summary>
+    internal const float ColumnPad = 10f;
+
+    /// <summary>The most lines one About row is measured for.</summary>
+    internal const int MaxLines = 40;
+
+    internal static List<ModAboutRow> Rows(IReadOnlyList<MarkdownBlock>? blocks, float width, string? pageName)
+    {
+        var rows = new List<ModAboutRow>();
+        if (blocks == null || blocks.Count == 0) return rows;
+        width = Math.Max(CellLayout.MinTextWidth, width);
+        int start = IsTitleHeading(blocks[0], pageName) ? 1 : 0;
+        for (int i = start; i < blocks.Count; i++)
+        {
+            var block = blocks[i];
+            string key = KeyPrefix + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            switch (block.Kind)
+            {
+                case MarkdownBlockKind.Heading:
+                    rows.Add(TextRow(key, block.Text, width, 0f, CellTone.Normal, HeadingFontSize, rows.Count > 0 ? HeadingGapAbove : -1f));
+                    break;
+                case MarkdownBlockKind.ListItem:
+                    rows.Add(TextRow(key, block.Text, width, ListIndent * Math.Min(3, block.Level), CellTone.Normal, CellLayout.TextFontSize));
+                    break;
+                case MarkdownBlockKind.Quote:
+                case MarkdownBlockKind.Code:
+                    rows.Add(TextRow(key, block.Text, width, QuoteIndent, CellTone.Muted, CellLayout.TextFontSize));
+                    break;
+                case MarkdownBlockKind.Table:
+                {
+                    if (block.Header != null && block.Cells != null)
+                    {
+                        int end = i;
+                        while (end + 1 < blocks.Count && blocks[end + 1].Kind == MarkdownBlockKind.Table
+                               && ReferenceEquals(blocks[end + 1].Header, block.Header) && blocks[end + 1].Cells != null)
+                            end++;
+                        var data = new List<IReadOnlyList<string>>(end - i + 1);
+                        for (int r = i; r <= end; r++) data.Add(blocks[r].Cells!);
+                        var columns = TableColumns(block.Header, data, width);
+                        if (columns != null)
+                        {
+                            rows.Add(TableRow(key + TableHeadSuffix, block.Header, columns, CellTone.Muted));
+                            for (int r = i; r <= end; r++)
+                                rows.Add(TableRow(KeyPrefix + r.ToString(System.Globalization.CultureInfo.InvariantCulture), blocks[r].Cells!, columns, CellTone.Normal));
+                            i = end;
+                            break;
+                        }
+                    }
+
+                    rows.Add(TextRow(key, block.Text, width, 0f, CellTone.Normal, CellLayout.TextFontSize));
+                    break;
+                }
+                default:
+                    rows.Add(TextRow(key, block.Text, width, 0f, CellTone.Normal, CellLayout.TextFontSize));
+                    break;
+            }
+        }
+
+        return rows;
+    }
+
+    /// <summary>A leading level-1 heading that only repeats the page's own title (the mod's name).</summary>
+    internal static bool IsTitleHeading(MarkdownBlock block, string? pageName)
+    {
+        if (block.Kind != MarkdownBlockKind.Heading || block.Level != 1 || string.IsNullOrWhiteSpace(pageName)) return false;
+        return string.Equals(Squash(block.Text), Squash(pageName!), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string Squash(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (char c in s)
+            if (char.IsLetterOrDigit(c)) sb.Append(c);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The column widths of an aligned table <paramref name="width"/> wide (gaps between the columns excluded), or null
+    /// when it is drawn as lines: fewer than two or more than <see cref="MaxColumns"/> columns, or a wrapping column
+    /// narrower than <see cref="MinColumnWidth"/>. Each column asks for its widest caption's estimate plus
+    /// <see cref="ColumnPad"/>; when the asks do not fit, the narrow columns keep their asks and the wide ones share the
+    /// rest equally (and wrap).
+    /// </summary>
+    internal static float[]? TableColumns(IReadOnlyList<string>? header, IReadOnlyList<IReadOnlyList<string>>? rows, float width)
+    {
+        if (header == null || header.Count < 2 || header.Count > MaxColumns || rows == null || rows.Count == 0) return null;
+        int n = header.Count;
+        float room = width - (n - 1) * CellLayout.Gap;
+        if (room < n * MinColumnWidth) return null;
+        var ask = new float[n];
+        for (int c = 0; c < n; c++)
+        {
+            float w = CellLayout.EstimateTextWidth(header[c], CellLayout.TextFontSize);
+            foreach (var row in rows)
+                if (c < row.Count) w = Math.Max(w, CellLayout.EstimateTextWidth(row[c], CellLayout.TextFontSize));
+            ask[c] = w + ColumnPad;
+        }
+
+        var result = new float[n];
+        var settled = new bool[n];
+        float left = room;
+        int open = n;
+        // Water-filling: a column asking for no more than an equal share of what is left keeps its ask.
+        bool changed = true;
+        while (changed && open > 0)
+        {
+            changed = false;
+            float share = left / open;
+            for (int c = 0; c < n; c++)
+            {
+                if (settled[c] || ask[c] > share) continue;
+                result[c] = ask[c];
+                settled[c] = true;
+                left -= ask[c];
+                open--;
+                changed = true;
+            }
+        }
+
+        if (open > 0)
+        {
+            float share = left / open;
+            if (share < MinColumnWidth) return null;
+            for (int c = 0; c < n; c++)
+                if (!settled[c]) result[c] = share;
+        }
+        else if (left > 0f)
+        {
+            // Everything fits: the last column takes the rest, so its text wraps as late as it can.
+            result[n - 1] += left;
+        }
+
+        return result;
+    }
+
+    private static ModAboutRow TextRow(string key, string text, float width, float indent, CellTone tone, float fontSize, float gapAbove = -1f)
+    {
+        var cells = new List<CellSpec>();
+        float textWidth = Math.Max(CellLayout.MinTextWidth, width - indent);
+        if (indent > 0f)
+        {
+            // An empty fixed cell, as the margin is (a spacer would take the row's remainder and push the text right).
+            float w = Math.Max(1f, indent - CellLayout.Gap);
+            cells.Add(new CellSpec(CellKind.Muted, IndentKey).With(text: "", width: CellWidth.Px(w), minWidth: w));
+        }
+        cells.Add(new CellSpec(CellKind.Text, TextKey).With(text: text, width: CellWidth.Px(textWidth), wrap: CellWrap.Wrap,
+            vAlign: CellVAlign.Top, tone: tone, fontSize: fontSize));
+        int lines = MenuPanelLayout.WrappedLines(text, textWidth, fontSize, MaxLines);
+        return new ModAboutRow(key, cells, LineHeight(lines, fontSize), gapAbove);
+    }
+
+    private static ModAboutRow TableRow(string key, IReadOnlyList<string> cells, float[] columns, CellTone tone)
+    {
+        var specs = new List<CellSpec>(columns.Length);
+        int lines = 1;
+        for (int c = 0; c < columns.Length; c++)
+        {
+            string text = c < cells.Count ? cells[c] ?? "" : "";
+            specs.Add(new CellSpec(CellKind.Text, c == 0 ? TextKey : ColumnKeyPrefix + c.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                .With(text: text, width: CellWidth.Px(columns[c]), wrap: CellWrap.Wrap, vAlign: CellVAlign.Top, tone: tone,
+                    minWidth: columns[c]));
+            lines = Math.Max(lines, MenuPanelLayout.WrappedLines(text, columns[c], CellLayout.TextFontSize, MaxLines));
+        }
+
+        return new ModAboutRow(key, specs, LineHeight(lines, CellLayout.TextFontSize));
+    }
+
+    /// <summary>A row's height for <paramref name="lines"/> lines of <paramref name="fontSize"/> type (<see cref="ModPagePane.AboutRowHeight"/> at the body size).</summary>
+    internal static float LineHeight(int lines, float fontSize) => Math.Max(1, lines) * (fontSize * 1.45f) + 8f;
 }

@@ -10007,6 +10007,8 @@ internal sealed partial class InstallModsPane
     {
         MarkdownBlockKind.Heading => new CellLine(CellLineKind.Heading, block.Text ?? ""),
         MarkdownBlockKind.Code => new CellLine(CellLineKind.Code, block.Text ?? ""),
+        // ABOUTMD1: a blockquote is a note, in the muted tone.
+        MarkdownBlockKind.Quote => new CellLine(CellLineKind.Muted, block.Text ?? ""),
         _ => new CellLine(CellLineKind.Body, block.Text ?? ""),
     };
 
@@ -10920,6 +10922,7 @@ internal sealed partial class InstallModsPane
         {
             MarkdownBlockKind.Heading => panel.Heading(text),
             MarkdownBlockKind.Code => panel.Note(text),
+            MarkdownBlockKind.Quote => panel.Note(text),
             _ => panel.Label(text),
         };
     }

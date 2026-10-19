@@ -854,6 +854,49 @@ internal readonly struct ModSettingsRowGrid
         return new RowColumns(NameWidth, left + NameInset + NameWidth * 0.5f, ControlWidth, left + ControlLeft + ControlWidth * 0.5f);
     }
 
+    /// <summary>
+    /// TOGGLEFIT1: the name's width on a row whose control has <paramref name="shape"/>. A compact control at the row's
+    /// right (the checkbox, a keybind's cap) leaves the control column empty to its left, so the name runs up to one
+    /// <see cref="Gap"/> before the control instead of stopping at <see cref="ControlLeft"/>; every other shape starts at
+    /// the column and keeps <see cref="NameWidth"/>. Live 2026.10.136: in a game-look window "Show the greeting on join"
+    /// drew as "Show the greeti…" with about 340 px of empty column before its checkbox.
+    /// </summary>
+    internal float NameWidthFor(SettingsControlShape shape)
+    {
+        switch (shape)
+        {
+            case SettingsControlShape.Checkbox:
+            case SettingsControlShape.KeyCap:
+                return Math.Max(NameWidth, ControlSlot(shape).Left - NameInset - Gap);
+            default:
+                return NameWidth;
+        }
+    }
+
+    /// <summary>
+    /// TOGGLEFIT1: a name column <paramref name="width"/> wide starting at <paramref name="left"/> (both from the row's
+    /// center), cut to end at <paramref name="right"/> when a chip sits there (NaN: no chip), never below the grid's own
+    /// <see cref="MinNameWidth"/> floor or 1.
+    /// </summary>
+    internal static float NameWidthBeforeChip(float width, float left, float right)
+    {
+        float w = Math.Max(1f, width);
+        if (float.IsNaN(right) || float.IsInfinity(right)) return w;
+        return Math.Max(Math.Min(w, MinNameWidth), Math.Min(w, right - left));
+    }
+
+    /// <summary>
+    /// <see cref="Columns(bool)"/> for a row whose control has <paramref name="shape"/>: the control column is the same,
+    /// the name column is <see cref="NameWidthFor"/> wide.
+    /// </summary>
+    internal RowColumns Columns(bool hasControl, SettingsControlShape shape)
+    {
+        if (!hasControl) return Columns(false);
+        float left = -RowWidth * 0.5f;
+        float name = NameWidthFor(shape);
+        return new RowColumns(name, left + NameInset + name * 0.5f, ControlWidth, left + ControlLeft + ControlWidth * 0.5f);
+    }
+
     /// <summary>An x from the row's left edge as an offset from its center.</summary>
     internal float FromCenter(float xFromLeft) => xFromLeft - RowWidth * 0.5f;
 

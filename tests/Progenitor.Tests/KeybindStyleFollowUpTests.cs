@@ -264,6 +264,60 @@ namespace Progenitor.Tests
             AssertHeadingTitleTakesTheRow(pane, "game:movement");
         }
 
+        /// <summary>
+        /// KEYSHEAD1 (live 2026.10.136): a fresh template mod's heading drew as "My M… »" while "Progenitor »" fit. The
+        /// title cell was the caption's glyph estimate (6 characters at 22 px, times the 1.15 slack): two wide capitals
+        /// drew wider than that, and TMP cut the name. The title is now sized by the runtime from the caption measured
+        /// with the drawn font (<see cref="CellSpec.FitCaption"/>), and the page glyph follows the measured width.
+        /// What this would catch: the flag dropped from the mod heading, the runtime no longer fitting the caption before
+        /// it places the cells, or a measured width that the layout does not honor.
+        /// </summary>
+        [Fact]
+        public void A_mod_heading_is_as_wide_as_its_measured_caption_and_the_page_glyph_follows_it()
+        {
+            ResetArt();
+            UseGame(GameIn("AutoMove", new KeyChord(UiKey.F), GameKeybindCatalog.Movement));
+            RegisterMod("my.mod", "My Mod");
+            using var reg = ModsMenu.Register(_owner, "my.mod", "My Mod");
+            Keybinds.Register(_owner, "my.mod", "Open", File("my"), F9, "", () => { });
+            OpenKeybindsTab();
+            var pane = Pane();
+            var section = pane.Model!.Sections.First(s => ((IUiCellRow)pane.HeadingOf(s.Id)!).Cells.Any(c => c.Key == KeybindsPane.CellOpenPage));
+            var heading = (IUiCellRow)pane.HeadingOf(section.Id)!;
+            var title = heading.Cells.Single(c => c.Key == KeybindsPane.CellTitle);
+            Assert.Equal("My Mod", title.Text);
+            Assert.True(title.FitCaption, "the mod heading's title is sized to its measured caption");
+            Assert.Equal(CellWidthMode.Px, title.Width.Mode);
+
+            // The runtime's step, with a drawn width 40% over the estimate (wide capitals).
+            float estimate = title.Width.Value;
+            float measured = CellLayout.EstimateTextWidth(title.Text, KeybindsTabLayout.CategoryFontSize) * 1.4f;
+            float fitted = CellLayout.FitCaptionWidth(estimate, measured, 1236f);
+            Assert.Equal(measured + CellLayout.CaptionFitPad, fitted, 2);
+            Assert.True(fitted > estimate, "the estimate was too narrow for the drawn caption");
+            var cells = heading.Cells.Select(c => c.Key == KeybindsPane.CellTitle
+                ? new CellSpec(CellKind.Text, c.Key).With(text: c.Text, width: CellWidth.Px(fitted), minWidth: fitted, fontSize: c.FontSize)
+                : c).ToList();
+            var placed = MenuPanelLayout.CellColumns(1236f, new CellRowSpec("probe", cells, rightInset: heading.RightInset)).Where(p => p.Visible).ToList();
+            var t = placed.Single(p => p.Key == KeybindsPane.CellTitle);
+            var icon = placed.Single(p => p.Key == KeybindsPane.CellOpenPage);
+            Assert.Equal(fitted, t.Width, 1);
+            Assert.Equal(t.Right + CellLayout.Gap, icon.Left, 1);
+
+            // An unusable measurement keeps the estimate; a huge one is capped at the row.
+            Assert.Equal(estimate, CellLayout.FitCaptionWidth(estimate, -1f, 1236f));
+            Assert.Equal(estimate, CellLayout.FitCaptionWidth(estimate, float.NaN, 1236f));
+            Assert.Equal(500f, CellLayout.FitCaptionWidth(estimate, 9000f, 500f));
+
+            // The runtime fits captions before it resolves the cells on every placement.
+            string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs");
+            int place = runtime.IndexOf("        public void PlaceCells(float rowWidth)", StringComparison.Ordinal);
+            int fit = runtime.IndexOf("            FitCaptions(rowWidth);", place, StringComparison.Ordinal);
+            int resolve = runtime.IndexOf("var placements = MenuPanelLayout.CellColumns(rowWidth, _spec);", place, StringComparison.Ordinal);
+            Assert.True(place > 0 && fit > place && resolve > fit, "PlaceCells fits captions, then resolves the cells");
+            Assert.Contains("measured = tmp.GetPreferredValues(tmp.text, float.PositiveInfinity, float.PositiveInfinity).x;", runtime, StringComparison.Ordinal);
+        }
+
         // ---- KEYS3 live K8: an owned copy of the borrowed sprites ----------------------------------
 
         [Fact]

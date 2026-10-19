@@ -1377,9 +1377,9 @@ internal static class KeybindsTabLayout
 
     /// <summary>
     /// Live 2026-09-30: the kit's 1.3 slack (and a 120 px floor) left short names like "Progenitor" far from
-    /// their page icon. A smaller slack keeps the glyph about one space after the name; the estimate is
-    /// not a measurement, so a name much wider than its estimate could still be cut (runtime request:
-    /// measure the caption and place the glyph after it).
+    /// their page icon. A smaller slack keeps the glyph about one space after the name. KEYSHEAD1: the estimate
+    /// is only the fallback now; the title cell is <see cref="CellSpec.FitCaption"/>, so the runtime sizes it to
+    /// the caption measured with the drawn font (live 2026.10.136: "My Mod", two wide capitals, drew as "My M…").
     /// </summary>
     internal const float HeadingTitleSlack = 1.15f;
     internal const string AllCaption = "All";

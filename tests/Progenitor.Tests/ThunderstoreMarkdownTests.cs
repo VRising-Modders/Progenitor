@@ -66,8 +66,8 @@ public sealed class ThunderstoreMarkdownTests
     public void Markdown_list_items_become_bullets()
     {
         Assert.Equal("• a\n• b", MarkdownPlain.Render("- a\n- b"));
-        Assert.Equal("• one", MarkdownPlain.Render("1. one"));
-        // Revert: dropping the list marker without a bullet fails this.
+        Assert.Equal("1. one", MarkdownPlain.Render("1. one"));
+        // Revert: dropping the list marker without a bullet, or a numbered item's number, fails this.
     }
 
     [Fact]
@@ -107,10 +107,12 @@ public sealed class ThunderstoreMarkdownTests
     }
 
     [Fact]
-    public void Markdown_tables_join_cells_with_pipes()
+    public void Markdown_table_rows_are_labeled_by_the_header_row()
     {
-        Assert.Equal("a | b\n1 | 2", MarkdownPlain.Render("| a | b |\n| --- | --- |\n| 1 | 2 |"));
-        // Revert: dropping tables or keeping the separator row fails this.
+        Assert.Equal("1 — b: 2", MarkdownPlain.Render("| a | b |\n| --- | --- |\n| 1 | 2 |"));
+        // ABOUTMD1: a pipe row without a separator is not a table, and still shows no raw pipes.
+        Assert.Equal("a · b", MarkdownPlain.Render("| a | b |"));
+        // Revert: dropping tables, keeping the separator row, or drawing raw pipes fails this.
     }
 
     [Fact]
@@ -127,9 +129,10 @@ public sealed class ThunderstoreMarkdownTests
         Assert.Equal(MarkdownBlockKind.Code, blocks[3].Kind);
         Assert.Equal("int x;", blocks[3].Text);
         Assert.Equal(MarkdownBlockKind.Table, blocks[4].Kind);
-        Assert.Equal("a | b", blocks[4].Text);
-        Assert.Equal(MarkdownBlockKind.Table, blocks[5].Kind);
-        Assert.Equal("1 | 2", blocks[5].Text);
+        Assert.Equal("1 — b: 2", blocks[4].Text);
+        Assert.Equal(new[] { "1", "2" }, blocks[4].Cells);
+        Assert.Equal(new[] { "a", "b" }, blocks[4].Header);
+        Assert.Equal(5, blocks.Count);
         Assert.All(blocks, b => Assert.DoesNotContain("\n\n", b.Text, StringComparison.Ordinal));
         Assert.DoesNotContain(blocks, b => b.Text.IndexOf("Title", StringComparison.Ordinal) >= 0
             && b.Text.IndexOf("first paragraph", StringComparison.Ordinal) >= 0);

@@ -487,12 +487,15 @@ internal sealed class KeybindsPane
         if (withPageLink)
         {
             // Requested 2026-09-30: "Open mod page" is a small icon right after the mod's name. The
-            // title is as wide as its caption (with the kit's measuring slack), the icon follows it, and
-            // the count stays at the right.
-            cells.Add(new CellSpec(CellKind.Text, CellTitle).With(text: title ?? "",
+            // title is as wide as its caption, the icon follows it, and the count stays at the right.
+            // KEYSHEAD1 (live 2026.10.136: "My Mod" drew as "My M… »"): the runtime sizes the title to its
+            // caption measured with the drawn font; the estimate with the kit's slack is only its fallback.
+            var titleCell = new CellSpec(CellKind.Text, CellTitle).With(text: title ?? "",
                 width: CellWidth.Px(KeybindsTabLayout.HeadingTitleWidth(title ?? "")), fontSize: KeybindsTabLayout.CategoryFontSize,
                 vAlign: CellVAlign.Bottom, tone: CellTone.Normal,
-                minWidth: KeybindsTabLayout.HeadingTitleWidth(title ?? "")));
+                minWidth: KeybindsTabLayout.HeadingTitleWidth(title ?? ""));
+            titleCell.FitCaption = true;
+            cells.Add(titleCell);
             // Live 2026-09-30: a plain inline glyph, no button chrome, muted; hovering the heading (the
             // whole heading is the link: a click anywhere opens the page) brightens it.
             float glyph = CellLayout.EstimateTextWidth(KeybindsTabLayout.OpenModPageGlyph, KeybindsTabLayout.CategoryFontSize) + 6f;

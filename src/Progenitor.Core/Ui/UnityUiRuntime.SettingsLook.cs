@@ -1720,6 +1720,8 @@ internal sealed partial class UnityUiRuntime
             float nameH = ModSettingsRowGrid.NameFontSize + 8f;
             float block = nameH + (helpShown ? GridHelpLineHeight : 0f);
             float blockTop = Math.Max(0f, (total - block) * 0.5f);
+            // TOGGLEFIT1: a name that runs up to a compact control stops before a shown chip instead.
+            float nameRight = float.NaN;
             if (_gridChrome.TryGetValue(row.Go, out var chrome) && chrome.Chip != null)
             {
                 bool chipOn = false;
@@ -1739,6 +1741,7 @@ internal sealed partial class UnityUiRuntime
                         rt.anchoredPosition = new Vector2(ModSettingsRowGrid.ChipCenterX(controlLeft, w), 0f);
                     }
                     catch { /* */ }
+                    nameRight = ModSettingsRowGrid.ChipCenterX(controlLeft, w) - w * 0.5f - ModSettingsRowGrid.Gap;
                 }
             }
 
@@ -1746,7 +1749,8 @@ internal sealed partial class UnityUiRuntime
             {
                 try
                 {
-                    float w = Math.Max(1f, columns.LabelWidth);
+                    float labelLeft = columns.LabelX - columns.LabelWidth * 0.5f;
+                    float w = ModSettingsRowGrid.NameWidthBeforeChip(columns.LabelWidth, labelLeft, nameRight);
                     var rt = row.Label.GetComponent<RectTransform>();
                     if (rt != null)
                     {
@@ -1754,7 +1758,7 @@ internal sealed partial class UnityUiRuntime
                         rt.anchorMax = new Vector2(0.5f, 0.5f);
                         rt.pivot = new Vector2(0.5f, 0.5f);
                         rt.sizeDelta = new Vector2(w, nameH);
-                        rt.anchoredPosition = new Vector2(columns.LabelX, total * 0.5f - blockTop - nameH * 0.5f);
+                        rt.anchoredPosition = new Vector2(labelLeft + w * 0.5f, total * 0.5f - blockTop - nameH * 0.5f);
                     }
 
                     var tmp = row.Label.GetComponent<TextMeshProUGUI>();
