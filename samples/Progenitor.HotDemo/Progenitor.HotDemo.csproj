@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.HotDemo</AssemblyName>
     <RootNamespace>Progenitor.HotDemo</RootNamespace>
-    <Description>Client-capable dummy plugin for the Install tab's hot-load lane (job HOT2).</Description>
+    <Description>Client-capable demo plugin that installs and loads while the game runs.</Description>
     <BepInExPluginGuid>progenitor.hotdemo</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Hot Demo</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.SharedResourcesTest</AssemblyName>
     <RootNamespace>Progenitor.SharedResourcesTest</RootNamespace>
-    <Description>TEST PLUGIN for the material sources (ctx.MaterialSource) live checks: an administrator-scoped fixed provider and inventory captures. Server only; not a sample to ship.</Description>
+    <Description>Test plugin for material sources (ctx.MaterialSource): an administrator-scoped fixed provider and inventory captures. Server only; not a sample to ship.</Description>
     <ReferenceGame>true</ReferenceGame>
   </PropertyGroup>
   <ItemGroup>

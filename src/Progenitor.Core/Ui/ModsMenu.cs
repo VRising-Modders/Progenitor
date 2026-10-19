@@ -6383,7 +6383,7 @@ public static partial class ModsMenu
         var listing = check.PackageVerified
             ? ModPageListing.FromEntry(entry, check.SameVersion ? ReadmeFor(entry!) : null)
             : ModPageListing.None;
-        var about = ModAboutText.Choose(check.SameVersion, listing.ReadmeMarkdown, PluginAboutOf(pluginId, mod, pluginFile));
+        var about = ModAboutText.ForPage(pluginId, check.SameVersion, listing.ReadmeMarkdown, PluginAboutOf(pluginId, mod, pluginFile));
         bool loadedHere = row?.Inventory != null && ModMenuInventory.IsLocalLocation(row.Inventory.Location);
         // LINK1: a name match is a listing to read, not evidence about the files on disk. It never
         // decides that this copy is the reloader's, and it never reports a half.

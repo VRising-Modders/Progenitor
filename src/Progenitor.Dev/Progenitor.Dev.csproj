@@ -2,7 +2,8 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.Dev</AssemblyName>
     <RootNamespace>Progenitor.Dev</RootNamespace>
-    <Description>Progenitor debug bridge: loopback JSON socket for reload, logs, commands, and inspection. Dev machines only.</Description>
+    <!-- The debug bridge: a loopback JSON socket for reload, logs, commands and inspection. -->
+    <Description>Developer tools for Progenitor mod authors. For development machines only; not needed to play.</Description>
     <BepInExPluginGuid>progenitor.dev</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Dev Bridge</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>
