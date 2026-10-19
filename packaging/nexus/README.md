@@ -13,6 +13,7 @@ The fields for Progenitor's Nexus Mods page. The description is [description.bbc
 | Category | Miscellaneous (V Rising's Nexus categories are Gameplay, Miscellaneous and User Interface) |
 | Brief overview | In-game mod manager and modding framework for V Rising. Install, update and set up mods from a Mods menu, join modded servers with the right versions, and hot reload for mod authors. Needs only BepInEx. |
 | Language | English |
+| Links (the page's link fields, if offered) | GitHub https://github.com/VRising-Modders/Progenitor, YouTube https://www.youtube.com/@ProgenitorMods, X https://x.com/ProgenitorMods |
 | Tags | Mod manager, Framework, Utilities, Multiplayer, AI Assisted (code written with AI coding assistants), AI-generated media (the artwork) |
 | Primary image | `00-primary.jpg` |
 | Header image | `header-1920x480.jpg` (a 1400×400 copy is also made) |

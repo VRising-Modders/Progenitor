@@ -170,6 +170,8 @@ To test a plugin on both sides, host a private game from the client, or stage a 
 
 Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md). AI coding agents read [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md). Report security problems privately as described in [SECURITY.md](SECURITY.md). Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
+Follow Progenitor on [YouTube](https://www.youtube.com/@ProgenitorMods) and [X](https://x.com/ProgenitorMods).
+
 ## License
 
 GNU Lesser General Public License, version 2.1 only (`LGPL-2.1-only`). See [`LICENSE`](LICENSE). [`NOTICE`](NOTICE) lists the dependencies and the few borrowed ideas, with attribution. No third-party source code is copied into this repository.

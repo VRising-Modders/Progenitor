@@ -58,3 +58,5 @@ The same files work in the game and on a dedicated server. Progenitor adds `BepI
 ## About
 
 Progenitor is in active development. Its API covers much of what a mod needs, not yet everything; missing pieces are welcome as feedback or as pull requests. Original code under the LGPL-2.1 license; its only dependency is BepInEx. Source, documentation and issues: [github.com/VRising-Modders/Progenitor](https://github.com/VRising-Modders/Progenitor).
+
+Follow Progenitor on [YouTube](https://www.youtube.com/@ProgenitorMods) and [X](https://x.com/ProgenitorMods).
