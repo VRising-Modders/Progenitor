@@ -162,7 +162,11 @@ public static partial class Ui
     /// </summary>
     internal static void DialogChrome(IUiPanel panel)
     {
-        if (panel is UiPanelHandle tagged) tagged.Flows = false;
+        if (panel is UiPanelHandle tagged)
+        {
+            tagged.Flows = false;
+            tagged.IsDialog = true;
+        }
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().DialogChrome(runtimePanel); }
@@ -1029,7 +1033,7 @@ public static partial class Ui
             if (shown.Count == 0) return;
             shown.Sort(static (a, b) => a.PlacementSlot.CompareTo(b.PlacementSlot));
 
-            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel, p => p.Flows, p => p.ShownSequence, p => p.EffectiveDock))
+            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel, p => p.Flows, p => p.ShownSequence, p => p.EffectiveDock, DrawBandOf))
                 panel.PlaceAt(spot);
         }
         catch (Exception e)
@@ -1039,6 +1043,10 @@ public static partial class Ui
             Plugin.Logger?.LogWarning("Ui: panel re-flow threw: " + e.Message);
         }
     }
+
+    /// <summary>PICKFRONT1: the stack a shown panel's canvas order is counted in (<see cref="UiWindowLayout.DrawOrders"/>).</summary>
+    internal static UiDrawBand DrawBandOf(UiPanelHandle panel) =>
+        panel.MountedInTab ? UiDrawBand.None : panel.IsDialog ? UiDrawBand.Dialog : UiDrawBand.Floating;
 
     /// <summary>WINDOWS1: whether the runtime was last asked to dim the workspace behind the windows.</summary>
     private static bool _windowShade;

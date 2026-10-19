@@ -38,6 +38,7 @@ internal static partial class ScopedSettings
         internal int Revision = -1;
         internal bool Admin;
         internal bool Presentation; // declared Capability.ScopedSettingsPresentation: sent version 2 rows
+        internal bool ListFilters; // also declared Capability.ScopedSettingsListFilters: sent version 3 rows
         internal Guid Generation;
         internal Guid PreviousGeneration; // writes sent before the client received the newer snapshot
         internal double SendStarted;
@@ -94,6 +95,7 @@ internal static partial class ScopedSettings
         {
             Entity = entity, Account = user.PlatformId,
             Presentation = (capabilities & Handshake.Capability.ScopedSettingsPresentation) != 0,
+            ListFilters = (capabilities & Handshake.Capability.ScopedSettingsListFilters) != 0,
         };
         // Sent on the next frame, after the existing handshake/config/catalog sequence.
         _nextPoll = 0;
@@ -222,7 +224,7 @@ internal static partial class ScopedSettings
             try
             {
                 var row = ForPeer(entry, peer.Account, peer.Presentation, Now());
-                rowPackets.Add(RowPacket(generation, row, peer.Presentation));
+                rowPackets.Add(RowPacket(generation, row, peer.Presentation, peer.ListFilters));
                 values[row.Id] = row.Value;
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("Setting omitted from catalog " + entry.Schema.Id + ": " + e.Message); }

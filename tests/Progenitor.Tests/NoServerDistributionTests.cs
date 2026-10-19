@@ -181,8 +181,8 @@ public sealed class NoServerDistributionTests : IDisposable
         // ItemLedgerChunks (262144) and ItemDefinitionPriority (2097152); C3 added VersionRanges (8388608); C4 added
         // ProgenitorExact (67108864); requests and subscriptions added ModExchange (134217728); material sources added
         // MaterialCharacterCraft (268435456) and MaterialRefineView (536870912); scoped settings added ScopedSettings (1073741824)
-        // and ScopedSettingsPresentation (16).
-        Assert.Equal("17ca7a7d7", row.Version);
+        // and ScopedSettingsPresentation (16); PICKFRONT1 added ScopedSettingsListFilters (32).
+        Assert.Equal("17ca7a7f7", row.Version);
 
         // The handshake and the client policy both ask the same question.
         string hs = SourcePin.ReadFile("src", "Progenitor.Core", "Networking", "Handshake.cs");

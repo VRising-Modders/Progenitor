@@ -61,11 +61,28 @@ internal sealed class ScopedSettingsPacket
 /// is laid out as in version 1. The server sends version 2 only to a client that declared
 /// <c>Capability.ScopedSettingsPresentation</c>; a version 1 client is sent version 1, without hints. Both versions
 /// decode here; clients always send version 1 writes.</para>
+///
+/// <para>Version 3 (<see cref="ListFilterVersion"/>, PICKFRONT1) is version 2 whose presentation block ends with one more
+/// byte: the item-list filter flags (<see cref="ScopedSettingPresentation.StackableOnly"/> is bit 0; the other bits are
+/// 0). It is sent only to a client that declared <c>Capability.ScopedSettingsListFilters</c>; a version 2 client is
+/// sent version 2, without the flags (its picker lists every item, and the server still refuses what the rules
+/// refuse).</para>
 /// </summary>
 internal static class ScopedSettingsWire
 {
     internal const byte Version = 1;
     internal const byte PresentationVersion = 2;
+    internal const byte ListFilterVersion = 3;
+
+    /// <summary>
+    /// PICKFRONT1: the row version a peer is sent: 1 without hints, 2 with them, 3 when it also reads the item-list
+    /// filter flags (<c>Capability.ScopedSettingsListFilters</c>).
+    /// </summary>
+    internal static byte RowVersion(bool hints, bool listFilters) =>
+        !hints ? Version : listFilters ? ListFilterVersion : PresentationVersion;
+
+    /// <summary>A version this wire encodes and decodes (1 to <see cref="ListFilterVersion"/>).</summary>
+    internal static bool Known(byte version) => version >= Version && version <= ListFilterVersion;
     internal const int MaxPacketBytes = 15 * 1024;
     internal const int MaxFieldBytes = 4096;
     internal const int MaxRows = 512;
@@ -77,7 +94,7 @@ internal static class ScopedSettingsWire
     /// <summary>Encode at <paramref name="version"/> (1, or 2 with a row's presentation hints).</summary>
     internal static byte[] Encode(ScopedSettingsPacket packet, byte version)
     {
-        if (version != Version && version != PresentationVersion) throw new ArgumentOutOfRangeException(nameof(version));
+        if (!Known(version)) throw new ArgumentOutOfRangeException(nameof(version));
         Validate(packet);
         // Fixed backing buffer prevents even an invalid combination of bounded fields growing the packet.
         var buffer = new byte[MaxPacketBytes];
@@ -94,11 +111,11 @@ internal static class ScopedSettingsWire
                     writer.Write(packet.Count); writer.Write(packet.CanEdit); Write(writer, packet.ServerName); break;
                 case 2:
                     WriteRow(writer, packet.Row!);
-                    if (version == PresentationVersion)
+                    if (version >= PresentationVersion)
                     {
                         var hints = packet.Row!.Presentation;
                         writer.Write(hints != null);
-                        hints?.Write(writer, packet.Row.Choices.Length);
+                        hints?.Write(writer, packet.Row.Choices.Length, version);
                     }
                     break;
                 case 3:
@@ -132,7 +149,7 @@ internal static class ScopedSettingsWire
         reduced = 0;
         var row = packet.Row ?? throw new ArgumentException("A row packet is required.", nameof(packet));
         var full = row.Presentation;
-        if (version != PresentationVersion || full == null) return Encode(packet, version);
+        if (version < PresentationVersion || full == null) return Encode(packet, version);
         for (int level = 0; level <= ScopedSettingPresentation.MaxReduction; level++)
         {
             row.Presentation = level == 0 ? full : full.Reduced(level);
@@ -152,7 +169,7 @@ internal static class ScopedSettingsWire
     internal static bool TryDecode(ReadOnlySpan<byte> bytes, bool fromServer, out ScopedSettingsPacket packet)
     {
         packet = null!;
-        if (bytes.Length < 18 || bytes.Length > MaxPacketBytes || (bytes[0] != Version && bytes[0] != PresentationVersion) ||
+        if (bytes.Length < 18 || bytes.Length > MaxPacketBytes || !Known(bytes[0]) ||
             bytes[1] < 1 || bytes[1] > 6 || fromServer == (bytes[1] == 5)) return false;
         try
         {
@@ -166,8 +183,8 @@ internal static class ScopedSettingsWire
                     result.Count = reader.ReadInt32(); result.CanEdit = ReadBool(reader); result.ServerName = Read(reader); break;
                 case 2:
                     result.Row = ReadRow(reader);
-                    if (version == PresentationVersion && ReadBool(reader))
-                        result.Row.Presentation = ScopedSettingPresentation.Read(reader, result.Row.Choices.Length);
+                    if (version >= PresentationVersion && ReadBool(reader))
+                        result.Row.Presentation = ScopedSettingPresentation.Read(reader, result.Row.Choices.Length, version);
                     break;
                 case 3:
                     result.Count = reader.ReadInt32(); break;

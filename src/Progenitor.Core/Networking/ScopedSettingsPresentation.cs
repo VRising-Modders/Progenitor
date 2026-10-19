@@ -59,11 +59,19 @@ internal sealed class ScopedSettingPresentation
     internal int MaxEntries { get; set; }
     internal int MaxCount { get; set; }
     internal string CountLabel { get; set; } = "";
+    /// <summary>
+    /// PICKFRONT1 (<see cref="ItemListRules.StackableOnly"/>): the item picker lists only items that stack. Sent in
+    /// version 3 blocks only (<see cref="ScopedSettingsWire.ListFilterVersion"/>).
+    /// </summary>
+    internal bool StackableOnly { get; set; }
+
+    /// <summary>The version 3 filter flags byte: bit 0 <see cref="StackableOnly"/>; every other bit is refused.</summary>
+    internal const byte StackableOnlyFlag = 1;
 
     internal bool IsEmpty => Widget == ScopedWidget.Default && Label.Length == 0 && SectionTitle.Length == 0
         && SectionOrder < 0 && RowOrder < 0 && Step == null && Units.Length == 0 && ChoiceLabels.Length == 0
         && ShowIf == null && EnableIf == null && CategoryIds.Length == 0 && !AllowCategories && MaxEntries == 0
-        && MaxCount == 0 && CountLabel.Length == 0;
+        && MaxCount == 0 && CountLabel.Length == 0 && !StackableOnly;
 
     internal ScopedSettingPresentation Copy()
     {
@@ -102,10 +110,10 @@ internal sealed class ScopedSettingPresentation
     };
 
     /// <summary>The block's encoded size for a row with <paramref name="choices"/> choices.</summary>
-    internal int EncodedBytes(int choices)
+    internal int EncodedBytes(int choices, byte version = ScopedSettingsWire.ListFilterVersion)
     {
         using var ms = new MemoryStream();
-        using (var w = new BinaryWriter(ms, Utf8, leaveOpen: true)) WriteUnchecked(w);
+        using (var w = new BinaryWriter(ms, Utf8, leaveOpen: true)) WriteUnchecked(w, version);
         Validate(choices);
         return (int)ms.Length;
     }
@@ -115,17 +123,18 @@ internal sealed class ScopedSettingPresentation
     /// <summary>
     /// The version 2 row block: widget byte, label, section title, section order (i32), row order (i32), step presence +
     /// text, units, choice label count (u16) + labels, show-if presence + condition, enable-if presence + condition,
-    /// category count (u16) + id/label pairs, allow-categories, max entries (i32), max count (i32), count label.
+    /// category count (u16) + id/label pairs, allow-categories, max entries (i32), max count (i32), count label. Version 3
+    /// adds the filter flags byte (<see cref="StackableOnlyFlag"/>) at the end.
     /// </summary>
-    internal void Write(BinaryWriter w, int choices)
+    internal void Write(BinaryWriter w, int choices, byte version = ScopedSettingsWire.PresentationVersion)
     {
         Validate(choices);
         long start = w.BaseStream.Position;
-        WriteUnchecked(w);
+        WriteUnchecked(w, version);
         if (w.BaseStream.Position - start > MaxBlockBytes) throw new ArgumentException("Presentation hints exceed their byte limit.");
     }
 
-    private void WriteUnchecked(BinaryWriter w)
+    private void WriteUnchecked(BinaryWriter w, byte version)
     {
         w.Write((byte)Widget);
         Text(w, Label); Text(w, SectionTitle);
@@ -139,9 +148,10 @@ internal sealed class ScopedSettingPresentation
         w.Write((ushort)CategoryIds.Length);
         for (int i = 0; i < CategoryIds.Length; i++) { Text(w, CategoryIds[i]); Text(w, CategoryLabels[i]); }
         w.Write(AllowCategories); w.Write(MaxEntries); w.Write(MaxCount); Text(w, CountLabel);
+        if (version >= ScopedSettingsWire.ListFilterVersion) w.Write(StackableOnly ? StackableOnlyFlag : (byte)0);
     }
 
-    internal static ScopedSettingPresentation Read(BinaryReader r, int choices)
+    internal static ScopedSettingPresentation Read(BinaryReader r, int choices, byte version = ScopedSettingsWire.PresentationVersion)
     {
         long start = r.BaseStream.Position;
         var p = new ScopedSettingPresentation { Widget = (ScopedWidget)r.ReadByte() };
@@ -161,6 +171,12 @@ internal sealed class ScopedSettingPresentation
         p.CategoryLabels = new string[categories];
         for (int i = 0; i < categories; i++) { p.CategoryIds[i] = Read(r); p.CategoryLabels[i] = Read(r); }
         p.AllowCategories = Bool(r); p.MaxEntries = r.ReadInt32(); p.MaxCount = r.ReadInt32(); p.CountLabel = Read(r);
+        if (version >= ScopedSettingsWire.ListFilterVersion)
+        {
+            byte flags = r.ReadByte();
+            if ((flags & ~StackableOnlyFlag) != 0) throw new InvalidDataException("Unknown item-list filter flags.");
+            p.StackableOnly = (flags & StackableOnlyFlag) != 0;
+        }
         if (r.BaseStream.Position - start > MaxBlockBytes) throw new InvalidDataException("Presentation hints too large.");
         try { p.Validate(choices); }
         catch (ArgumentException e) { throw new InvalidDataException(e.Message); }
@@ -231,6 +247,7 @@ internal sealed class ScopedSettingPresentation
             Widget = ScopedWidget.ItemList, Label = new string('l', MaxLabelBytes), SectionTitle = new string('s', MaxLabelBytes),
             SectionOrder = int.MaxValue, RowOrder = int.MaxValue, Step = new string('1', 32), Units = new string('u', MaxUnitsBytes),
             CountLabel = new string('c', MaxUnitsBytes), AllowCategories = true, MaxEntries = ItemLimitList.MaxEntries, MaxCount = int.MaxValue,
+            StackableOnly = true,
         };
         return row;
     }

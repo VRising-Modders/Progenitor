@@ -66,7 +66,7 @@ internal static partial class ScopedSettings
         {
             // An item list's value, help and kept hints can all reach their limits: the row must still fit one packet.
             var full = ScopedSettingPresentation.WorstCaseListRow(row.Schema);
-            try { ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = full }, ScopedSettingsWire.PresentationVersion); }
+            try { ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = full }, ScopedSettingsWire.ListFilterVersion); }
             catch (ArgumentException) { throw new ArgumentException("This item list's default or names are too long to send with a full list."); }
         }
         Entries.Add(row.Schema.Id, row); _schemaRevision++;
@@ -137,7 +137,7 @@ internal static partial class ScopedSettings
             if (parsed is string listText && ItemListSettings.TryGet(id, out var listRules))
             {
                 // An item list: the server's own rules decide it, and the canonical text is stored.
-                if (!ItemListSettings.TryCanonical(listRules, listText, out var canonical, out var listError)) return new(false, current, listError);
+                if (!ItemListSettings.TryCanonical(listRules, listText, current, out var canonical, out var listError)) return new(false, current, listError);
                 parsed = canonical;
             }
             if (bounds != null && !bounds.IsValid(parsed)) return new(false, current, "Outside the values this setting accepts.");

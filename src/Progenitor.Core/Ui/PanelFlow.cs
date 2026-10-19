@@ -65,6 +65,7 @@ internal readonly struct PanelSpot
         Layer = 0;
         Docks = null;
         DockIndex = -1;
+        Sorting = 0;
     }
 
     private PanelSpot(in PanelSpot from, UiDockSpec[]? docks, int dockIndex, bool workspaceOpen)
@@ -76,7 +77,27 @@ internal readonly struct PanelSpot
         Layer = from.Layer;
         Docks = docks;
         DockIndex = dockIndex;
+        Sorting = from.Sorting;
     }
+
+    private PanelSpot(in PanelSpot from, int sorting)
+    {
+        this = from;
+        Sorting = sorting > 0 ? sorting : 0;
+    }
+
+    /// <summary>
+    /// PICKFRONT1: this spot with the canvas order the shown set gives the panel (<see cref="UiWindowLayout.DrawOrders"/>);
+    /// 0 leaves the panel's own order.
+    /// </summary>
+    internal PanelSpot WithSorting(int sorting) => new(this, sorting);
+
+    /// <summary>
+    /// PICKFRONT1: the panel's canvas order in the shown set, by show order: a panel shown later (a picker or popup a
+    /// window opened) draws over every panel shown before it in its band. 0: the runtime keeps the panel's own order
+    /// (a workspace pane, a panel mounted in a game window's tab, a spot that was not counted with the set).
+    /// </summary>
+    internal int Sorting { get; }
 
     /// <summary>
     /// DOCK1: this spot with the shown docked panels (<paramref name="docks"/>, in slot order) the layout keeps clear of,
@@ -110,6 +131,7 @@ internal readonly struct PanelSpot
         Layer = layer >= 0 ? layer : rank;
         Docks = null;
         DockIndex = -1;
+        Sorting = 0;
     }
 
     /// <summary>

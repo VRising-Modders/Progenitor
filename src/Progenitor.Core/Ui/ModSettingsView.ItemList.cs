@@ -263,7 +263,10 @@ internal sealed partial class ModSettingsView
             foreach (var e in catalog) _byGuid[e.PrefabGuid] = e;
         }
 
-        /// <summary>The picker's entries: the categories the server offers, then every named item, the listed ones grayed.</summary>
+        /// <summary>
+        /// The picker's entries: the categories the server offers, then every named item (only the ones that stack when
+        /// the server sent <see cref="ItemListRules.StackableOnly"/>), the listed ones grayed.
+        /// </summary>
         internal List<UiChecklistEntry> PickerEntries()
         {
             Index();
@@ -282,9 +285,11 @@ internal sealed partial class ModSettingsView
                         DisabledReason = listed.Contains(key) ? "Already listed" : "",
                     }.Text("type", "Category"));
                 }
+            bool stackableOnly = hints?.StackableOnly ?? false;
             foreach (var e in _byGuid.Values)
             {
                 if (e.DisplayName is not { Length: > 0 } name) continue;
+                if (!ItemListRules.Offers(stackableOnly, e.MaxAmount)) continue;
                 string key = "i:" + e.PrefabGuid.ToString(CultureInfo.InvariantCulture);
                 entries.Add(new UiChecklistEntry(key, name)
                 {
@@ -297,7 +302,8 @@ internal sealed partial class ModSettingsView
             return entries;
         }
 
-        private void OpenPicker()
+        /// <summary>The "+ Add…" button: open (or bring back) the picker over the list window.</summary>
+        internal void OpenPicker()
         {
             if (!_binding.Enabled || _spec.ViewOnlyNow()) return;
             if (_pickerWindow is not { IsDisposed: false })
@@ -381,8 +387,9 @@ internal sealed partial class ModSettingsView
                 Say(QueuedNote);
                 return true;
             }
-            var next = change(Current);
-            if (next.Check(Rules) is { } problem)
+            var current = Current;
+            var next = change(current);
+            if ((next.Check(Rules) ?? Rules.CheckStackable(next, current, StackSizeHere)) is { } problem)
             {
                 Say(problem);
                 return false;
@@ -424,6 +431,14 @@ internal sealed partial class ModSettingsView
             MaxEntries = Hints is { MaxEntries: > 0 } h ? h.MaxEntries : ItemLimitList.MaxEntries,
             MaxCount = MaxCount,
             AllowCategories = Hints?.AllowCategories ?? true,
+            StackableOnly = Hints?.StackableOnly ?? false,
         };
+
+        /// <summary>A prefab's stack size in this client's catalog (the one the picker lists), null when it is not there.</summary>
+        private int? StackSizeHere(int prefabGuid)
+        {
+            if (_byGuid.Count == 0) Index();
+            return _byGuid.TryGetValue(prefabGuid, out var entry) ? entry.MaxAmount : null;
+        }
     }
 }
