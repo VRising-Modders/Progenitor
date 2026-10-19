@@ -6786,6 +6786,11 @@ Recent is **verified live in part on 2026-10-18**: release package 2026.10.128 (
 observer stage on the server and was added on the client (the [`build_search` diagnostics](bridge-ops-client.md#build_search)
 counters); a lamp post was recorded too, so the history held two blueprints and the Recent category read "2 recent";
 placing again from Recent moved that building to the top. Copy building's name fill was verified live the same day.
+**Verified live on 2026-10-19** (release package 2026.10.133, main 0e415ea2a, installed cold on the client, the
+server and a headless second client, no hot swap): with Recent open, RECENT was the only category drawn selected, no
+tag was drawn selected and the row read "2 recent". Copy building filled the box ("'Invocation' Candle Rack",
+"1 found", box not focused); after the placement was cancelled with Space, one Escape cleared the search, build mode
+stayed open on Lighting > Candle Stands and the category buttons came back, and a second Escape left build mode.
 The rest of Recent, Copy building, the box position and the disabled categories are not live-verified on the current main ([not yet proven](#build-search-not-yet-proven)).
 Before the port onto it, a Copy building press was observed on the Steam
 client (2026-10-15, one wooden floor blueprint): it picked the hovered building, the same press with the menu
@@ -6815,8 +6820,10 @@ hot swap gives the selection look back to the game at once. Source-checked again
 turns it off on the game's buttons after that update while Recent shows, so the game's next update restores its
 own state by itself. `ForceSelect`, a stronger override the entries' refresh does not write, is never set (a
 leftover one is cleared when the menu opens). Game-free rules: `BuildMenuTabLook.cs` (`BuildMenuTabLookTests`).
-Built and unit-tested; not live-verified (a 2026-10-18 screenshot showed Castle and Foundation still drawn selected
-under Recent before this change).
+Built and unit-tested. **Verified live 2026-10-19** (release package 2026.10.133, main 0e415ea2a, cold install, no
+hot swap): with Recent open, RECENT was the only category drawn selected and no tag was drawn selected (a 2026-10-18
+screenshot showed Castle and Foundation still drawn selected under Recent before this change). Not live-verified:
+a search typed over Recent, the look after leaving Recent, and a Core unload or hot swap while Recent shows.
 
 The server says which placements finished: a server running this Core sends each confirmed build back to its
 builder on the Core-reserved event `'PrRb'` (versioned; both sides drop a malformed packet). On a server without it,
@@ -6890,7 +6897,7 @@ The **Copy building** key is stored as `CopyBuilding` in the same file and is re
 | Type | From two letters on, the item row shows the matches from every tab, at most 48 cells. The count beside the box reads "12 found", or "48 of 212 found" when there are more. One letter filters the selected tab. |
 | Hover a result | The tooltip is the game's own, with the breadcrumb saying where the item normally lives. |
 | x button (shown while the box has text) | Clears the search and keeps the keyboard in the box. The row is the selected tab again, with nothing selected for placement. |
-| Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. With text in the box and the box not focused (after Copy building, say), one Escape also clears the search and the build menu stays open and build mode stays on; the next Escape, with the search empty, is the game's own. A dialog, a key capture, the chat box or the Mods menu takes Escape first. In build mode Escape is three game actions on keyboard and mouse: `Back`, `Building_Deselect` (drops the current placement) and `Building_Exit` (leaves build mode and closes the build menu). While the search owns Escape, the menu-hotkey guard (input order 498, ahead of the build menu at 502 and build mode's own input order, `BuildMode` = 602) takes `Back`, `Menu_Close` and `Building_Exit`, kept until Escape is up; the search keeps a close-key input hold (`UiInputCapture.AcquireCloseKey`) meanwhile, because the guard context exists only while some hold wants one. `Building_Exit` is also taken for the other close-hold reasons (a key capture, a framework dialog), on keyboard and mouse only. `Building_Deselect` is not taken (it is also Space), so an Escape that clears the search with a placement selected also drops that placement. Live 2026-10-18 (client 2026.10.128, main 07bad52da): taking only `Back` and `Menu_Close` let that Escape leave build mode. The fix is unit-tested in its decisions; not live-verified. Build mode's own registration order was not read (the `BuildMode` order is inferred from the game's order list). |
+| Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. With text in the box and the box not focused (after Copy building, say), one Escape also clears the search and the build menu stays open and build mode stays on; the next Escape, with the search empty, is the game's own. A dialog, a key capture, the chat box or the Mods menu takes Escape first. In build mode Escape is three game actions on keyboard and mouse: `Back`, `Building_Deselect` (drops the current placement) and `Building_Exit` (leaves build mode and closes the build menu). While the search owns Escape, the menu-hotkey guard (input order 498, ahead of the build menu at 502 and build mode's own input order, `BuildMode` = 602) takes `Back`, `Menu_Close` and `Building_Exit`, kept until Escape is up; the search keeps a close-key input hold (`UiInputCapture.AcquireCloseKey`) meanwhile, because the guard context exists only while some hold wants one. `Building_Exit` is also taken for the other close-hold reasons (a key capture, a framework dialog), on keyboard and mouse only. `Building_Deselect` is not taken (it is also Space), so an Escape that clears the search with a placement selected also drops that placement. Live 2026-10-18 (client 2026.10.128, main 07bad52da): taking only `Back` and `Menu_Close` let that Escape leave build mode. The fix is unit-tested in its decisions. **Verified live 2026-10-19** (release package 2026.10.133, main 0e415ea2a, keyboard and mouse): Copy building filled the box ("'Invocation' Candle Rack", "1 found", box not focused) and the placement was cancelled with Space; one Escape cleared the search, build mode stayed open on Lighting > Candle Stands and the category buttons came back; a second Escape left build mode. Not live-verified: that Escape with a placement selected, and the gamepad. Build mode's own registration order was not read (the `BuildMode` order is inferred from the game's order list). |
 | Enter, or a click elsewhere | Gives the keyboard back and keeps the search. |
 | Switch tab | Not while the box has text: the category and tag buttons are disabled. Clear the search to browse. |
 | Recent | Click it with the box empty: the row lists recent builds. Type to filter them. Another category leaves Recent. |
@@ -6998,10 +7005,11 @@ unlocks every recipe for a test character.
 - The settings switches with the menu open. (Closing with a search active and reopening unfiltered ran live through the bridge's `open` / `close` on 2026-10-04.)
 - Recent: a refused placement staying out, relocation staying out, the `RecentCount` trim, the history save
   debounce, the list after a restart and across a Core hot swap, filtering inside Recent, and the category and tag
-  selection look while Recent shows and after leaving it. (A placement reaching
-  the list, two items and the order after a rebuild were verified live on 2026-10-18.)
-- Copy building on the current main: Escape clearing the search while the box is not focused (the name fill was
-  verified live on 2026-10-18), the build keybind share rule with a Progenitor gameplay key, a building inside a group, an item on another category, a locked item, a
+  selection look after leaving Recent. (A placement reaching
+  the list, two items and the order after a rebuild were verified live on 2026-10-18; the selection look while
+  Recent shows on 2026-10-19.)
+- Copy building on the current main: Escape clearing the search with a placement still selected (the name fill was
+  verified live on 2026-10-18; the unfocused Escape clear, with the placement cancelled first, on 2026-10-19), the build keybind share rule with a Progenitor gameplay key, a building inside a group, an item on another category, a locked item, a
   remapped keyboard key and its hint, and the Push To Talk warning in the Keybinds tab.
 - The box beside and above the variant selector at narrow widths, and the disabled categories while searching.
 
