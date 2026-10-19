@@ -1487,7 +1487,7 @@ bool on = receive.For(userEntity);   // server; the client reads receive.Mine on
 - Show/enable rules that travel: `page.Toggle(hint).ShowIf(enabled, true)`, `.ShowWhen(SettingCondition.ServerHasMod("Satisvampory"))`, `.EnableWhen(SettingCondition.AtLeast(radius, 5) & …)`. `showIf` / `enableIf` delegates stay local.
 - Item lists: `ctx.Settings.ItemList(...)` (server-wide) and `ctx.Settings.PerPlayerItemList(...)`, edited with the item picker; at most 256 lines and 4,096 bytes of text, refused beyond. [Item lists](settings-scopes.md#item-lists).
 
-Status: game-free tested on current main. Live-verified on the isolated client/server pair on the 2026-10-15 build before the port; the port has not been run live. Presentation hints, rules and item lists are game-free tested only, not live-verified ([qualification](settings-scopes.md#qualification)).
+Status: game-free tested on current main. Live-verified on the isolated client/server pair on the 2026-10-15 build before the port; the port has not been run live. Presentation hints and rules are game-free tested only, not live-verified. Item lists are verified live in part on 2026-10-19: the list window, the picker and its `StackableOnly` filter were drawn; adding an item, the server write and the stackable refusal were not checked ([qualification](settings-scopes.md#qualification)).
 
 ## Localization
 
