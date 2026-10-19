@@ -7,107 +7,65 @@ using static Progenitor.Debugging.DebugMapPolicy;
 namespace Progenitor.Tests;
 
 /// <summary>
-/// The 2026-10-19 castle teleport bug, game-free: inside castle territory the map teleport walks down to the ground
+/// The 2026-10-19 castle teleport bug, game-free: inside castle territory the map teleport selects the base gameplay
 /// floor instead of the roof (<see cref="PickFloor"/>), and a teleport is reported only when a read-back found the
 /// character there (<see cref="PlayerTeleportPolicy"/>).
 /// </summary>
 public class DebugMapTeleportVerifyTests
 {
-    /// <summary>
-    /// A stand-in for the game's height read: the highest of <paramref name="layers"/> at or below the probe height,
-    /// or null. Records every probe height it was asked.
-    /// </summary>
+    // Match the native level selection and per-cell clamping, rather than raycast semantics.
     private static Func<float, float?> Layers(List<float> asked, params float[] layers) => probeY =>
     {
         asked.Add(probeY);
-        float? best = null;
-        foreach (float l in layers)
-            if (l <= probeY && (!best.HasValue || l > best.Value)) best = l;
-        return best;
+        int level = (int)Math.Clamp((probeY + 51f) / 5f, 0f, 20f);
+        int baseLevel = (int)((layers[0] + 51f) / 5f);
+        return layers[Math.Clamp(level - baseLevel, 0, layers.Length - 1)];
     };
 
-    // ---- the floor --------------------------------------------------------------------------------
-
-    [Fact]
-    public void Inside_a_castle_the_roof_over_the_floor_is_passed_for_the_ground_floor()
+    [Theory]
+    [InlineData(5f, 10f, 15.5f)]
+    [InlineData(25f, 30f, 35.5f)]
+    [InlineData(-10f, -5f, 0.5f)]
+    public void Castle_base_read_avoids_roof_on_elevated_and_low_terrain(float ground, float upper, float roof)
     {
-        // The live case: a top layer at 15.5 over the castle floor at 5.
         var asked = new List<float>();
-        var floor = PickFloor(Layers(asked, 5f, 15.5f), preferGround: true);
+        var reader = Layers(asked, ground, upper, roof);
+        Assert.Equal(roof, reader(roof - 1f)); // the old one-meter descent returns the roof again
+        asked.Clear();
+        var floor = PickFloor(reader, true);
         Assert.True(floor.Found);
-        Assert.Equal(5f, floor.Y);
-        Assert.Equal(15.5f, floor.Top);
-        Assert.Equal(2, floor.Layers);
-        Assert.Equal(ProbeHeight, asked[0]);
-        Assert.Equal(15.5f - FloorLayerGap, asked[1]);
+        Assert.Equal(ground, floor.Y);
+        Assert.Equal(roof, floor.Top);
+        Assert.Equal(new[] { ProbeHeight, BaseLayerProbeHeight }, asked);
     }
 
     [Fact]
-    public void Outside_a_castle_the_top_layer_is_used_as_before_with_one_read()
+    public void Outside_castles_preserves_top_layer()
     {
         var asked = new List<float>();
-        var floor = PickFloor(Layers(asked, 5f, 15.5f), preferGround: false);
+        var floor = PickFloor(Layers(asked, 5f, 10f, 15.5f), false);
         Assert.Equal(15.5f, floor.Y);
-        Assert.Equal(1, floor.Layers);
         Assert.Single(asked);
     }
 
     [Fact]
-    public void A_single_floor_in_a_castle_stays_on_that_floor()
+    public void Single_raised_floor_remains_at_its_real_height()
     {
-        var floor = PickFloor(Layers(new List<float>(), 15f), preferGround: true);
-        Assert.Equal(15f, floor.Y);
-        Assert.Equal(1, floor.Layers);
+        var floor = PickFloor(Layers(new List<float>(), 25f), true);
+        Assert.True(floor.Found);
+        Assert.Equal(25f, floor.Y);
     }
 
-    [Fact]
-    public void Several_stacked_layers_end_on_the_lowest()
+    [Theory]
+    [InlineData(null)]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    [InlineData(-41f)]
+    public void Invalid_base_is_refused_without_roof_fallback(float? missing)
     {
-        var floor = PickFloor(Layers(new List<float>(), 5f, 10f, 15.5f, 20f), preferGround: true);
-        Assert.Equal(5f, floor.Y);
-        Assert.Equal(20f, floor.Top);
-        Assert.Equal(4, floor.Layers);
-    }
-
-    [Fact]
-    public void A_slab_just_under_the_floor_is_not_a_layer()
-    {
-        // Terrain 20 cm under the castle floor slab is within the layer gap and is never probed into.
-        var floor = PickFloor(Layers(new List<float>(), 4.8f, 5f), preferGround: true);
-        Assert.Equal(5f, floor.Y);
-    }
-
-    [Fact]
-    public void A_read_that_ignores_the_probe_height_stops_the_walk_on_the_top_layer()
-    {
-        // A height read that always answers the same floor, whatever it is asked: the walk must not loop or descend.
-        int calls = 0;
-        var floor = PickFloor(_ => { calls++; return 15.5f; }, preferGround: true);
-        Assert.Equal(15.5f, floor.Y);
-        Assert.Equal(2, calls);
-    }
-
-    [Fact]
-    public void The_walk_is_bounded_in_depth_and_in_layers()
-    {
-        // A layer far under the top (a cave, the void) is not taken.
-        var deep = PickFloor(Layers(new List<float>(), 15.5f - MaxFloorDrop - 5f, 15.5f), preferGround: true);
-        Assert.Equal(15.5f, deep.Y);
-
-        // A layer every 2 m: the walk stops after MaxFloorLayers reads under the top.
-        var many = new List<float>();
-        for (int i = 0; i < 20; i++) many.Add(i * 2f);
-        var asked = new List<float>();
-        var floor = PickFloor(Layers(asked, many.ToArray()), preferGround: true);
-        Assert.Equal(MaxFloorLayers, floor.Layers);
-        Assert.Equal(MaxFloorLayers, asked.Count);
-    }
-
-    [Fact]
-    public void No_ground_at_all_is_not_found()
-    {
-        Assert.False(PickFloor(_ => null, preferGround: true).Found);
-        Assert.False(PickFloor(_ => float.NaN, preferGround: false).Found);
+        Assert.False(PickFloor(y => y == ProbeHeight ? 15.5f : missing, true).Found);
+        Assert.False(PickFloor(_ => missing, false).Found);
     }
 
     [Fact]
@@ -115,7 +73,7 @@ public class DebugMapTeleportVerifyTests
     {
         var spot = FindNearestValid(-1465.2f, -720.6f, DefaultRadius, DefaultStep, (px, pz) =>
         {
-            var f = PickFloor(Layers(new List<float>(), 5f, 15.5f), preferGround: true);
+            var f = PickFloor(Layers(new List<float>(), 5f, 10f, 15.5f), preferGround: true);
             return Probe.Ok(f.Y, f.Top);
         });
         Assert.Equal(5f, spot.Y);

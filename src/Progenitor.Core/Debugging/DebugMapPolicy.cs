@@ -202,60 +202,31 @@ internal static class DebugMapPolicy
 
     // ---- the floor -------------------------------------------------------------------------------
 
-    /// <summary>
-    /// Meters below a found floor the next layer probe starts. The game's height read answers with the highest
-    /// walkable floor at or below the probe height, so probing this far under a floor finds the next layer down and
-    /// cannot return the same one or a slab a few centimeters under it.
-    /// </summary>
-    internal const float FloorLayerGap = 1f;
+    /// <summary>Maps to height level zero; the tile world clamps it to each cell's base layer.</summary>
+    internal const float BaseLayerProbeHeight = -51f;
 
-    /// <summary>Most layers the floor walk reads under one point (a roof, upper floors, the ground floor).</summary>
-    internal const int MaxFloorLayers = 6;
-
-    /// <summary>Meters. The floor walk never goes further than this below the top layer.</summary>
-    internal const float MaxFloorDrop = 30f;
-
-    /// <summary>
-    /// The floor chosen under one point. <see cref="Y"/> is the floor to stand on, <see cref="Top"/> the top layer
-    /// (what a single read from <see cref="ProbeHeight"/> gives), <see cref="Layers"/> how many layers were read.
-    /// </summary>
+    /// <summary>Selected gameplay height, top height for diagnostics, and number of reads.</summary>
     internal readonly record struct Floor(bool Found, float Y, float Top, int Layers);
 
     /// <summary>
-    /// Pick the floor to stand on under one point. <paramref name="heightAt"/> answers the game's height read for a
-    /// probe height: the highest walkable floor at or below it, or null. Read once from <see cref="ProbeHeight"/>:
-    /// that is the top layer, and outside a castle it is the answer (the behavior that has worked live).
-    ///
-    /// <para><b>Inside castle territory</b> (<paramref name="preferGround"/>) the top layer can be a roof or an upper
-    /// level the game will not teleport onto (live 2026-10-19: y 15.5 over a castle floor at 5; the game's helper
-    /// returned and moved nobody). There the walk goes on down, <see cref="FloorLayerGap"/> under each floor found,
-    /// and takes the <b>lowest</b> layer: the castle's ground floor, or the ground. It stops at a miss, at an answer
-    /// that is not below the probe (a read that ignores the probe height), past <see cref="MaxFloorDrop"/> under the
-    /// top, or after <see cref="MaxFloorLayers"/> layers.</para>
+    /// Castle destinations use the cell's base gameplay layer, including raised terrain.
+    /// The game's height query selects five-meter bands, not a surface below the probe.
+    /// A failed base read is refused rather than falling back to a roof.
     /// </summary>
     internal static Floor PickFloor(Func<float, float?> heightAt, bool preferGround)
     {
         if (heightAt == null) throw new ArgumentNullException(nameof(heightAt));
         float? top = heightAt(ProbeHeight);
-        if (!top.HasValue || float.IsNaN(top.Value)) return new Floor(false, float.NaN, float.NaN, 0);
-
-        float chosen = top.Value;
-        int layers = 1;
-        if (!preferGround) return new Floor(true, chosen, top.Value, layers);
-
-        while (layers < MaxFloorLayers)
-        {
-            float probe = chosen - FloorLayerGap;
-            float? below = heightAt(probe);
-            if (!below.HasValue || float.IsNaN(below.Value)) break;
-            if (below.Value > probe + 0.01f) break; // not "at or below" the probe: the read ignored the height
-            if (top.Value - below.Value > MaxFloorDrop) break;
-            chosen = below.Value;
-            layers++;
-        }
-
-        return new Floor(true, chosen, top.Value, layers);
+        if (!UsableHeight(top)) return new Floor(false, float.NaN, float.NaN, 1);
+        if (!preferGround) return new Floor(true, top!.Value, top.Value, 1);
+        float? ground = heightAt(BaseLayerProbeHeight);
+        return UsableHeight(ground)
+            ? new Floor(true, ground!.Value, top!.Value, 2)
+            : new Floor(false, float.NaN, top!.Value, 2);
     }
+
+    private static bool UsableHeight(float? height) => height.HasValue
+        && !float.IsNaN(height.Value) && !float.IsInfinity(height.Value) && height.Value >= -40f;
 
     /// <summary>One probe's answer.</summary>
     internal readonly record struct Probe(bool Valid, float Y, string Why, float Top = float.NaN)
