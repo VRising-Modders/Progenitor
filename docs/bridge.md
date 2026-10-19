@@ -150,11 +150,15 @@ To read them: open `BepInEx/LogOutput.log` (BepInEx flushes it every 2 s), use `
 
 **Queued console (every mod's lines).** BepInEx's own console listener writes each line on the thread that logged it: it sets the color, writes the line and resets the color, synchronously. When the console host is slow to take output, every `LogInfo` from every mod stalls the frame, and a longer line stalls it longer. Bootstrap therefore replaces that listener at start with `QueuedConsoleLogListener`. The logging thread only formats the line and adds it to a bounded queue (`ConsoleLogQueue`). One background thread writes the queue to the console, with consecutive lines of one color in a single write. Bounds:
 
-- At most 4,000 lines or 1 M characters wait. A line that does not fit is dropped from the console only, and the next console write starts with one `[Progenitor: N console line(s) dropped …]` notice.
+- At most 4,000 lines or 1 M characters wait. A line that does not fit is dropped from the console only, and a `[Progenitor: N console line(s) dropped …]` notice says so at most once a second, with the count since the last one.
 - A line longer than 2,000 characters is shortened in the console and ends with `… [N more characters; the whole line is in LogOutput.log]`.
 - A batch is at most 256 lines or 64 K characters.
 
-`LogOutput.log`, the bridge's `logs` ring and the session log under `BepInEx/progenitor-logs` still receive every line whole, and in order. `[Logging] QueuedConsole=false` in `progenitor.cfg` restores BepInEx's direct writes at the next start. The preloader's session log is buffered the same way: the logging thread appends to a list, and the timer thread writes and flushes it every second. An error line asks for that write at once instead of performing it on the logging thread. Source-checked and tested game-free (`ConsoleLogQueueTests`, `SessionLogWriterTests`); not verified live.
+`LogOutput.log`, the bridge's `logs` ring and the session log under `BepInEx/progenitor-logs` still receive every line whole, and in order. At process exit the writer gets at most 500 ms to empty the queue. Exit never waits longer, even when a console write is stuck (a QuickEdit selection pauses console output), and lines logged after that are still queued and written while the process lives.
+
+`[Logging] QueuedConsole=false` in `progenitor.cfg` restores BepInEx's direct writes at the next start. Use it when another mod looks for BepInEx's own `ConsoleLogListener` in `Logger.Listeners`: with the queue on, that listener is no longer there.
+
+The preloader's session log is buffered too. The logging thread appends to a list, and a one-shot timer writes and flushes it every second; overlapping requests fold into the run in progress. An error line is written and flushed at once on the logging thread when no other write is in progress, so a crash right after it keeps the line. When the timer is mid-write, the error line goes to the timer to write as soon as that write ends. Source-checked and tested game-free (`ConsoleLogQueueTests`, `SessionLogWriterTests`); not verified live.
 
 **Hitch reporting.** Per frame `UiFrameCost` only adds to counters. At most every 30 s it writes one file-only summary, and only when a hitch happened (a frame interval, or a named Progenitor phase, of 80 ms or more):
 

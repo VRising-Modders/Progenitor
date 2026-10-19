@@ -66,6 +66,7 @@ internal sealed class ConsoleLogQueue
     private readonly Queue<Line> _lines = new();
     private long _chars;
     private long _droppedSinceNotice;
+    private long _lastNoticeMs = long.MinValue;
     private Stats _stats;
     private readonly AutoResetEvent _signal = new(false);
 
@@ -85,6 +86,12 @@ internal sealed class ConsoleLogQueue
     internal int MaxLineChars { get; }
     internal int BatchLines { get; }
     internal int BatchChars { get; }
+
+    /// <summary>The "dropped" notice is printed at most once per this many milliseconds; drops in between add up.</summary>
+    internal const int NoticeEveryMs = 1000;
+
+    /// <summary>Milliseconds clock for the notice's rate limit (tests replace it).</summary>
+    internal Func<long> NowMs { get; set; } = () => Environment.TickCount64;
 
     /// <summary>Lines waiting for the writer.</summary>
     internal int Pending
@@ -163,22 +170,27 @@ internal sealed class ConsoleLogQueue
     /// <summary>Wait until a line is queued or <paramref name="timeoutMs"/> passes. True when there is work.</summary>
     internal bool WaitForWork(int timeoutMs)
     {
-        if (Pending > 0 || DroppedSinceNotice > 0) return true;
+        if (Pending > 0 || NoticeDue) return true;
         _signal.WaitOne(timeoutMs);
-        return Pending > 0 || DroppedSinceNotice > 0;
+        return Pending > 0 || NoticeDue;
     }
 
     /// <summary>Wake the writer (shutdown).</summary>
     internal void Wake() => _signal.Set();
 
-    private long DroppedSinceNotice
+    /// <summary>Dropped lines wait for a notice and the rate limit allows one now.</summary>
+    private bool NoticeDue
     {
-        get { lock (_gate) return _droppedSinceNotice; }
+        get { lock (_gate) return NoticeDueLocked(NowMs()); }
     }
+
+    private bool NoticeDueLocked(long now) =>
+        _droppedSinceNotice > 0 && (_lastNoticeMs == long.MinValue || now - _lastNoticeMs >= NoticeEveryMs);
 
     /// <summary>
     /// Take up to one batch and join it into same-color runs. A pending "dropped" notice comes first, in
-    /// <paramref name="noticeColor"/>. Empty when nothing waits.
+    /// <paramref name="noticeColor"/>, at most once per <see cref="NoticeEveryMs"/> with the count of every line
+    /// dropped since the last one. Empty when nothing waits.
     /// </summary>
     internal List<Run> TakeBatch(ConsoleColor noticeColor = ConsoleColor.Yellow)
     {
@@ -186,8 +198,14 @@ internal sealed class ConsoleLogQueue
         long dropped;
         lock (_gate)
         {
-            dropped = _droppedSinceNotice;
-            _droppedSinceNotice = 0;
+            long now = NowMs();
+            dropped = 0;
+            if (NoticeDueLocked(now))
+            {
+                dropped = _droppedSinceNotice;
+                _droppedSinceNotice = 0;
+                _lastNoticeMs = now;
+            }
             int chars = 0;
             while (_lines.Count > 0 && lines.Count < BatchLines)
             {

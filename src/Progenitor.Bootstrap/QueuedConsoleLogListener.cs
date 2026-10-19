@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Threading;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -26,24 +25,22 @@ internal sealed class QueuedConsoleLogListener : ILogListener
     internal const string ConfigSection = "Logging";
     internal const string ConfigKey = "QueuedConsole";
 
-    /// <summary>The writer waits this long after the first queued line so a burst goes out as one batch.</summary>
-    private const int CoalesceMs = 15;
-
-    /// <summary>The most the writer spends on what is still queued when the process exits.</summary>
+    /// <summary>
+    /// The most process exit waits for the writer to finish what is queued. It never waits longer, even when a console
+    /// write is blocked (<see cref="ConsoleBatchWriter.Stop"/>), so later exit handlers (the self-update promote) still run.
+    /// </summary>
     private const int ExitDrainMs = 500;
 
     internal static QueuedConsoleLogListener? Instance { get; private set; }
 
     private readonly ConsoleLogQueue _queue = new();
     private readonly ILogListener _replaced;
-    private readonly Thread _writer;
-    private readonly object _writeGate = new();
-    private volatile bool _stopping;
+    private readonly ConsoleBatchWriter _writer;
 
     private QueuedConsoleLogListener(ILogListener replaced)
     {
         _replaced = replaced;
-        _writer = new Thread(WriterLoop) { IsBackground = true, Name = "Progenitor console writer" };
+        _writer = new ConsoleBatchWriter(_queue, WriteRun, ResetColor);
     }
 
     /// <summary>The level filter of the listener it replaced (BepInEx's <c>[Logging.Console] LogLevels</c>).</summary>
@@ -75,6 +72,7 @@ internal sealed class QueuedConsoleLogListener : ILogListener
                     + "so a slow console never stalls the game's frame. Lines longer than "
                     + ConsoleLogQueue.DefaultMaxLineChars + " characters are shortened in the console only, and the console "
                     + "drops lines (with a notice) when it falls far behind. LogOutput.log always keeps every line whole. "
+                    + "Set false if another mod needs BepInEx's own ConsoleLogListener in Logger.Listeners. "
                     + "Takes effect at the next start.").Value ?? true;
             }
             catch { enabled = true; }
@@ -97,7 +95,7 @@ internal sealed class QueuedConsoleLogListener : ILogListener
             Logger.Listeners.Add(queued);
             Logger.Listeners.Remove(original);
             Instance = queued;
-            try { AppDomain.CurrentDomain.ProcessExit += (_, _) => queued.Stop(ExitDrainMs); }
+            try { AppDomain.CurrentDomain.ProcessExit += (_, _) => queued._writer.Stop(ExitDrainMs); }
             catch { /* background thread; the process ends anyway */ }
             return "Console: lines for the console window are queued and written off the game thread ([Logging] QueuedConsole).";
         }
@@ -114,11 +112,15 @@ internal sealed class QueuedConsoleLogListener : ILogListener
         return i == null ? null : ConsoleLogQueue.ToArray(i._queue.Snapshot(resetMaxima));
     }
 
+    /// <summary>
+    /// Queue the line. Lines logged during process exit are queued too: the writer keeps writing them for as long as the
+    /// process lives (the unload and self-update lines), and exit waits only <see cref="ExitDrainMs"/> for them.
+    /// </summary>
     public void LogEvent(object sender, LogEventArgs eventArgs)
     {
         try
         {
-            if (eventArgs == null || _stopping) return;
+            if (eventArgs == null) return;
             long start = Stopwatch.GetTimestamp();
             string data;
             try { data = eventArgs.Data?.ToString() ?? ""; }
@@ -131,76 +133,18 @@ internal sealed class QueuedConsoleLogListener : ILogListener
         catch { /* a log line must never throw into the logger */ }
     }
 
-    private void WriterLoop()
+    /// <summary>Writer thread only.</summary>
+    private static void WriteRun(ConsoleColor color, string text)
     {
-        while (true)
-        {
-            try
-            {
-                if (!_queue.WaitForWork(250))
-                {
-                    if (_stopping) return;
-                    continue;
-                }
-                if (!_stopping) Thread.Sleep(CoalesceMs);
-                WriteOneBatch();
-            }
-            catch
-            {
-                // A console that went away: keep draining so the queue does not sit full; try again shortly.
-                try { Thread.Sleep(100); } catch { return; }
-            }
-        }
-    }
-
-    /// <summary>Write one batch. False when nothing was queued.</summary>
-    private bool WriteOneBatch()
-    {
-        // One writer at a time (the thread, or the exit drain), so a batch's colors never interleave with another's.
-        lock (_writeGate) return WriteOneBatchLocked();
-    }
-
-    private bool WriteOneBatchLocked()
-    {
-        var runs = _queue.TakeBatch();
-        if (runs.Count == 0) return false;
-        long start = Stopwatch.GetTimestamp();
-        int lines = 0;
         var stream = ConsoleManager.ConsoleStream;
-        foreach (var run in runs)
-        {
-            lines += run.Lines;
-            if (stream == null) continue;
-            try
-            {
-                ConsoleManager.SetConsoleColor(run.Color);
-                stream.Write(run.Text);
-            }
-            catch { /* the console closed */ }
-        }
-        try { ConsoleManager.SetConsoleColor(ConsoleColor.Gray); }
-        catch { /* the console closed */ }
-        _queue.NoteWritten(lines, Stopwatch.GetTimestamp() - start);
-        return true;
+        if (stream == null) return;
+        ConsoleManager.SetConsoleColor(color);
+        stream.Write(text);
     }
 
-    /// <summary>Process exit: write what is still queued, for at most <paramref name="maxMs"/>.</summary>
-    private void Stop(int maxMs)
-    {
-        _stopping = true;
-        _queue.Wake();
-        var clock = Stopwatch.StartNew();
-        try
-        {
-            // The writer thread may be mid-batch; WriteOneBatch serializes the two, so whole batches go out in order.
-            while (clock.ElapsedMilliseconds < maxMs && WriteOneBatch()) { }
-        }
-        catch { /* exiting */ }
-    }
+    /// <summary>Writer thread only, after each batch: the console's default color, as BepInEx leaves it.</summary>
+    private static void ResetColor() => ConsoleManager.SetConsoleColor(ConsoleColor.Gray);
 
-    public void Dispose()
-    {
-        _stopping = true;
-        _queue.Wake();
-    }
+    /// <summary>Kept for the life of the process: the writer thread is a background thread.</summary>
+    public void Dispose() { }
 }

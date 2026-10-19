@@ -181,8 +181,10 @@ internal static class SessionLogFiles
 /// <summary>
 /// A size-capped, thread-safe line writer over one session log. The thread that logs only appends the line to a
 /// pending list; the timer thread writes and flushes that list every second, outside the lock the logging thread
-/// takes, so a slow disk never stalls the game's frame. A line written with <c>flushNow</c> (errors) asks the timer to
-/// write at once instead of waiting for the second; without a timer (tests) it is written on the spot. Game-free.
+/// takes, so a slow disk never stalls the game's frame. A line written with <c>flushNow</c> (errors) is written and
+/// flushed on the spot when no other write is in progress, so a crash right after an error keeps it; when the timer is
+/// mid-write, the line is handed to it to write at once instead of waiting behind it. The timer is one-shot and
+/// re-armed after each run, and a reentrancy guard folds overlapping requests into the run in progress. Game-free.
 /// </summary>
 internal sealed class SessionLogWriter : IDisposable
 {
@@ -198,13 +200,15 @@ internal sealed class SessionLogWriter : IDisposable
     private long _written;
     private bool _capped;
     private bool _disposed;
+    private int _timerRunning; // 1 while OnTimer runs
+    private int _timerAgain;   // a request arrived while it ran: run once more
 
     internal SessionLogWriter(Stream stream, long maxBytes, bool timedFlush = true)
     {
         _stream = stream ?? throw new ArgumentNullException(nameof(stream));
         _writer = new StreamWriter(stream, Utf8) { AutoFlush = false };
         _maxBytes = maxBytes <= 0 ? SessionLogFiles.DefaultMaxBytes : maxBytes;
-        if (timedFlush) _flush = new Timer(_ => Flush(), null, 1000, 1000);
+        if (timedFlush) _flush = new Timer(_ => OnTimer(), null, 1000, Timeout.Infinite);
     }
 
     /// <summary>Bytes accepted so far (UTF-8, newlines included).</summary>
@@ -248,36 +252,71 @@ internal sealed class SessionLogWriter : IDisposable
         if (urgent) RequestFlush();
     }
 
-    /// <summary>Have the pending lines written now: by the timer thread when there is one, else here.</summary>
+    /// <summary>
+    /// Have the pending lines written now: here when nothing else is writing (the urgent line is on disk when this
+    /// returns), else by the timer as soon as its current write ends. Without a timer, here in any case.
+    /// </summary>
     private void RequestFlush()
     {
-        if (_flush != null)
+        if (_flush == null)
         {
-            try
-            {
-                _flush.Change(0, 1000);
-                return;
-            }
-            catch (ObjectDisposedException) { return; }
-            catch { /* write here instead */ }
+            Flush();
+            return;
         }
-        Flush();
+        if (Monitor.TryEnter(_io))
+        {
+            try { FlushLocked(); }
+            finally { Monitor.Exit(_io); }
+            return;
+        }
+        Schedule(0);
+    }
+
+    private void Schedule(int dueMs)
+    {
+        try { _flush?.Change(dueMs, Timeout.Infinite); }
+        catch { /* disposed */ }
+    }
+
+    /// <summary>The timer's callback: never two at once; a request during a run makes it run again; then re-arm.</summary>
+    private void OnTimer()
+    {
+        if (Interlocked.Exchange(ref _timerRunning, 1) == 1)
+        {
+            Interlocked.Exchange(ref _timerAgain, 1);
+            return;
+        }
+        try
+        {
+            do { Flush(); }
+            while (Interlocked.Exchange(ref _timerAgain, 0) == 1);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _timerRunning, 0);
+            bool disposed;
+            lock (_gate) disposed = _disposed;
+            if (!disposed) Schedule(1000);
+        }
     }
 
     /// <summary>Write and flush every pending line. Called by the timer, at exit and by tests.</summary>
     internal void Flush()
     {
-        lock (_io)
+        lock (_io) FlushLocked();
+    }
+
+    /// <summary>Caller holds <see cref="_io"/>.</summary>
+    private void FlushLocked()
+    {
+        List<string> batch;
+        lock (_gate)
         {
-            List<string> batch;
-            lock (_gate)
-            {
-                if (_disposed || _pending.Count == 0) return;
-                batch = _pending;
-                _pending = new List<string>();
-            }
-            WriteBatch(batch);
+            if (_disposed || _pending.Count == 0) return;
+            batch = _pending;
+            _pending = new List<string>();
         }
+        WriteBatch(batch);
     }
 
     /// <summary>Caller holds <see cref="_io"/>.</summary>

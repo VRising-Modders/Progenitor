@@ -147,6 +147,88 @@ public class ConsoleLogQueueTests
     }
 
     [Fact]
+    public void The_dropped_notice_is_said_at_most_once_a_second_with_the_running_count()
+    {
+        long now = 10_000;
+        var q = new ConsoleLogQueue(maxLines: 1) { NowMs = () => now };
+        q.Enqueue(ConsoleColor.Gray, "kept");
+        q.Enqueue(ConsoleColor.Gray, "dropped 1");
+        var runs = q.TakeBatch();
+        Assert.StartsWith("[Progenitor: 1 console line(s) dropped", runs[0].Text);
+
+        // Within the second: lines still go out, the notice waits and the count adds up.
+        for (int i = 0; i < 3; i++)
+        {
+            now += 200;
+            q.Enqueue(ConsoleColor.Gray, "kept " + i);
+            q.Enqueue(ConsoleColor.Gray, "dropped");
+            runs = q.TakeBatch();
+            Assert.Single(runs);
+            Assert.StartsWith("kept " + i, runs[0].Text);
+        }
+        Assert.False(q.WaitForWork(0)); // a waiting notice alone does not spin the writer before it is due
+
+        now += 400; // 1,000 ms since the last notice
+        Assert.True(q.WaitForWork(0));
+        runs = q.TakeBatch();
+        Assert.StartsWith("[Progenitor: 3 console line(s) dropped", Assert.Single(runs).Text);
+    }
+
+    [Fact]
+    public void Stop_returns_within_its_budget_while_the_console_write_is_stuck()
+    {
+        var q = new ConsoleLogQueue();
+        using var release = new ManualResetEventSlim(false);
+        using var entered = new ManualResetEventSlim(false);
+        var writer = new ConsoleBatchWriter(q, (_, _) => { entered.Set(); release.Wait(30_000); }, coalesceMs: 0);
+        writer.Start();
+        try
+        {
+            q.Enqueue(ConsoleColor.Gray, "stuck");
+            Assert.True(entered.Wait(5_000));
+            q.Enqueue(ConsoleColor.Gray, "behind it");
+
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Assert.False(writer.Stop(200));
+            Assert.InRange(clock.ElapsedMilliseconds, 150, 2_000);
+        }
+        finally
+        {
+            release.Set();
+            writer.Dispose();
+        }
+    }
+
+    [Fact]
+    public void Stop_waits_for_the_queue_and_lines_logged_while_stopping_still_go_out()
+    {
+        var q = new ConsoleLogQueue();
+        var written = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var writer = new ConsoleBatchWriter(q, (_, text) => written.Enqueue(text), coalesceMs: 0);
+        writer.Start();
+        try
+        {
+            for (int i = 0; i < 50; i++) q.Enqueue(ConsoleColor.Gray, "before " + i);
+            Assert.True(writer.Stop(5_000));
+            Assert.Equal(0, q.Pending);
+            Assert.True(writer.Stopping);
+
+            // A later exit handler logs (the self-update promote, the unload lines): still written.
+            q.Enqueue(ConsoleColor.Gray, "after stop");
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (!string.Concat(written).Contains("after stop") && clock.ElapsedMilliseconds < 5_000) Thread.Sleep(5);
+            string all = string.Concat(written);
+            Assert.Contains("before 49", all);
+            Assert.Contains("after stop", all);
+            Assert.True(all.IndexOf("before 0", StringComparison.Ordinal) < all.IndexOf("after stop", StringComparison.Ordinal));
+        }
+        finally
+        {
+            writer.Dispose();
+        }
+    }
+
+    [Fact]
     public void Many_producers_and_one_writer_lose_nothing_that_fit()
     {
         var q = new ConsoleLogQueue(maxLines: 100_000, maxChars: 10_000_000, batchLines: 64);
@@ -249,14 +331,32 @@ public class SessionLogWriterTests
     }
 
     [Fact]
-    public void An_urgent_line_is_written_soon_by_the_timer_thread()
+    public void An_urgent_line_is_on_disk_when_WriteLine_returns_if_nothing_else_is_writing()
     {
         var ms = new MemoryStream();
         using var writer = new SessionLogWriter(ms, 1024 * 1024, timedFlush: true);
+        writer.WriteLine("ordinary");
         writer.WriteLine("error", flushNow: true);
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        while (writer.PendingLines > 0 && clock.ElapsedMilliseconds < 900) Thread.Sleep(5);
-        // Well before the one-second timer period.
         Assert.Equal(0, writer.PendingLines);
+        Assert.Equal("ordinary" + Environment.NewLine + "error" + Environment.NewLine, Encoding.UTF8.GetString(ms.ToArray()));
+    }
+
+    [Fact]
+    public void An_urgent_line_during_a_slow_write_is_handed_to_the_timer_without_blocking()
+    {
+        var stream = new SlowStream();
+        using var writer = new SessionLogWriter(stream, 1024 * 1024, timedFlush: true);
+        writer.WriteLine("first");
+        var flusher = Task.Run(writer.Flush); // holds the write lock, stuck on the disk
+        Thread.Sleep(50);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        writer.WriteLine("error", flushNow: true);
+        Assert.True(clock.ElapsedMilliseconds < 500, "the error line waited for the disk: " + clock.ElapsedMilliseconds + " ms");
+        stream.Release.Set();
+        Assert.True(flusher.Wait(5_000));
+        clock.Restart();
+        while (writer.PendingLines > 0 && clock.ElapsedMilliseconds < 900) Thread.Sleep(5);
+        Assert.Equal(0, writer.PendingLines); // the timer ran at once, not a second later
+        Assert.EndsWith("error" + Environment.NewLine, Encoding.UTF8.GetString(stream.ToArray()));
     }
 }
