@@ -48,7 +48,7 @@ Start with `PROGENITOR_GUIDE.md` (included in this package), the `dotnet new pro
 3. Download this package (**Manual Download**), open the zip and copy its `BepInEx` folder into the same game folder. Let it replace files when you update.
 4. Start the game. **Mods** appears on the title screen.
 
-The same files work in the game and on a dedicated server. Progenitor adds `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and the `BepInEx/progenitor-core` folder. To remove it, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed.
+The same files work in the game and on a dedicated server. Progenitor adds `BepInEx/plugins/Progenitor.Bootstrap.dll` and `BepInEx/patchers/Progenitor.Preloader.dll` with `progenitor-files.zip` beside it, which becomes the `BepInEx/progenitor-core` folder when the game starts. To remove it, use **Remove Progenitor from this PC** in the Mods menu, or delete those files and that folder while the game is closed.
 
 ## Help
 

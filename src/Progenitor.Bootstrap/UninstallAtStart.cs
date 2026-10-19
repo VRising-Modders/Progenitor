@@ -58,6 +58,8 @@ internal static class UninstallAtStart
     internal const string LoaderCoreFolder = "core";
     internal const string BootstrapDllName = "Progenitor.Bootstrap.dll";
     internal const string PluginsFolder = "plugins";
+    internal const string PreloaderDllName = "Progenitor.Preloader.dll";
+    internal const string PatchersFolder = "patchers";
 
     internal const string LogPrefix = "Progenitor uninstall: ";
     internal const string RefusalOutsideRoot = "the request named a path outside BepInEx; nothing was removed";
@@ -130,9 +132,10 @@ internal static class UninstallAtStart
             // The marker is deleted last, after the done note is written.
             if (string.Equals(rel, markerRelative, StringComparison.OrdinalIgnoreCase)) continue;
             string abs = Absolute(root, rel);
-            if (IsBootstrapDll(rel))
+            if (IsRunningImage(rel))
             {
-                // This process is running from it: delete-on-reboot is the only honest answer, and
+                // This process is running from it (Bootstrap, or the preloader patcher BepInEx loaded before it):
+                // delete-on-reboot is the only honest answer, and
                 // the file is still on disk either way, so it counts as left rather than deleted.
                 ScheduleDelete(abs);
                 left++;
@@ -277,11 +280,20 @@ internal static class UninstallAtStart
     private static string Absolute(string root, string relative) =>
         Path.Combine(root, Normalize(relative).Replace('/', Path.DirectorySeparatorChar));
 
-    private static bool IsBootstrapDll(string relative) =>
-        string.Equals(
-            Normalize(relative),
-            PluginsFolder + "/" + BootstrapDllName,
-            StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Bootstrap under <c>plugins/</c> or the preloader under <c>patchers/</c>, at the top or in a mod manager's package
+    /// folder: both are loaded by this process.
+    /// </summary>
+    internal static bool IsRunningImage(string relative)
+    {
+        string rel = Normalize(relative);
+        string leaf = Path.GetFileName(rel);
+        if (string.Equals(leaf, BootstrapDllName, StringComparison.OrdinalIgnoreCase))
+            return rel.StartsWith(PluginsFolder + "/", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(leaf, PreloaderDllName, StringComparison.OrdinalIgnoreCase))
+            return rel.StartsWith(PatchersFolder + "/", StringComparison.OrdinalIgnoreCase);
+        return false;
+    }
 
     private static bool Exists(string path)
     {

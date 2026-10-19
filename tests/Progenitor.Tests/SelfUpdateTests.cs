@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Progenitor.Install;
 using Progenitor.SelfUpdate;
+using Progenitor.PluginActions;
 using Xunit;
 
 namespace Progenitor.Tests;
@@ -137,6 +138,39 @@ public sealed class SelfUpdateTests : IDisposable
         }
 
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// The Thunderstore package's layout: Bootstrap and the preloader routed by the install rules, Core's folder inside
+    /// <c>BepInEx/patchers/progenitor-files.zip</c> with names relative to <c>BepInEx/</c> (tools/package.ps1, New-ThunderstoreZip).
+    /// </summary>
+    internal static byte[] ThunderstoreZip(byte[] core, byte[] boot, string version)
+    {
+        byte[] Archive(Action<Action<string, byte[]>> fill)
+        {
+            using var ms = new MemoryStream();
+            using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+                fill((path, bytes) =>
+                {
+                    var e = zip.CreateEntry(path);
+                    using var s = e.Open();
+                    s.Write(bytes, 0, bytes.Length);
+                });
+            return ms.ToArray();
+        }
+
+        byte[] payload = Archive(add =>
+        {
+            add("progenitor-core/Progenitor.dll", core);
+            add("progenitor-core/addresslib/client-1.json", Encoding.UTF8.GetBytes("{\"v\":\"" + version + "\"}"));
+        });
+        return Archive(add =>
+        {
+            add("manifest.json", Encoding.UTF8.GetBytes("{\"name\":\"Progenitor\",\"version_number\":\"" + version + "\"}"));
+            add("BepInEx/plugins/Progenitor.Bootstrap.dll", boot);
+            add("BepInEx/patchers/Progenitor.Preloader.dll", new byte[] { 1 });
+            add("BepInEx/patchers/" + SelfImageReader.PayloadFile, payload);
+        });
     }
 
     private static SelfRelease Release(string version, long size = 0) =>
@@ -376,6 +410,16 @@ public sealed class SelfUpdateTests : IDisposable
         Assert.Equal("2026.10.14", image.PackageVersion);
         Assert.Equal(Progenitor.Networking.Handshake.ProtocolVersion, image.HandshakeProtocol);
         Assert.Equal(new[] { "client-1.json" }, image.Tables.Keys.ToArray());
+
+        // The Thunderstore package carries Core and its tables inside progenitor-files.zip; the same image is read.
+        var store = SelfImageReader.Read(ThunderstoreZip(CoreImage(5, "2026.10.14.0"), BootImage(5, "2026.10.9.0"), "2026.10.14"));
+        Assert.True(store.Ok, store.Error);
+        Assert.Equal(5, store.CoreProtocol);
+        Assert.Equal("2026.10.14", store.CoreVersion);
+        Assert.Equal("2026.10.9", store.BootstrapVersion);
+        Assert.Equal("2026.10.14", store.PackageVersion);
+        Assert.Equal(new[] { "client-1.json" }, store.Tables.Keys.ToArray());
+        Assert.Equal(PackagePayload.FileName, SelfImageReader.PayloadFile);
 
         Assert.False(SelfImageReader.Read(Zip(null, BootImage(5, "1.0.0.0"), "1")).Ok);
         // A Bootstrap image under Core's name is refused (the assembly name is checked).

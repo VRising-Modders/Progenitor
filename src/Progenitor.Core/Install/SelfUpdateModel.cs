@@ -418,7 +418,8 @@ internal sealed class SelfImage
 
 /// <summary>
 /// AUTOUPDATE5: reads a Progenitor package zip: <c>BepInEx/plugins/Progenitor.Bootstrap.dll</c>,
-/// <c>BepInEx/progenitor-core/Progenitor.dll</c> and its <c>addresslib/*.json</c>. The Core/Bootstrap protocol and the
+/// <c>BepInEx/progenitor-core/Progenitor.dll</c> and its <c>addresslib/*.json</c>, either as files (the manual zip) or inside
+/// <c>BepInEx/patchers/progenitor-files.zip</c> (the Thunderstore package). The Core/Bootstrap protocol and the
 /// versions are read from each image's metadata (<c>Progenitor.BootstrapLink.ProtocolVersion</c>,
 /// <c>Progenitor.Bootstrap.CoreLayout.ProtocolVersion</c>), and Core's handshake protocol
 /// (<c>Progenitor.Networking.Handshake.ProtocolVersion</c>); nothing is loaded.
@@ -446,13 +447,20 @@ internal static class SelfImageReader
                     image.PackageVersion = SelfState.Str(JsonDocument.Parse(ReadAll(entry)).RootElement, "version_number");
                 else if (lower == "changelog.md")
                     image.Changelog = System.Text.Encoding.UTF8.GetString(ReadAll(entry));
-                else if (lower.EndsWith("/plugins/progenitor.bootstrap.dll", StringComparison.Ordinal) || lower == "plugins/progenitor.bootstrap.dll")
-                    image.Bootstrap = ReadAll(entry);
-                else if (lower.EndsWith("/progenitor-core/progenitor.dll", StringComparison.Ordinal) || lower == "progenitor-core/progenitor.dll")
-                    image.Core = ReadAll(entry);
-                else if (lower.Contains("/progenitor-core/addresslib/") && lower.EndsWith(".json", StringComparison.Ordinal)
-                         && (Path.GetFileName(lower).StartsWith("client-", StringComparison.Ordinal) || Path.GetFileName(lower).StartsWith("server-", StringComparison.Ordinal)))
-                    image.Tables[Path.GetFileName(path)] = ReadAll(entry);
+                else if (lower.EndsWith("/patchers/" + PayloadFile, StringComparison.Ordinal) || lower == "patchers/" + PayloadFile)
+                {
+                    // The Thunderstore package carries Core's folder as one archive (the preloader unpacks it); its
+                    // entries are relative to BepInEx/, so progenitor-core/Progenitor.dll matches the rules below.
+                    using var inner = new ZipArchive(new MemoryStream(ReadAll(entry), writable: false), ZipArchiveMode.Read);
+                    foreach (var nested in inner.Entries)
+                    {
+                        string nestedPath = nested.FullName.Replace('\\', '/').TrimStart('/');
+                        if (nested.Length > MaxEntryBytes) { image.Error = nestedPath + " is too large"; return image; }
+                        Take(image, nestedPath, nested);
+                    }
+                }
+                else
+                    Take(image, path, entry);
             }
         }
         catch (Exception e)
@@ -522,6 +530,23 @@ internal static class SelfImageReader
         }
 
         return image;
+    }
+
+    /// <summary>The package archive the Thunderstore zip carries under <c>BepInEx/patchers/</c> (the preloader's <c>PackagePayload.FileName</c>).</summary>
+    public const string PayloadFile = "progenitor-files.zip";
+
+    /// <summary>Bootstrap, Core or an address table, by its path in the package (or in its archive).</summary>
+    private static void Take(SelfImage image, string path, ZipArchiveEntry entry)
+    {
+        string lower = path.ToLowerInvariant();
+        if (lower.EndsWith("/plugins/progenitor.bootstrap.dll", StringComparison.Ordinal) || lower == "plugins/progenitor.bootstrap.dll")
+            image.Bootstrap = ReadAll(entry);
+        else if (lower.EndsWith("/progenitor-core/progenitor.dll", StringComparison.Ordinal) || lower == "progenitor-core/progenitor.dll")
+            image.Core = ReadAll(entry);
+        else if ((lower.Contains("/progenitor-core/addresslib/") || lower.StartsWith("progenitor-core/addresslib/", StringComparison.Ordinal))
+                 && lower.EndsWith(".json", StringComparison.Ordinal)
+                 && (Path.GetFileName(lower).StartsWith("client-", StringComparison.Ordinal) || Path.GetFileName(lower).StartsWith("server-", StringComparison.Ordinal)))
+            image.Tables[Path.GetFileName(path)] = ReadAll(entry);
     }
 
     private static byte[] ReadAll(ZipArchiveEntry entry)

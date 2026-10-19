@@ -73,7 +73,7 @@ Two layouts to avoid:
 - **The DLL under `BepInEx/plugins/` inside the zip.** A package with a `progenitor.json` and this layout is refused by the Install tab (`Cannot install — the package layout targets BepInEx/plugins/, patchers/ or core/`).
 - **Loose data files next to the DLL** (`localization/en.json`, a `.json` the mod reads). The Install tab places the DLL only. Register strings in code (`Localization.Register`) and keep data where the tutorial says ([Where should my data go?](tutorial.md#where-should-my-data-go)).
 
-**Known limitation.** A mod manager cannot place a DLL in `BepInEx/progenitor-reload/`, so mod-manager installs never hot reload. Whether a package that ships `BepInEx/progenitor-reload/MyMod.dll` inside the zip would be placed there by a mod manager has not been tested; do not rely on it.
+**Known limitation.** A mod manager cannot place a DLL in `BepInEx/progenitor-reload/`, so mod-manager installs never hot reload. V Rising's Thunderstore install rules route only `BepInEx/plugins`, `patchers`, `core`, `monomod` and `config`; a file in any other folder of the zip lands in `BepInEx/plugins/<package>/` with its folders dropped (observed with Gale 1.23.2 on 2026-10-19, and the same rule in r2modman's installer). A package that ships `BepInEx/progenitor-reload/MyMod.dll` therefore installs as an ordinary plugin.
 
 ### `progenitor.json`
 

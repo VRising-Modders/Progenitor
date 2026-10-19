@@ -77,6 +77,20 @@ internal static class ClientUninstall
         "Progenitor.ReloadExample.dll",
     };
 
+    /// <summary>
+    /// Progenitor's files under <c>BepInEx/patchers/</c>: the preloader, and the package archive a mod-manager install
+    /// carries Core's folder in (the preloader's <c>PackagePayload.FileName</c>). Left behind, the archive would put Core
+    /// back at the next start.
+    /// </summary>
+    public static readonly IReadOnlyList<string> OwnedPatcherFileNames = new[]
+    {
+        "Progenitor.Preloader.dll",
+        "progenitor-files.zip",
+    };
+
+    /// <summary>BepInEx's patcher folder, beside <see cref="InstalledState.PluginsFolder"/>.</summary>
+    public const string PatchersFolder = "patchers";
+
     public const string PromptHeading = "Remove Progenitor from this client?";
     public const string PromptPrefix =
         "At the next start of V Rising, Progenitor removes itself, every mod it installed";
@@ -136,6 +150,33 @@ internal static class ClientUninstall
             string rel = InstalledState.PluginsFolder + "/" + OwnedPluginFileNames[i];
             if (Exists(root, rel)) Add(rel);
         }
+
+        // A mod manager puts the package in a folder of its own (plugins/<Package>/, patchers/<Package>/): Bootstrap there,
+        // and in patchers the preloader and the archive it unpacks Core from. One level down, Progenitor's file names only
+        // (in plugins, the first three: Bootstrap and its staged copies).
+        foreach (string folder in Subfolders(root, InstalledState.PluginsFolder))
+        {
+            bool progenitorPackage = false;
+            for (int i = 0; i < 3; i++)
+            {
+                string rel = folder + "/" + OwnedPluginFileNames[i];
+                if (!Exists(root, rel)) continue;
+                Add(rel);
+                progenitorPackage = true;
+            }
+
+            // An older package layout flattened Core in beside Bootstrap, where the chainloader would load it.
+            if (progenitorPackage && Exists(root, folder + "/Progenitor.dll")) Add(folder + "/Progenitor.dll");
+        }
+
+        var patcherFolders = new List<string> { PatchersFolder };
+        patcherFolders.AddRange(Subfolders(root, PatchersFolder));
+        foreach (string folder in patcherFolders)
+            for (int i = 0; i < OwnedPatcherFileNames.Count; i++)
+            {
+                string rel = folder + "/" + OwnedPatcherFileNames[i];
+                if (Exists(root, rel)) Add(rel);
+            }
 
         // Core, the pending and reload folders, the caches, staging and the hosted images.
         for (int i = 0; i < OwnedFolders.Count; i++)
@@ -272,6 +313,31 @@ internal static class ClientUninstall
     {
         try { return File.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))); }
         catch { return false; }
+    }
+
+    /// <summary>The direct subfolders of <paramref name="folder"/>, as root-relative paths; links are skipped.</summary>
+    private static IEnumerable<string> Subfolders(string root, string folder)
+    {
+        string[] found;
+        try
+        {
+            string dir = Path.Combine(root, folder);
+            if (!Directory.Exists(dir)) yield break;
+            found = Directory.GetDirectories(dir);
+        }
+        catch
+        {
+            yield break;
+        }
+
+        for (int i = 0; i < found.Length; i++)
+        {
+            bool link;
+            try { link = (File.GetAttributes(found[i]) & FileAttributes.ReparsePoint) != 0; }
+            catch { link = true; }
+            if (link) continue;
+            yield return folder + "/" + Path.GetFileName(found[i]);
+        }
     }
 
     private static IEnumerable<string> EnumerateFolder(string root, string folder)

@@ -24,6 +24,10 @@ namespace Progenitor.Preloader;
 /// <para>SUPPORT1: it also keeps a copy of each session's log under <c>BepInEx/progenitor-logs</c>
 /// (<see cref="SessionLogListener"/>), so the Get help bundle still has a crashed session's log after a restart.</para>
 ///
+/// <para>Before either, it unpacks the Thunderstore package's <c>progenitor-files.zip</c> into
+/// <c>BepInEx/progenitor-core</c> when that archive changed (<see cref="PackagePayload"/>): mod managers only place
+/// files under <c>plugins</c> and <c>patchers</c>, so that is how Core reaches its own folder in a mod-manager install.</para>
+///
 /// <para>Review finding 2: while another game process started from this same install is running
 /// (it has the plugin DLLs open), the requests wait for a start with no such process.</para>
 /// </summary>
@@ -41,6 +45,27 @@ public sealed class Patcher : BasePatcher
         // SUPPORT1: this session's copy of the log first, so a crashed session survives the next start.
         try { Log.LogInfo(SessionLogListener.Attach()); }
         catch { /* the game must start */ }
+
+        // A mod-manager install carries Core's folder as BepInEx/patchers/.../progenitor-files.zip (PackagePayload.cs);
+        // it is unpacked here, before Bootstrap looks for BepInEx/progenitor-core/Progenitor.dll.
+        try
+        {
+            string root = Paths.BepInExRootPath;
+            string? here = null;
+            try { here = Path.GetDirectoryName(typeof(Patcher).Assembly.Location); }
+            catch { /* no location: search BepInEx/patchers */ }
+            PackagePayload.Apply(
+                root,
+                PackagePayload.Find(root, here, line => Log.LogWarning(line)),
+                line => Log.LogInfo(line),
+                line => Log.LogWarning(line),
+                OtherGameProcessRunning);
+        }
+        catch (Exception e)
+        {
+            try { Log.LogWarning("Progenitor preloader: " + e.Message); }
+            catch { /* the game must start */ }
+        }
 
         try
         {

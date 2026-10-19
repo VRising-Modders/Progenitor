@@ -31,7 +31,7 @@ You need [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/Bep
 3. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the one that holds `VRisingServer.exe`). Let it replace files when you update.
 4. Start the game. **Mods** appears on the title screen: install and update other mods there, change their settings and remap their keys.
 
-The same zip works for the game and for a dedicated server. It adds three things: `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and the `BepInEx/progenitor-core/` folder. Progenitor will also be published on Thunderstore as **`VRising_Modders-Progenitor`**.
+The same zip works for the game and for a dedicated server. It adds three things: `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and the `BepInEx/progenitor-core/` folder. Progenitor will also be published on Thunderstore as **`VRising_Modders-Progenitor`**; that package carries the `progenitor-core` folder as `BepInEx/patchers/progenitor-files.zip`, which the preloader unpacks at the first start, because mod managers only place files in `plugins` and `patchers`.
 
 To remove it, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed. The menu removal leaves the small preloader in `BepInEx/patchers`; you can delete it while the game is closed.
 

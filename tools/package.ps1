@@ -10,16 +10,24 @@
                                                          entry is BepInEx/, so a player extracts
                                                          it into the folder that holds VRising.exe
                                                          (or VRisingServer.exe) in one step
-    packaging/out/Progenitor-<version>-thunderstore.zip  the Thunderstore package: the same
-                                                         BepInEx/ tree plus manifest.json,
-                                                         README.md, CHANGELOG.md, icon.png and
-                                                         PROGENITOR_GUIDE.md at the root
+    packaging/out/Progenitor-<version>-thunderstore.zip  the Thunderstore package: manifest.json,
+                                                         README.md, CHANGELOG.md, icon.png, LICENSE
+                                                         and PROGENITOR_GUIDE.md at the root, and
+                                                         the same BepInEx/ tree with Core's folder
+                                                         packed (below)
 
-  Thunderstore metadata comes from packaging/thunderstore/. Both zips carry
+  Thunderstore metadata comes from packaging/thunderstore/. The manual zip carries
 
     BepInEx/plugins/Progenitor.Bootstrap.dll
     BepInEx/patchers/Progenitor.Preloader.dll
     BepInEx/progenitor-core/Progenitor.dll
+
+  The Thunderstore zip carries the first two and, instead of BepInEx/progenitor-core/, the archive
+  BepInEx/patchers/progenitor-files.zip (entries relative to BepInEx/). V Rising's Thunderstore
+  install rules route only plugins, patchers, core, monomod and config; r2modman, the Thunderstore
+  App and Gale flatten any other folder into BepInEx/plugins/<package>/, which would leave Core among
+  the plugins. The preloader unpacks the archive into BepInEx/progenitor-core before Bootstrap starts
+  (src/Progenitor.Preloader/PackagePayload.cs). New-ThunderstoreZip asserts the routed layout.
 
   The preloader patcher carries out the Mods menu's next-start plugin actions and keeps the
   per-session logs (BepInEx/progenitor-logs) that Get help -> Collect logs bundles. All three
@@ -225,9 +233,9 @@ function New-GameFolderZip {
   <#
     The manual-install zip: one copy, extracted into the folder that holds VRising.exe (or
     VRisingServer.exe). Its only root entry is BepInEx/, taken from the staged tree, so the
-    extract lands every file at the path the mod-manager package already uses
+    extract lands every file at the path Bootstrap and the preloader read
     (BepInEx/plugins, BepInEx/patchers, BepInEx/progenitor-core) and nothing else lands in the
-    game folder. No code reads it differently: it is the same files at the same paths.
+    game folder. It carries no progenitor-files.zip: the folders are already real.
 
     Entries are written one by one with '/' separators (Windows PowerShell's CreateFromDirectory
     writes '\', which some extractors turn into file names). The finished zip is then asserted:
@@ -272,6 +280,126 @@ function New-GameFolderZip {
     }
   } finally {
     $check.Dispose()
+  }
+}
+
+function New-ThunderstoreZip {
+  <#
+    The Thunderstore package, built from the same staged tree as the manual zip. V Rising's Thunderstore install rules
+    (the ecosystem schema, game "v-rising") route only BepInEx/plugins, core, patchers, monomod and config; r2modman, the
+    Thunderstore App and Gale flatten any other folder's files into BepInEx/plugins/<package>/. So the package carries the
+    root files, BepInEx/plugins/ and BepInEx/patchers/ as they are, and every other staged BepInEx folder (progenitor-core,
+    and progenitor-reload with -IncludeDev) as one archive, BepInEx/patchers/<PayloadName>, whose entries are relative to
+    BepInEx/. The preloader patcher unpacks it into the real folders before Bootstrap starts (PackagePayload.cs). Without
+    this, a mod-manager install would put Core's Progenitor.dll among the plugins and Bootstrap would start without Core.
+
+    Entries are written one by one with '/' separators. The finished zip is asserted: every entry is a root file or under
+    BepInEx/plugins/ or BepInEx/patchers/, no entry is a Progenitor.dll, each of -Required is present, and the archive
+    holds progenitor-core/Progenitor.dll and nothing outside the folders the preloader unpacks.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Stage,
+    [Parameter(Mandatory = $true)][string]$ZipPath,
+    [Parameter(Mandatory = $true)][string]$PayloadName,
+    [Parameter(Mandatory = $true)][string[]]$Required
+  )
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $bepRoot = Join-Path $Stage "BepInEx"
+  if (-not (Test-Path -LiteralPath $bepRoot -PathType Container)) {
+    throw "packaging assertion failed: the staged tree has no BepInEx folder: $bepRoot"
+  }
+  $stageFull = [System.IO.Path]::GetFullPath($Stage).TrimEnd('\', '/')
+  $bepFull = [System.IO.Path]::GetFullPath($bepRoot).TrimEnd('\', '/')
+  $routed = @("plugins", "patchers")
+  $packed = @("progenitor-core", "progenitor-reload")
+  foreach ($loose in @(Get-ChildItem -LiteralPath $bepRoot -File)) {
+    throw "packaging assertion failed: a file directly under the staged BepInEx folder has no install rule: $($loose.FullName)"
+  }
+  foreach ($dir in @(Get-ChildItem -LiteralPath $bepRoot -Directory)) {
+    if (($routed -notcontains $dir.Name) -and ($packed -notcontains $dir.Name)) {
+      throw "packaging assertion failed: the staged BepInEx/$($dir.Name) folder is neither routed by the Thunderstore install rules nor packed into $PayloadName"
+    }
+  }
+
+  if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+  $level = [System.IO.Compression.CompressionLevel]::Optimal
+  $payloadStream = New-Object System.IO.MemoryStream
+  $payload = New-Object System.IO.Compression.ZipArchive($payloadStream, [System.IO.Compression.ZipArchiveMode]::Create, $true)
+  try {
+    foreach ($name in $packed) {
+      $dir = Join-Path $bepRoot $name
+      if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+      foreach ($file in @(Get-ChildItem -LiteralPath $dir -Recurse -File | Sort-Object FullName)) {
+        $relative = $file.FullName.Substring($bepFull.Length + 1).Replace('\', '/')
+        [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($payload, $file.FullName, $relative, $level)
+      }
+    }
+  } finally {
+    $payload.Dispose()
+  }
+  $payloadBytes = $payloadStream.ToArray()
+  $payloadStream.Dispose()
+
+  $archive = [System.IO.Compression.ZipFile]::Open($ZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($file in @(Get-ChildItem -LiteralPath $Stage -Recurse -File | Sort-Object FullName)) {
+      $relative = $file.FullName.Substring($stageFull.Length + 1).Replace('\', '/')
+      $parts = $relative.Split('/')
+      if ($parts.Length -ge 3 -and $parts[0] -eq "BepInEx" -and ($packed -contains $parts[1])) { continue }
+      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative, $level)
+    }
+    $entry = $archive.CreateEntry("BepInEx/patchers/" + $PayloadName, $level)
+    $out = $entry.Open()
+    try { $out.Write($payloadBytes, 0, $payloadBytes.Length) } finally { $out.Dispose() }
+  } finally {
+    $archive.Dispose()
+  }
+
+  $check = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $names = @($check.Entries | ForEach-Object { $_.FullName })
+    $backslashed = @($names | Where-Object { $_.Contains('\') })
+    if ($backslashed.Count -gt 0) {
+      throw "packaging assertion failed: $ZipPath has entry names with '\' separators: $($backslashed -join ', ')"
+    }
+    $unrouted = @($names | Where-Object {
+      $_.Contains('/') -and -not ($_.StartsWith("BepInEx/plugins/", [System.StringComparison]::Ordinal) -or
+                                  $_.StartsWith("BepInEx/patchers/", [System.StringComparison]::Ordinal))
+    })
+    if ($unrouted.Count -gt 0) {
+      throw "packaging assertion failed: $ZipPath has entries a mod manager would flatten into BepInEx/plugins: $($unrouted -join ', ')"
+    }
+    $looseCore = @($names | Where-Object { $_.Split('/')[-1] -eq "Progenitor.dll" })
+    if ($looseCore.Count -gt 0) {
+      throw "packaging assertion failed: $ZipPath carries Core as a loose file, which a mod manager would place among the plugins: $($looseCore -join ', ')"
+    }
+    Assert-NoInstallScripts -Names $names -Where $ZipPath
+    foreach ($req in $Required) {
+      if ($names -notcontains $req) {
+        throw "packaging assertion failed: $ZipPath has no $req"
+      }
+    }
+  } finally {
+    $check.Dispose()
+  }
+
+  $inner = New-Object System.IO.Compression.ZipArchive((New-Object System.IO.MemoryStream(, $payloadBytes)), [System.IO.Compression.ZipArchiveMode]::Read)
+  try {
+    $innerNames = @($inner.Entries | ForEach-Object { $_.FullName })
+    if ($innerNames -notcontains "progenitor-core/Progenitor.dll") {
+      throw "packaging assertion failed: $PayloadName has no progenitor-core/Progenitor.dll"
+    }
+    $badInner = @($innerNames | Where-Object {
+      $_.Contains('\') -or -not ($_.StartsWith("progenitor-core/", [System.StringComparison]::Ordinal) -or
+                                 $_.StartsWith("progenitor-reload/", [System.StringComparison]::Ordinal))
+    })
+    if ($badInner.Count -gt 0) {
+      throw "packaging assertion failed: $PayloadName has entries the preloader refuses: $($badInner -join ', ')"
+    }
+    Assert-NoInstallScripts -Names $innerNames -Where $PayloadName
+  } finally {
+    $inner.Dispose()
   }
 }
 
@@ -487,60 +615,49 @@ Assert-NoDevPayload -Root $stage -DevExpected ([bool]$IncludeDev)
 Assert-NoDeveloperArtefacts -Root $stage
 Assert-NoInstallScripts -Names @(Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object { $_.FullName }) -Where "the staged tree"
 
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$compression = [System.IO.Compression.CompressionLevel]::Optimal
-# Entries are written one by one with '/' separators, as New-GameFolderZip does: Windows PowerShell's
-# CreateFromDirectory writes '\', which extractors on other systems keep as part of the file name.
-$stageFull = [System.IO.Path]::GetFullPath($stage).TrimEnd('\', '/')
-$tsArchive = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
-try {
-  foreach ($file in @(Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName)) {
-    $relative = $file.FullName.Substring($stageFull.Length + 1).Replace('\', '/')
-    [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($tsArchive, $file.FullName, $relative, $compression)
-  }
-} finally {
-  $tsArchive.Dispose()
-}
+# The Thunderstore package: Core's folder travels as BepInEx/patchers/progenitor-files.zip, which the preloader unpacks
+# (New-ThunderstoreZip asserts '/' separators, the routed layout, no loose Progenitor.dll and these entries).
+$tsRequired = @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/patchers/progenitor-files.zip", "manifest.json", "LICENSE")
+New-ThunderstoreZip -Stage $stage -ZipPath $zipPath -PayloadName "progenitor-files.zip" -Required $tsRequired
 
-# ...and again on the artifact itself, which is what actually reaches a player.
+# ...and again on the artifact itself, which is what actually reaches a player: its entries and the archive's, so a file
+# packed into progenitor-files.zip is checked like any other.
 $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
 try {
-  $devEntries = @($zip.Entries | Where-Object { $_.Name -like "Progenitor.Dev.*" -or $_.Name -like "*.token" -or $_.Name -eq "progenitor-dev.enable" })
-  if (-not $IncludeDev -and $devEntries.Count -gt 0) {
-    throw "packaging assertion failed: $zipPath contains $(($devEntries | ForEach-Object { $_.FullName }) -join ', ')"
-  }
-  if ($IncludeDev -and -not ($zip.Entries | Where-Object { $_.Name -eq "Progenitor.Dev.dll" })) {
-    throw "packaging assertion failed: -IncludeDev was passed but $zipPath has no Progenitor.Dev.dll"
-  }
-  # Every entry is named with '/' separators...
-  $backslashed = @($zip.Entries | Where-Object { $_.FullName.Contains('\') })
-  if ($backslashed.Count -gt 0) {
-    throw "packaging assertion failed: $zipPath has entry names with '\' separators: $(($backslashed | ForEach-Object { $_.FullName }) -join ', ')"
-  }
-  # ...and the public layout: these three DLLs at exactly these paths, plus the license.
-  foreach ($requiredEntry in @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll", "LICENSE")) {
-    if (-not ($zip.Entries | Where-Object { $_.FullName -eq $requiredEntry })) {
-      throw "packaging assertion failed: $zipPath has no $requiredEntry"
+  $entryNames = New-Object System.Collections.Generic.List[string]
+  foreach ($e in $zip.Entries) {
+    $entryNames.Add($e.FullName)
+    if ($e.FullName -eq "BepInEx/patchers/progenitor-files.zip") {
+      $innerZip = New-Object System.IO.Compression.ZipArchive($e.Open(), [System.IO.Compression.ZipArchiveMode]::Read)
+      try { foreach ($i in $innerZip.Entries) { $entryNames.Add("BepInEx/" + $i.FullName) } } finally { $innerZip.Dispose() }
     }
+  }
+  $leaf = { param($n) $n.Split('/')[-1] }
+  $devEntries = @($entryNames | Where-Object { $l = & $leaf $_; $l -like "Progenitor.Dev.*" -or $l -like "*.token" -or $l -eq "progenitor-dev.enable" })
+  if (-not $IncludeDev -and $devEntries.Count -gt 0) {
+    throw "packaging assertion failed: $zipPath contains $($devEntries -join ', ')"
+  }
+  if ($IncludeDev -and -not ($entryNames | Where-Object { (& $leaf $_) -eq "Progenitor.Dev.dll" })) {
+    throw "packaging assertion failed: -IncludeDev was passed but $zipPath has no Progenitor.Dev.dll"
   }
   # ...and the developer-only artifacts, on the artifact itself. Same list as
   # Assert-NoDeveloperArtefacts, matched against zip entry paths (which use '/').
-  $junk = @($zip.Entries | Where-Object {
-    $_.Name -like "*.delta" -or $_.Name -like "*.delta-state" -or $_.Name -eq "progenitor-allow.txt" -or
-    $_.Name -like "build-*.json" -or $_.Name -like "driftmap-*.json" -or $_.Name -eq "access.txt" -or
-    $_.Name -like "*.pdb" -or $_.Name -like "*.deps.json" -or $_.FullName -like "*progenitor-pending/*"
+  $junk = @($entryNames | Where-Object {
+    $l = & $leaf $_
+    $l -like "*.delta" -or $l -like "*.delta-state" -or $l -eq "progenitor-allow.txt" -or
+    $l -like "build-*.json" -or $l -like "driftmap-*.json" -or $l -eq "access.txt" -or
+    $l -like "*.pdb" -or $l -like "*.deps.json" -or $_ -like "*progenitor-pending/*"
   })
   if ($junk.Count -gt 0) {
-    throw "packaging assertion failed: $zipPath contains developer-only artifacts: $(($junk | ForEach-Object { $_.FullName }) -join ', ')"
+    throw "packaging assertion failed: $zipPath contains developer-only artifacts: $($junk -join ', ')"
   }
-  Assert-NoInstallScripts -Names @($zip.Entries | ForEach-Object { $_.FullName }) -Where $zipPath
+  Assert-NoInstallScripts -Names @($entryNames) -Where $zipPath
 } finally {
   $zip.Dispose()
 }
 
 # The manual-install zip (one copy into the game folder): the same staged BepInEx/ tree, already asserted above, and
-# nothing else at its root. The Thunderstore zip stays as it is: Thunderstore needs manifest.json, README.md and
+# nothing else at its root, and Core's folder as real files. Thunderstore needs manifest.json, README.md and
 # icon.png at the root, which a player extracting into the game folder should not get.
 $requiredEntries = @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll")
 New-GameFolderZip -Stage $stage -ZipPath $manualZipPath -Required $requiredEntries
@@ -593,5 +710,5 @@ Write-Host "wrote $sumsPath (zip + every zip entry, sha256)"
 if ($IncludeDev) {
   Write-Host "included BepInEx/progenitor-reload/Progenitor.Dev.dll (-IncludeDev)"
 } else {
-  Write-Host "public layout: BepInEx/plugins/Progenitor.Bootstrap.dll + BepInEx/patchers/Progenitor.Preloader.dll + BepInEx/progenitor-core/Progenitor.dll (asserted; Dev omitted, asserted)"
+  Write-Host "public layout: BepInEx/plugins/Progenitor.Bootstrap.dll + BepInEx/patchers/Progenitor.Preloader.dll + BepInEx/progenitor-core/Progenitor.dll (manual zip) or BepInEx/patchers/progenitor-files.zip (Thunderstore zip) (asserted; Dev omitted, asserted)"
 }

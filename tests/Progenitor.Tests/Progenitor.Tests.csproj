@@ -1088,6 +1088,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Plugins\ModEnableState.cs" Link="Linked\ModEnableState.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Plugins\LegacyIds.cs" Link="Linked\LegacyIds.cs" />
     <Compile Include="..\..\src\Progenitor.Preloader\PluginFileActions.cs" Link="Linked\PluginFileActions.cs" />
+    <!-- The Thunderstore package's progenitor-files.zip, unpacked by the preloader into BepInEx/progenitor-core. -->
+    <Compile Include="..\..\src\Progenitor.Preloader\PackagePayload.cs" Link="Linked\PackagePayload.cs" />
     <!-- SUPPORT1: Get help's log bundle (redaction, tail cuts, retention, zip contents), its page rows' actions and the
          preloader's per-session log rotation. All game-free; SupportLive.cs is the game-bound half. -->
     <Compile Include="..\..\src\Progenitor.Preloader\SessionLogFiles.cs" Link="Linked\SessionLogFiles.cs" />
