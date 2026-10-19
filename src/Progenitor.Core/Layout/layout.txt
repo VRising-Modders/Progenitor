@@ -1075,6 +1075,8 @@ offset RootPrefabPlayerDeathContainerClanMembersOffset = 0x5C : RootPrefabCollec
 offset RootPrefabPlayerDeathContainerOnlySelfOffset = 0x60 : RootPrefabCollection.PlayerDeathContainerOnlySelfPrefabGUID
 offset RootPrefabPlayerInventoryDropContainerOffset = 0x68 : RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID
 dump client
+# The Dev bridge's bot_event dropall writes the setting into the client's outgoing event.
+offset ClientDropEntireInventoryEventSettingOffset  = 0x0  : DropEntireInventoryEvent.Setting             # DropEntireInventorySetting, int
 offset ClientRootPrefabDropItemOffset                     = 0x48 : RootPrefabCollection.DropItemPrefabGUID
 offset ClientRootPrefabDeathContainerOffset               = 0x54 : RootPrefabCollection.DeathContainerPrefabGUID
 offset ClientRootPrefabPlayerDeathContainerAnyoneOffset   = 0x58 : RootPrefabCollection.PlayerDeathContainerAnyonePrefabGUID
