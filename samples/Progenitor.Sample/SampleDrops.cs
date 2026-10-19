@@ -52,7 +52,8 @@ internal static class SampleDrops
                 ctx.Reply(piles.Count + " pile(s) within " + radius.ToString("0.#", ci) + " m.");
                 foreach (var p in piles)
                     ctx.Reply(p.Id + " item " + p.Item + " x" + p.Amount + " at " + p.Distance.ToString("0.0", ci) + " m"
-                        + (p.CanTake ? "" : p.HasItemEntity ? " (own item entity: not taken)" : p.InFlight ? " (in flight: not taken yet)" : " (does not stack: not taken)"));
+                        + (p.IsUnique ? " unique" : "") + " via " + p.Route
+                        + (p.CanTake ? "" : p.InFlight ? " (in flight: not taken yet)" : !p.IsItemKnown ? " (unknown item: not taken)" : " (no route: not taken)"));
                 SampleLog.Info(Area, "near " + radius.ToString("0.#", ci) + " m: " + piles.Count + " pile(s)");
                 return;
             }

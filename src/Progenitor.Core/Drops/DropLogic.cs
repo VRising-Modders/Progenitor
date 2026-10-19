@@ -7,7 +7,14 @@ namespace Progenitor.Drops;
 // ---- game-free logic behind ctx.Drops and ctx.Inventory.OnGroundDrop / OnDropAll ---------------
 
 /// <summary>
-/// The rules <c>ctx.Drops.TakeInto</c> applies before and after its inventory add. Game-free.
+/// The rules <c>ctx.Drops.TakeInto</c> and <c>ctx.Drops.Remove</c> apply around their writes. Game-free.
+///
+/// <para><b>Routes.</b> A pile with its own inventory (the game's item pile carries an inventory
+/// that holds the real item, its item entity included) is taken the way the game's own pickup
+/// (<c>ItemPickupSystem</c>) takes it: the game's slot move from the pile's inventory into the
+/// target, then <c>ItemPickup.ItemAmount</c> set to what the pile's inventory still holds. A pile
+/// without an inventory can only be copied (the server add creates fresh units), so only a
+/// stackable item without per-copy state takes that route.</para>
 /// </summary>
 internal static class GroundTakeRules
 {
@@ -19,19 +26,20 @@ internal static class GroundTakeRules
     internal const string Empty = "the pile is empty";
     internal const string InFlight =
         "the pile is in flight (the game's throw is still running, and the throw holds its own amount); try again once it has landed";
-    internal const string ItemEntity =
-        "the pile carries its own item entity (gear with rolled stats, a jewel); TakeInto refuses it rather than copy the item without its state";
-    internal const string NotStackable =
-        "the item does not stack (stack size 1); TakeInto refuses it, because such an item can carry state a copy would lose";
+    internal const string NoPileInventory =
+        "the pile has no inventory of its own, and its item cannot be copied without losing state (it has an item entity, its definition gives each copy one, or it does not stack); TakeInto refuses it";
+    internal const string NotInPileInventory =
+        "the pile's own inventory holds none of the pile's item; TakeInto leaves it alone";
     internal const string UnknownItem = "the item is not in the server item table";
     internal const string NoTarget = "no target inventory (InventoryRef.None)";
+    internal const string HoldsItems = "the pile still holds items; take them first (TakeInto) or leave the pile";
 
     /// <summary>
     /// Why a take must not start, or null when it may. Checked in this order: arguments, the
-    /// handle's epoch, the pile's presence and state, then what it holds.
+    /// handle's epoch, the pile's presence and state, then what it holds and the route.
     /// </summary>
     internal static string? Refusal(bool pileNone, bool stale, bool targetNone, int requested, bool exists, bool removing,
-        int amount, bool inFlight, bool hasItemEntity, bool itemKnown, int maxStack)
+        int amount, bool inFlight, bool itemKnown, GroundTakeRoute route)
     {
         if (pileNone) return NoPile;
         if (targetNone) return NoTarget;
@@ -41,11 +49,26 @@ internal static class GroundTakeRules
         if (removing) return Removing;
         if (amount <= 0) return Empty;
         if (inFlight) return InFlight;
-        if (hasItemEntity) return ItemEntity;
         if (!itemKnown) return UnknownItem;
-        if (maxStack <= 1) return NotStackable;
+        if (route == GroundTakeRoute.None) return NoPileInventory;
         return null;
     }
+
+    /// <summary>
+    /// How a pile is taken: through its own inventory whenever it has one (any item; the game's
+    /// own pickup does the same), else a copy for a stackable item that is not unique, else not at all.
+    /// </summary>
+    internal static GroundTakeRoute Route(bool hasPileInventory, bool unique, int maxStack) =>
+        hasPileInventory ? GroundTakeRoute.PileInventory
+        : !unique && maxStack > 1 ? GroundTakeRoute.Copy
+        : GroundTakeRoute.None;
+
+    /// <summary>
+    /// True when the pile holds a copy with per-copy state: the throw component or a slot of the
+    /// pile's own inventory names an item entity, or the item's definition gives each copy one.
+    /// </summary>
+    internal static bool IsUnique(bool throwItemEntity, bool slotItemEntity, bool definitionInstance) =>
+        throwItemEntity || slotItemEntity || definitionInstance;
 
     /// <summary>How many to ask the inventory for: never more than the pile holds.</summary>
     internal static int Ask(int requested, int pileAmount) => Math.Max(0, Math.Min(requested, pileAmount));
@@ -61,9 +84,39 @@ internal static class GroundTakeRules
         return (left, left <= 0 && done > 0, done);
     }
 
+    /// <summary>
+    /// The pile after a move out of its own inventory: <paramref name="leftInPile"/> is the item's
+    /// count read back from the pile's inventory, which becomes <c>ItemPickup.ItemAmount</c> (as the
+    /// game's pickup writes it). The pile is removed only when the move took something and nothing
+    /// of the item is left.
+    /// </summary>
+    internal static (int NewAmount, bool Remove) AfterMove(int moved, int leftInPile)
+    {
+        int left = Math.Max(0, leftInPile);
+        return (left, left == 0 && moved > 0);
+    }
+
     /// <summary>The outcome for a take that reached the add.</summary>
     internal static InventoryOutcome Outcome(int requested, int done) =>
         done <= 0 ? InventoryOutcome.Nothing : done >= requested ? InventoryOutcome.Complete : InventoryOutcome.Partial;
+
+    /// <summary>
+    /// <c>ctx.Drops.Remove</c>: (why it must not run, or null; and whether there is nothing left to
+    /// do). A pile that is already gone or being removed counts as done (the call is idempotent); a
+    /// stale handle is refused, because the entity slot may hold something else now; a pile that
+    /// still holds units (its <c>ItemAmount</c> or its own inventory) is refused.
+    /// </summary>
+    internal static (string? Refusal, bool AlreadyDone) RemoveCheck(bool pileNone, bool stale, bool exists, bool isPile, bool removing,
+        int amount, int unitsInPileInventory)
+    {
+        if (pileNone) return (NoPile, false);
+        if (stale) return (StalePile, false);
+        if (!exists) return (null, true);
+        if (!isPile) return (Gone, false);
+        if (removing) return (null, true);
+        if (amount > 0 || unitsInPileInventory > 0) return (HoldsItems, false);
+        return (null, false);
+    }
 }
 
 /// <summary>Distance filter and nearest-first selection for <c>ctx.Drops.Near</c>. Game-free.</summary>

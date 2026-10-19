@@ -2670,11 +2670,11 @@ not run. Results per step:
 [api.md, Drops](api.md#drops).
 
 ```csharp
-// An autoloot pass: take every stackable pile within 4 m of the player into their bag.
+// An autoloot pass: take every pile within 4 m of the player into their bag.
 var bag = ctx.Inventory.Of(character);
 foreach (var pile in ctx.Drops.Near(x, y, z, radius: 4f))
 {
-    if (!pile.CanTake) continue;                    // gear, jewels and unknown items stay on the ground
+    if (!pile.CanTake) continue;                    // in flight, unknown item, or no safe route
     GroundTakeResult r = ctx.Drops.TakeInto(pile.Id, bag, pile.Amount);
     if (r.Outcome == InventoryOutcome.Inconsistent) break;  // the bag could not be read back: stop
 }
@@ -2703,33 +2703,46 @@ A pile is an entity with the game's `ItemPickup` component (both sides' metadata
 | `NearInto(x, y, z, radius, List<GroundPile> into, max = 64)` → `int` | The same into a caller list (cleared first); returns the count. |
 | `TryGet(GroundPileId, out GroundPile, out string reason)` | The pile as it is now. False with the reason when the handle is stale, the pile is gone, being removed or empty. |
 | `TakeInto(GroundPileId, InventoryRef into, int amount)` → `GroundTakeResult` | Up to `amount` units into the inventory, the pile shrunk or removed (below). |
+| `Remove(GroundPileId, out string reason)` → `bool` | Removes a pile that holds nothing, with the replicated destroy (below). |
 
 - **Which piles.** Asleep piles (`Disabled`, an area nobody is near) are listed with
   `GroundPile.Disabled`. Piles with `DestroyTag`, an item of 0 or an amount of 0 are left out.
   The position is `Translation`, else `LocalToWorld`; a pile with neither is skipped.
 - **`GroundPile`**: `Id`, `Item`, `Amount`, `X`/`Y`/`Z`, `Distance` and `DistanceSquared` from the
   asked point, `Disabled`, `MaxStack` (the stack size in the server item table, 0 when the table
-  does not know the item), `HasItemEntity` with `ItemEntity` (`ItemEntityIndex`/`Version`),
-  `InFlight`, `IsStackable` (stack size above 1), `IsUnique` (`HasItemEntity` or not stackable)
-  and `CanTake` (not unique, not in flight, units left).
+  does not know the item) and `IsItemKnown`, `HasOwnInventory` (below), `SlotHasItemEntity`,
+  `ItemEntity` (`ItemEntityIndex`/`Version`, from the throw component), `HasItemEntity` (either),
+  `ItemHasInstanceEntity` (the item's definition, as
+  [`ItemCatalogEntry.HasInstanceEntity`](#item-catalog)), `InFlight`, `IsStackable` (stack size above
+  1), `IsUnique` (`HasItemEntity` or `ItemHasInstanceEntity`), `Route` (how `TakeInto` takes it) and
+  `CanTake` (landed, units left, a known item, a route).
+- **The pile's own inventory.** The game's item pile carries an inventory of its own
+  (`InventoryBuffer`, reached like any other owner's through `InventoryInstanceElement`), and the
+  real item lives in it, item entity included. The game's pickup relies on it: `ItemPickupSystem`
+  (server) calls `InventoryUtilities.TryGetInventory` on the pile, `InventoryUtilitiesServer.TryMoveItem`
+  for each of its slots into the picker's inventory, then `GetItemAmount` on the pile and writes the
+  result into `ItemPickup.ItemAmount` (checked against the server's game code). Observed live by the
+  Autoloot mod 2026-10-19: loot piles from ten bandits each held their item in such an inventory.
+  `HasOwnInventory` is read per pile through `ctx.Inventory`'s reader; `SlotHasItemEntity` is set
+  when a slot holding the pile's item names an item entity, so a landed gear pile stays unique.
 - **In flight.** A pile that still carries the game's throw component
   (`DropItemThrowSystem.DropItem`) or `SpellMovement` is `InFlight`. The throw component holds its
   own `Amount`, which a take would not update, and the game's throw systems read it when the throw
   ends; a take then could be undone or doubled. `TakeInto` refuses such a pile ("in flight") until
   it has landed. Verified live 2026-10-19: landed piles cleared `InFlight` within a tick or two, so
   the rule does not hold landed piles back.
-- **The pile's own item entity.** When a pile carries the game's throw component
+- **The throw's item entity.** While a pile carries the game's throw component
   `DropItemThrowSystem.DropItem` (`ItemEntity` at 0x0, `ItemType` 0x8, `Amount` 0xC) and its
-  `ItemEntity` names a live entity, the pile reports it. The game's drop handlers pass a dropped
-  slot's item entity on to the drop (`DropItemAroundPosition.ItemEntity`). That the pile keeps it
-  in this component is **inferred** from the metadata, not observed; a pile of gear without it is
-  still refused, because gear does not stack.
+  `ItemEntity` names a live entity, the pile reports it in `ItemEntity`. The component is gone once
+  the pile lands, so after landing the pile's own inventory slot (`SlotHasItemEntity`) and the
+  item's definition (`ItemHasInstanceEntity`) carry the answer.
 - **`GroundPileId`** is the entity's index and version plus the world-load epoch it was listed in
   (`IsStaleIn(epoch)`, `Key` for a dictionary within one epoch). A handle from before a save reload
   is refused as stale. Never persist one.
 - **Cost.** One cached query over `ItemPickup` (asleep piles included), one entity array per call,
   then one position read per pile. Only piles inside the radius get the further reads (the item
-  fields, `DestroyTag`, `Disabled`, the throw component and a cached item-table lookup). A server
+  fields, `DestroyTag`, `Disabled`, the throw component, a cached item-table lookup and the pile's
+  own inventory, usually one slot). A server
   with thousands of piles pays the position reads on every call: poll at a few hertz, not every
   frame.
 
@@ -2740,20 +2753,41 @@ steps:
 
 1. **Refusals** (nothing touched, `Outcome = Refused`), in this order: `GroundPileId.None`, no
    target inventory, `amount` below 1, a stale handle, a pile that is gone, being removed
-   (`DestroyTag`) or empty, a pile in flight (above), a pile with its own item entity, an item the
-   server item table does not know, an item that does not stack (stack size 1).
-2. **The add.** `ctx.Inventory.TryAdd(into, item, min(amount, pile))`: the game's server add,
-   read back. A refused add is `Refused` with its reason; `Inconsistent` (the inventory could not be
-   read back) leaves the pile untouched. The caller should then leave that pile alone, because the
-   units may already be in the inventory.
-3. **The pile.** It shrinks by exactly what the inventory read back as added, never by what was
-   asked. A pile with units left gets its new `ItemAmount`, written alone through the component
-   overlay (`GetComponentDataRawRW` at offset 0x8). An emptied pile gets `ItemAmount` 0 first, so
-   a second take in the same frame finds it empty, then the replicated removal
-   (`DestroyUtility.Destroy` alone, the [unit removal path](#units); live 2026-09-24 it removed a
-   loot drop on the server and the client within 2 s).
-4. **The result.** `Outcome` (`Complete`, `Partial`, `Nothing` when nothing fit), `Done`,
-   `PileBefore`, `PileAfter`, `PileRemoved`, `Reason`, `Add` (the inventory result).
+   (`DestroyTag`) or empty, a pile in flight (above), an item the server item table does not know,
+   and a pile with no route (`GroundTakeRoute.None`, below).
+2. **The route** (`GroundPile.Route`, `GroundTakeResult.Route`):
+   - `PileInventory` whenever the pile has its own inventory, for every item: stackable loot,
+     blueprint books, gear and jewels alike. This is the game's own pickup.
+   - `Copy` for a pile without its own inventory, only when the item stacks and the pile is not
+     unique: a fresh copy then loses nothing.
+   - `None` otherwise (no inventory, and the item has an item entity, its definition gives each copy
+     one, or it does not stack): refused.
+3. **The move** (`PileInventory`). `ctx.Inventory.Transfer(pile's inventory, into, item,
+   min(amount, units in the pile's inventory))`: the game's slot move, read back, so the item entity
+   and its rolled stats travel with the slot. Then the pile's inventory is counted again and that
+   count becomes `ItemAmount`, as the game's pickup writes it. A pile whose inventory holds none of
+   its item is refused.
+   **The add** (`Copy`). `ctx.Inventory.TryAdd(into, item, min(amount, pile))`: the game's server add,
+   read back; the pile shrinks by exactly what the inventory read back as added, never by what was
+   asked.
+   On both routes a refused call is `Refused` with its reason, and `Inconsistent` (the inventory
+   could not be read back) leaves the pile untouched. The caller should then leave that pile alone,
+   because the units may already be in the inventory.
+4. **The pile.** Nothing moved (the bag is full): `Nothing`, the pile untouched. Part moved:
+   `Partial`, the pile kept with its new `ItemAmount`, written alone through the component overlay
+   (`GetComponentDataRawRW` at offset 0x8). An emptied pile gets `ItemAmount` 0 first, so a second
+   take in the same frame finds it empty, then the replicated removal (`DestroyUtility.Destroy`
+   alone, the [unit removal path](#units); live 2026-09-24 it removed a loot drop on the server and
+   the client within 2 s).
+5. **The result.** `Route`, `Outcome` (`Complete`, `Partial`, `Nothing` when nothing fit), `Done`,
+   `PileBefore`, `PileAfter`, `PileRemoved`, `Reason`, `Add` (the transfer or add result).
+
+`Remove(pile, out reason)` removes a pile that holds nothing with the same replicated removal, for
+a pile a mod emptied another way, so no mod needs to call the removal path itself. It is
+idempotent: a pile already gone or being removed returns true. It refuses a stale handle (the
+entity slot may hold something else in the new world load), an entity that is not an item pile,
+and a pile that still holds units, in `ItemAmount` or in its own inventory. There is no force flag:
+take the units with `TakeInto` first.
 
 Proven and assumed:
 
@@ -2762,10 +2796,16 @@ Proven and assumed:
   removed on both the server and the client, with no ghost piles. That clients see a lower
   `ItemAmount` after a partial take (the field is a synced int on the game's side) is still
   **assumed**: no partial take was observed.
-- **Unique items are refused.** No proven path moves a pile's own item entity into an inventory
-  (the game's own pickup, `ItemPickupSystem`, runs from an interaction spell and was not traced).
-  Re-creating the item with `TryAdd` would drop its rolled stats, so `TakeInto` refuses rather than
-  copy it.
+- **The pile-inventory route.** Checked against the server's pickup code (above) and game-free
+  tested. The same moves done by a mod, `ctx.Inventory.TransferAll(ctx.Inventory.Of(pile), bag)`,
+  then `ItemAmount` 0 and the replicated removal, were **verified live 2026-10-19** by the Autoloot
+  mod: loot from ten bandits, including `Item_Jewel_Blood_T01` and
+  `Item_Ingredient_Book_Floor_Forge`, went into the bag, the jewel kept its rolled stats, and no
+  piles were left on the server or the client. Through `TakeInto` itself the route is **not yet
+  live-verified**, and neither is `Remove`.
+- **Stackable piles.** Before this route a stackable pile with its own inventory was copied and its
+  `ItemAmount` lowered while its inventory kept the units. The pile-inventory route keeps the two in
+  step, as the game does.
 
 ### Bag drops to the ground
 
@@ -2934,8 +2974,8 @@ Each step says what that run covered; a step with no **Run** note has not been r
    two players beside each other (one sent with `bot_event` kind `drop`) raised `OnGroundDrop`, and
    the mod's protection keyed off it kept both stacks on the ground. `DragOut` and the weapon were not
    run.
-3. `.drops near 5`: the two ore piles (and the weapon, `own item entity: not taken` or
-   `does not stack: not taken`). For each landed pile, record its distance from the position its
+3. `.drops near 5`: the two ore piles and the weapon, each with its route (`via PileInventory`
+   for a pile with its own inventory; the weapon also `unique`). For each landed pile, record its distance from the position its
    `ground drop` line reported (`PlayerGroundDrop.X/Y/Z`), over at least five drops facing different
    ways. Report the largest: Autoloot matches a player's own drop within 4 m of that position, so a
    throw that regularly lands farther needs a wider match.
@@ -2946,6 +2986,12 @@ Each step says what that run covered; a step with no **Run** note has not been r
    both clients within 2 s.
    **Run in part:** whole takes of deer and bear loot into a bag (`TryGet`, then `TakeInto`) removed
    the piles on the server and the client, with no ghost piles. The partial take was not run.
+   **Pile-inventory route (procedure, not run through `TakeInto`):** drop a weapon, a jewel and a
+   blueprint book, let them land, then `.drops take` once per pile: each line reads
+   `Complete via PileInventory … removed`, the weapon and the jewel keep their stats in the bag
+   (inspect the item), and the piles disappear on both clients. With a full bag the line reads
+   `Nothing` and the pile stays. The same moves were run by the Autoloot mod itself on 2026-10-19
+   (see [Taking from a pile](#taking-from-a-pile)).
 5. Drop all: the game's drop-all button, or from a headless client the Dev bridge's
    `bot_event {"kind":"dropall"}` (optional `"setting"`, e.g. `"ExceptAnyEquipped"`; see
    [headless bot ops](../tools/bots/README.md#ops)). Expect `drop all … container=<i:v> match items=…`,
@@ -3850,7 +3896,7 @@ X/Z change by about 10 and the other's do not.
 
 `ctx.Items.Catalog()` is a read-only list of every item the world knows, for pickers, category
 rules and settings pages: `IReadOnlyList<ItemCatalogEntry>` with `PrefabGuid`, `PrefabName`,
-`DisplayName`, `MaxAmount`, `ItemCategory`, `ItemType` and `IsCustom`. `ctx.Items.CatalogEntry(guid)`
+`DisplayName`, `MaxAmount`, `ItemCategory`, `ItemType`, `IsCustom` and `HasInstanceEntity`. `ctx.Items.CatalogEntry(guid)`
 looks one up from the same build; `ctx.Items.CatalogInfo()` reports the last build. Status:
 **landed** (source-checked against the game's metadata, built, game-free tested in
 `ItemCatalogTests`); not live-verified. Signatures: [api.md](api.md#item-catalog).
@@ -3872,6 +3918,28 @@ clone-time stack size on the client after an ordered edit pass; the row is only 
 that read fails. Prefab names come from the prefab collection's lookup map. Custom items cloned with
 `DefineItem` or a data pack are included on each side once their clone is applied there
 (`IsCustom` true).
+
+**Instance entity.** `HasInstanceEntity` is true when a copy of the item in an inventory slot gets
+its own item entity, the carrier of per-copy state such as durability, rolled stats or a jewel's
+mods. The rule is the game's, read from the item definition alone:
+
+- The server's inventory add calls `InventoryUtilitiesServer.CreateInventoryItemEntity` for each new
+  slot (unless the add carries a previous item entity, as a move does). It looks the item up in the
+  item table it is handed (`GameDataSystem.ItemHashLookupMap`): when the row's `ItemData.Entity` is
+  `Entity.Null` it returns `Entity.Null` and the slot is pure data; otherwise it instantiates that
+  entity, adds `Disabled`, and the slot names the copy.
+- The post-load repair, `RepairBrokenInventoryItemsSystem`, applies the same test the other way: a
+  slot whose row has `ItemData.Entity` set but whose own item entity is null is cleared as broken.
+- The table row is a copy of the prefab's `ItemData` made when the prefab is registered (the
+  registration job only scales the stack size and adjusts binding flags). Stack size, `ItemType`,
+  category and equipment or durability components take no part in the decision.
+
+Evidence level: the rule is checked against the server's game code; the per-item values are not
+observed. The one item whose `ItemData` was recorded live, `Item_Ingredient_Crystal` (2026-09-10),
+has `ItemData.Entity` null, as a plain stack must. The catalog reads the table row first (that is
+what the add reads), then the prefab's own `ItemData`; with neither it would answer true, the safe
+side. The flag is information: `ctx.Drops.TakeInto` decides by the pile's own inventory
+([Taking from a pile](#taking-from-a-pile)), not by this flag.
 
 **Display names.** The client resolves `ManagedItemData.Name` through the game's string table,
 the resolver chat item links already use, so names follow the client's language. The dedicated

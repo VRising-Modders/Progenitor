@@ -120,7 +120,9 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
 
             // The same table the game's server add and move read (their ItemDataMap), so the
             // free-space answer uses the stack size the game itself applies.
-            info = new InventoryItemInfo(mapped.MaxAmount, (long)mapped.ItemCategory, (int)mapped.ItemType);
+            // ItemData.Entity in the same row is what the game's CreateInventoryItemEntity checks.
+            info = new InventoryItemInfo(mapped.MaxAmount, (long)mapped.ItemCategory, (int)mapped.ItemType,
+                Progenitor.Items.ItemInstanceRule.FromItemDataEntity(mapped.Entity.Index, mapped.Entity.Version));
             _items[item] = info;
             return true;
         }

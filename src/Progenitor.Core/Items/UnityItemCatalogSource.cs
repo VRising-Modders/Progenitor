@@ -24,7 +24,9 @@ namespace Progenitor.Items;
 /// <c>ctx.Inventory</c> reads stack sizes from. A prefab missing from it is not listed, except a
 /// custom item applied in this process.</description></item>
 /// <item><description>Facts: the prefab's own <c>ItemData</c> (<c>GetComponentData&lt;ItemData&gt;</c>);
-/// the table row only when that read fails (<see cref="ItemCatalogFacts.TryPick"/>).</description></item>
+/// the table row only when that read fails (<see cref="ItemCatalogFacts.TryPick"/>). The instance
+/// flag is the other way round: the table row's <c>ItemData.Entity</c> first, because that row is
+/// what the game's inventory add reads (<see cref="ItemInstanceRule.Pick"/>).</description></item>
 /// <item><description>Prefab name: <c>PrefabCollectionSystem._PrefabLookupMap.TryGetName</c>, the call
 /// <see cref="PrefabLookup.TryGetName"/> makes, with the system resolved once per build and no per-item log.</description></item>
 /// <item><description>Display name (client): <c>ChatGameData.TryLocalizedItemName</c>, the resolver
@@ -132,17 +134,21 @@ internal sealed class UnityItemCatalogSource : IItemCatalogSource
 
                 // The prefab's own ItemData (the typed read Core's edit and status paths use): the
                 // table row can lag behind an ordered edit pass on the client.
-                bool entityRead = false;
+                bool entityRead = false, prefabInstance = false;
                 ItemCatalogFacts entityFacts = default;
                 try
                 {
                     var data = em.GetComponentData<ItemData>(e);
                     entityFacts = new ItemCatalogFacts(data.MaxAmount, (long)data.ItemCategory, (int)data.ItemType);
+                    prefabInstance = ItemInstanceRule.FromItemDataEntity(data.Entity.Index, data.Entity.Version);
                     entityRead = true;
                 }
                 catch { entityMisses++; }
 
                 if (!ItemCatalogFacts.TryPick(inTable, tableFacts, entityRead, entityFacts, isCustom, out var facts)) continue;
+                // ItemData.Entity decides whether a slot gets an item entity; the game's add reads the table row.
+                bool instance = ItemInstanceRule.Pick(inTable, inTable && ItemInstanceRule.FromItemDataEntity(row.Entity.Index, row.Entity.Version),
+                    entityRead, prefabInstance);
 
                 string? prefabName = null;
                 if (prefabs != null)
@@ -166,7 +172,7 @@ internal sealed class UnityItemCatalogSource : IItemCatalogSource
                     display = def.LocalizedName;
 
                 into.Add(new ItemCatalogRow(guid.GuidHash, prefabName, display, facts.MaxAmount,
-                    facts.ItemCategory, facts.ItemType, isCustom));
+                    facts.ItemCategory, facts.ItemType, isCustom, instance));
             }
             catch
             {
