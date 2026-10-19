@@ -150,7 +150,17 @@ internal static class DebugMapPolicy
         NoGround = 6,
         NoValidSpot = 7,
         TeleportFailed = 8,
+
+        /// <summary>
+        /// The move ran but the read-back did not find the character at the spot, even after the position write: the
+        /// game refused that spot. Never reported as a teleport. A client from before 2026-10-19 shows its generic
+        /// failure line for this code.
+        /// </summary>
+        Refused = 9,
     }
+
+    /// <summary>True for the two results that mean the character really moved (a read-back confirmed it).</summary>
+    internal static bool IsTeleported(Result result) => result is Result.Teleported or Result.Moved;
 
     /// <summary>
     /// The server's re-check before anything moves, in order: an admin, with a character, wearing the
@@ -190,16 +200,73 @@ internal static class DebugMapPolicy
     /// <summary>Height the ground probe starts from: above any terrain, so it lands on the top floor there.</summary>
     internal const float ProbeHeight = 200f;
 
-    /// <summary>One probe's answer.</summary>
-    internal readonly record struct Probe(bool Valid, float Y, string Why)
+    // ---- the floor -------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Meters below a found floor the next layer probe starts. The game's height read answers with the highest
+    /// walkable floor at or below the probe height, so probing this far under a floor finds the next layer down and
+    /// cannot return the same one or a slab a few centimeters under it.
+    /// </summary>
+    internal const float FloorLayerGap = 1f;
+
+    /// <summary>Most layers the floor walk reads under one point (a roof, upper floors, the ground floor).</summary>
+    internal const int MaxFloorLayers = 6;
+
+    /// <summary>Meters. The floor walk never goes further than this below the top layer.</summary>
+    internal const float MaxFloorDrop = 30f;
+
+    /// <summary>
+    /// The floor chosen under one point. <see cref="Y"/> is the floor to stand on, <see cref="Top"/> the top layer
+    /// (what a single read from <see cref="ProbeHeight"/> gives), <see cref="Layers"/> how many layers were read.
+    /// </summary>
+    internal readonly record struct Floor(bool Found, float Y, float Top, int Layers);
+
+    /// <summary>
+    /// Pick the floor to stand on under one point. <paramref name="heightAt"/> answers the game's height read for a
+    /// probe height: the highest walkable floor at or below it, or null. Read once from <see cref="ProbeHeight"/>:
+    /// that is the top layer, and outside a castle it is the answer (the behavior that has worked live).
+    ///
+    /// <para><b>Inside castle territory</b> (<paramref name="preferGround"/>) the top layer can be a roof or an upper
+    /// level the game will not teleport onto (live 2026-10-19: y 15.5 over a castle floor at 5; the game's helper
+    /// returned and moved nobody). There the walk goes on down, <see cref="FloorLayerGap"/> under each floor found,
+    /// and takes the <b>lowest</b> layer: the castle's ground floor, or the ground. It stops at a miss, at an answer
+    /// that is not below the probe (a read that ignores the probe height), past <see cref="MaxFloorDrop"/> under the
+    /// top, or after <see cref="MaxFloorLayers"/> layers.</para>
+    /// </summary>
+    internal static Floor PickFloor(Func<float, float?> heightAt, bool preferGround)
     {
-        internal static Probe Ok(float y) => new(true, y, "");
+        if (heightAt == null) throw new ArgumentNullException(nameof(heightAt));
+        float? top = heightAt(ProbeHeight);
+        if (!top.HasValue || float.IsNaN(top.Value)) return new Floor(false, float.NaN, float.NaN, 0);
+
+        float chosen = top.Value;
+        int layers = 1;
+        if (!preferGround) return new Floor(true, chosen, top.Value, layers);
+
+        while (layers < MaxFloorLayers)
+        {
+            float probe = chosen - FloorLayerGap;
+            float? below = heightAt(probe);
+            if (!below.HasValue || float.IsNaN(below.Value)) break;
+            if (below.Value > probe + 0.01f) break; // not "at or below" the probe: the read ignored the height
+            if (top.Value - below.Value > MaxFloorDrop) break;
+            chosen = below.Value;
+            layers++;
+        }
+
+        return new Floor(true, chosen, top.Value, layers);
+    }
+
+    /// <summary>One probe's answer.</summary>
+    internal readonly record struct Probe(bool Valid, float Y, string Why, float Top = float.NaN)
+    {
+        internal static Probe Ok(float y, float top = float.NaN) => new(true, y, "", top);
 
         internal static Probe No(string why) => new(false, float.NaN, why ?? "");
     }
 
     /// <summary>The search's answer.</summary>
-    internal readonly record struct Spot(bool Found, float X, float Y, float Z, float Distance, int Probes, string Why, float Step = 0f);
+    internal readonly record struct Spot(bool Found, float X, float Y, float Z, float Distance, int Probes, string Why, float Step = 0f, float Top = float.NaN);
 
     /// <summary>Probes a full search of <paramref name="radius"/> at <paramref name="step"/> makes: the point plus every ring.</summary>
     internal static int PlannedProbes(float radius, float step)
@@ -260,7 +327,7 @@ internal static class DebugMapPolicy
         }
 
         var center = Ask(x, z);
-        if (center.Valid) return new Spot(true, x, center.Y, z, 0f, probes, "", step);
+        if (center.Valid) return new Spot(true, x, center.Y, z, 0f, probes, "", step, center.Top);
         firstWhy = center.Why;
 
         int rings = (int)Math.Floor(radius / step + 1e-4);
@@ -275,7 +342,7 @@ internal static class DebugMapPolicy
                 float pz = (float)(z + r * Math.Sin(a));
                 var p = Ask(px, pz);
                 if (!p.Valid) continue;
-                return new Spot(true, px, p.Y, pz, (float)Distance(x, z, px, pz), probes, firstWhy, step);
+                return new Spot(true, px, p.Y, pz, (float)Distance(x, z, px, pz), probes, firstWhy, step, p.Top);
             }
         }
 
@@ -335,20 +402,29 @@ internal static class DebugMapPolicy
         Result.BadPoint => "Map teleport refused: that point is off the world.",
         Result.NoGround => "Map teleport refused: the ground cannot be read there (the tile world is not loaded).",
         Result.NoValidSpot => "Map teleport refused: no valid spot within " + M(radius) + " m of that point.",
+        Result.Refused => "Couldn't teleport there: the game refused that spot.",
         _ => "Map teleport failed. See the server log.",
     };
 
-    /// <summary>The readback line <c>.debug tp</c> prints and the server logs for every request.</summary>
-    internal static string Readback(string who, Result result, float reqX, float reqZ, Spot spot, string method, bool walkCheck) =>
+    /// <summary>
+    /// The readback line <c>.debug tp</c> prints and the server logs for every request. <paramref name="castle"/>:
+    /// the point is in castle territory, so the floor walk ran (<c>top=</c> names the top layer it went under).
+    /// <paramref name="verify"/>: what the read-back after the move found, empty before a move.
+    /// </summary>
+    internal static string Readback(string who, Result result, float reqX, float reqZ, Spot spot, string method, bool walkCheck,
+        bool castle = false, string verify = "") =>
         "teleport " + who + ": requested (" + N(reqX) + ", " + N(reqZ) + ")"
         + (spot.Found
             ? " chosen (" + N(spot.X) + ", " + N(spot.Y) + ", " + N(spot.Z) + ") moved " + N(spot.Distance) + " m"
             : " no spot")
+        + (castle ? " castle=yes" : "")
+        + (spot.Found && !float.IsNaN(spot.Top) && spot.Top > spot.Y + 0.05f ? " top=" + N(spot.Top) : "")
         + " probes=" + spot.Probes.ToString(CultureInfo.InvariantCulture)
         + (spot.Step > 0f ? " step=" + N(spot.Step) : "")
         + " walkCheck=" + (walkCheck ? "on" : "off")
         + " result=" + result
         + (method.Length > 0 ? " method=" + method : "")
+        + (verify.Length > 0 ? " verify=" + verify : "")
         + (spot.Why.Length > 0 ? " first=" + spot.Why : "");
 
     /// <summary><c>.debug status</c> lines for the map powers.</summary>

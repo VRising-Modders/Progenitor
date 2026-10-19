@@ -1078,6 +1078,8 @@
     <!-- Map focus: a chat location link's Set marker opens the map centered on the spot. MapFocus.cs is the game-bound half. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\MapFocusLogic.cs" Link="Linked\MapFocusLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugMapPolicy.cs" Link="Linked\DebugMapPolicy.cs" />
+    <!-- The verified teleport's arrival check, next step and fallback write guard; PlayerTeleport.cs is the game-bound half. -->
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerTeleportPolicy.cs" Link="Linked\PlayerTeleportPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Dye\DyeHold.cs" Link="Linked\DyeHold.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Dye\DyeSlots.cs" Link="Linked\DyeSlots.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Dye\DyeRing.cs" Link="Linked\DyeRing.cs" />
