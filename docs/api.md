@@ -249,7 +249,10 @@ a distinctive `eventId`.
 protocol ids all live in that range, and `OnReceive` / `OnReceiveFromClient` **refuse** a plugin
 registration inside it, and refuse an id a *different* assembly already owns rather than replacing
 it. Neither throws: the handle removes nothing and one error line names both parties. Derive ids
-from your own four-letter tag (`modules.md#networking`).
+from your own four-letter tag (`modules.md#networking`). On receive, a reserved id with no handler
+is consumed (one warning per id) instead of reaching the game's event reader, which would reject it
+as malformed; an unknown id outside the range still goes to the game. Source-checked and game-free
+tested, not live-verified.
 
 | Member | Status | Intent | Example |
 |---|---|---|---|

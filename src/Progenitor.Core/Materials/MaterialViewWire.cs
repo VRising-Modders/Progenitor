@@ -484,6 +484,34 @@ internal static class MaterialClientPolicy
         };
 
     /// <summary>
+    /// Whether a client reads any view: it declared <c>Handshake.Capability.MaterialViews</c>, which a client sets
+    /// only while its material seams are bound. A client without it (an older Core, or one whose Bootstrap lacks the
+    /// seams) is sent nothing and costs the server no provider call.
+    /// </summary>
+    internal static bool ReadsViews(Progenitor.Networking.Handshake.Capability peerCaps) =>
+        (peerCaps & Progenitor.Networking.Handshake.Capability.MaterialViews) != 0;
+
+    /// <summary>
+    /// The server's send decision for one operation and one client's declared capabilities: <see cref="ReadsViews"/>
+    /// first, then the operation's own bit (<see cref="ReadByPeer(MaterialOperation, bool, bool)"/>).
+    /// </summary>
+    internal static bool ReadByPeer(MaterialOperation operation, Progenitor.Networking.Handshake.Capability peerCaps) =>
+        ReadsViews(peerCaps)
+        && ReadByPeer(operation,
+            (peerCaps & Progenitor.Networking.Handshake.Capability.MaterialCharacterCraft) != 0,
+            (peerCaps & Progenitor.Networking.Handshake.Capability.MaterialRefineView) != 0);
+
+    /// <summary>
+    /// Whether this process registers the <c>'PrMv'</c> handler. Every client does, bound or not: the id must be
+    /// owned on the client so a view a server still sends (an older server ignores <c>MaterialViews</c>) is consumed
+    /// rather than handed to the game, whose event reader rejects it as malformed.
+    /// </summary>
+    internal static bool RegistersViewHandler(bool server) => !server;
+
+    /// <summary>Whether a received view is applied. While the seams are unbound it is dropped unread.</summary>
+    internal static bool AppliesView(bool seamsBound) => seamsBound;
+
+    /// <summary>
     /// A view of this operation only means something at a structure (Craft: a workstation, Upgrade: a
     /// castle heart's window, RefineView: a refinement station's window); without one the server sends
     /// none and skips the provider calls.
