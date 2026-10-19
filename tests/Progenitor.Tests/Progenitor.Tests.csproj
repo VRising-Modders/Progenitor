@@ -861,6 +861,7 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\WorldSaveOps.cs" Link="Linked\WorldSaveOps.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\QueryArgs.cs" Link="Linked\QueryArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\HealLogic.cs" Link="Linked\HealLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Bots\BotDropAllArgs.cs" Link="Linked\BotDropAllArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PrefabInspectArgs.cs" Link="Linked\PrefabInspectArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\SpawnArgs.cs" Link="Linked\SpawnArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\EntityLifecycleOps.cs" Link="Linked\EntityLifecycleOps.cs" />

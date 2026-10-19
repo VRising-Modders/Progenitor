@@ -2659,8 +2659,14 @@ of the save made for this test.
 inventory; `ctx.Inventory.OnGroundDrop` and `ctx.Inventory.OnDropAll` report what players drop
 from their own bag. Pile calls and both events are server only and main-thread only; on the client
 they throw `InvalidOperationException`. `ctx.Drops.TryPrefabs` works on both sides.
-**Experimental**: source-checked, built and game-free tested (`DropTests`), **not live-verified**
-(procedure below). API rows: [api.md, Drops](api.md#drops).
+**Experimental**: source-checked, built and game-free tested (`DropTests`); **verified live in part,
+2026-10-19** (2026.10.147, main 34e782304, on the isolated test server, a Moo World copy, with the
+Steam client and a headless client, through the Autoloot mod): `TryGet` and `TakeInto` on stackable
+loot piles, `InFlight` clearing on landed piles, `OnGroundDrop` for drop-key drops, and `TryPrefabs`
+on the server. That evidence does not name `Near`. `OnDropAll`, drag-out drops, partial takes and
+the client side of `TryPrefabs` were not run. Results per step:
+[live acceptance](#drops-live-acceptance-procedure-run-in-part-2026-10-19). API rows:
+[api.md, Drops](api.md#drops).
 
 ```csharp
 // An autoloot pass: take every stackable pile within 4 m of the player into their bag.
@@ -2709,8 +2715,8 @@ A pile is an entity with the game's `ItemPickup` component (both sides' metadata
   (`DropItemThrowSystem.DropItem`) or `SpellMovement` is `InFlight`. The throw component holds its
   own `Amount`, which a take would not update, and the game's throw systems read it when the throw
   ends; a take then could be undone or doubled. `TakeInto` refuses such a pile ("in flight") until
-  it has landed. When the throw component leaves a pile is not observed: if live piles keep it after
-  landing, every such pile reads as in flight, which the live acceptance below checks first.
+  it has landed. Verified live 2026-10-19: landed piles cleared `InFlight` within a tick or two, so
+  the rule does not hold landed piles back.
 - **The pile's own item entity.** When a pile carries the game's throw component
   `DropItemThrowSystem.DropItem` (`ItemEntity` at 0x0, `ItemType` 0x8, `Amount` 0xC) and its
   `ItemEntity` names a live entity, the pile reports it. The game's drop handlers pass a dropped
@@ -2750,9 +2756,11 @@ steps:
 
 Proven and assumed:
 
-- The removal path and the add are the framework's existing paths. That clients see a lower
-  `ItemAmount` written this way (the field is a synced int on the game's side) is **assumed**:
-  the Autoloot mod writes the amount the same way, and this framework has not observed it live.
+- The removal path and the add are the framework's existing paths. **Verified live 2026-10-19**
+  (Autoloot): loot from killed deer and bears was taken into a bag, and the emptied piles were
+  removed on both the server and the client, with no ghost piles. That clients see a lower
+  `ItemAmount` after a partial take (the field is a synced int on the game's side) is still
+  **assumed**: no partial take was observed.
 - **Unique items are refused.** No proven path moves a pile's own item entity into an inventory
   (the game's own pickup, `ItemPickupSystem`, runs from an interaction spell and was not traced).
   Re-creating the item with `TryAdd` would drop its rolled stats, so `TakeInto` refuses rather than
@@ -2784,7 +2792,12 @@ read raw and read-only); the `SystemHooks.After` (priority +10000) reads the row
 character's position. The difference is the drop. Nothing is written, patched or skipped. A
 `DropInventoryItemEvent` that names a container, or another player, is not this event's.
 
-Game facts (the game's server handlers, source-checked; nothing here was observed live):
+Verified live 2026-10-19 (Autoloot, `DropKey` source only): a stack dropped by one player (through
+the Dev bridge's `bot_event` kind `drop`) and one dropped by a second player beside them both stayed
+on the ground, because the consuming mod's protection keyed off this event. One throw was measured:
+the pile landed 2.8 m from the reported position. `DragOut` and `WithItemEntity` were not run.
+
+Game facts (the game's server handlers, source-checked; not observed live beyond the paragraph above):
 
 - **No drop request carries an amount.** Every drop is the whole slot; a partial drop needs a split
   into an empty slot first.
@@ -2854,8 +2867,10 @@ shared scan per pass serves every waiting drop and offers only containers the bo
 
 Proven and assumed: the handler and the prefab field are in the metadata (source-checked). That the
 container appears within 60 frames and within 8 m of the player, holds the bag's items, and carries one
-of the two inventory components, is **assumed**; a bag that did not change (a refused request) raises
-nothing. A drop-all request in an update always takes its player's bag out of the ground-drop report,
+of the two inventory components, is **assumed**, and `OnDropAll` has **not been run live**; a bag
+that did not change (a refused request) raises nothing. The Dev bridge's `bot_event` kind `dropall`
+([headless bot ops](../tools/bots/README.md#ops)) sends the game's request from a headless client for
+step 5 of the live acceptance below. A drop-all request in an update always takes its player's bag out of the ground-drop report,
 whether or not anything listens to `OnDropAll`.
 **Cost**: no metadata component marks the drop container alone (prefab components are game data, not
 metadata), so a scan reads the prefab of each inventory-bearing entity, at most 50,000 per scan (a
@@ -2892,31 +2907,54 @@ within the radius, default 10 m, with their handles and whether `TakeInto` takes
 `Sample drops: ground drop …` / `drop all …` line per bag drop), `prefabs`. Built; not run in the
 game.
 
-### Live acceptance (procedure, not run)
+### Drops: live acceptance (procedure, run in part 2026-10-19)
 
 Isolated test server with Core, the Dev bridge and `Progenitor.Sample`; an admin character with
 Iron Ore, a weapon and a few other stacks in the bag.
 
+The run of 2026-10-19 (2026.10.147, main 34e782304, isolated test server with the Steam client and a
+headless client) exercised these APIs from the Autoloot mod, not through the Sample's `.drops` verbs.
+Each step says what that run covered; a step with no **Run** note has not been run.
+
 1. `.drops prefabs`: six non-zero GUIDs.
+   **Run in part:** on the server, `TryPrefabs` let the mod recognize a player death container
+   (`Resource_PlayerDeathContainer_Drop_ClanMembers`). The owner took it back whole and the game
+   removed the empty container; a player outside the clan could not take it (the game's own rule
+   held). The six values were not listed.
 2. Drop an Iron Ore stack and run `.drops near 5` at once and again two seconds later: the pile is
    `in flight: not taken yet` only during the throw. If it still reads in flight after landing, stop:
    the in-flight rule needs another signal. `.drops log`. Drop an Iron Ore stack with the inventory menu's drop key. Expect one
    `ground drop … DropKey item=<ore> x<stack> bag=<n>->0 at <your position>`. Drag another stack
    onto the ground: `DragOut`. Drop the weapon: the line ends with `item-entity`.
+   **Run in part:** landed piles cleared `InFlight` within a tick or two. A drop-key drop from each of
+   two players beside each other (one sent with `bot_event` kind `drop`) raised `OnGroundDrop`, and
+   the mod's protection keyed off it kept both stacks on the ground. `DragOut` and the weapon were not
+   run.
 3. `.drops near 5`: the two ore piles (and the weapon, `own item entity: not taken` or
    `does not stack: not taken`). For each landed pile, record its distance from the position its
    `ground drop` line reported (`PlayerGroundDrop.X/Y/Z`), over at least five drops facing different
    ways. Report the largest: Autoloot matches a player's own drop within 4 m of that position, so a
    throw that regularly lands farther needs a wider match.
+   **Run in part:** one sample, 2.8 m from the reported position. The five-drop measurement was not
+   run.
 4. `.drops take 10`: `Partial` or `Complete … pile <n>-><n-10>`; the pile in the world shows the
    lower amount on a second client. `.drops take`: `Complete … removed`; the pile disappears on
    both clients within 2 s.
-5. Drop all (the game's drop-all). Expect `drop all … container=<i:v> match items=…`, and the
-   container on the ground holds what left the bag. With a second player dropping all beside you in
-   the same moment, each line names that player's own container.
+   **Run in part:** whole takes of deer and bear loot into a bag (`TryGet`, then `TakeInto`) removed
+   the piles on the server and the client, with no ghost piles. The partial take was not run.
+5. Drop all: the game's drop-all button, or from a headless client the Dev bridge's
+   `bot_event {"kind":"dropall"}` (optional `"setting"`, e.g. `"ExceptAnyEquipped"`; see
+   [headless bot ops](../tools/bots/README.md#ops)). Expect `drop all … container=<i:v> match items=…`,
+   and the container on the ground holds what left the bag. Repeat with
+   `"setting":"ExceptAnyEquipped"`: the line reports `ExceptAnyEquipped`; record what stayed. With a second player dropping all beside you in the same
+   moment, each line names that player's own container. Not run: until this bridge kind (2026-10-19)
+   there was no scripted drop-all.
 6. While casting, or in PvP combat with an action-bar slot: drop; nothing is logged.
 7. `.drops log` again to stop. Clean up: remove the Sample from the test server's reload folder
    and confirm the clean unload.
+8. Hot reload a consumer plugin that uses these APIs, on both sides, several times: the log never
+   reports a previous generation alive. **Run:** about six reloads of the Autoloot mod on both
+   sides, none reported "previous generation alive".
 
 ## Player state
 

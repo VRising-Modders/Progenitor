@@ -6,6 +6,7 @@ using ProjectM;
 using ProjectM.CastleBuilding.Rebuilding;
 using ProjectM.Network;
 using ProjectM.Tiles;
+using Progenitor.Drops;
 using Progenitor.Ecs;
 using Stunlock.Core;
 using Unity.Entities;
@@ -44,6 +45,9 @@ namespace Progenitor.Dev.Bots;
 /// RecipeId @0xC. Args <c>recipe</c> (GUID or name), optional <c>station</c>.</item>
 /// <item><c>equip</c>: <c>EquipItemEvent</c> (9548331): SlotIndex int @0x0,
 /// IsCosmetic bool @0x4. Args <c>slot</c> (main-bag index), optional <c>cosmetic</c>.</item>
+/// <item><c>dropall</c>: <c>DropEntireInventoryEvent</c> (-131540227): Setting
+/// (<c>DropEntireInventorySetting</c>, int) @0x0. Optional arg <c>setting</c>
+/// (<see cref="DropAllSetting"/> name or 0..6, default All).</item>
 /// <item><c>claim</c>: <c>ClaimAchievementEvent</c> (-514702814): Achievement
 /// @0x0. Args <c>achievement</c> (GUID or name).</item>
 /// </list>
@@ -59,6 +63,7 @@ internal static class BotEvents
     internal const int ClaimAchievementEventId = -514702814;
     internal const int EquipItemEventId = 9548331;
     internal const int DropItemAtSlotEventId = -1012179922;
+    internal const int DropEntireInventoryEventId = -131540227;
     internal const int StartCharacterCraftItemEventId = -215712725;
     internal const int StartCraftItemEventId = -382113386;
     // Empty "menu opened" events (each struct has no fields). They are
@@ -81,7 +86,7 @@ internal static class BotEvents
             throw new InvalidOperationException("bot_event runs on a client (a headless extra instance); it sends client-to-server events");
         if (args.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("args must be an object with 'kind'");
-        string kind = (Str(args, "kind") ?? throw new ArgumentException("args.kind is required (build, craft, equip, drop, claim, ui, toggle, moveall, spell, shapeshift)"))
+        string kind = (Str(args, "kind") ?? throw new ArgumentException("args.kind is required (build, craft, equip, drop, dropall, claim, ui, toggle, moveall, spell, shapeshift)"))
             .Trim().ToLowerInvariant();
         var em = world.EntityManager;
         return kind switch
@@ -90,13 +95,14 @@ internal static class BotEvents
             "craft" => Craft(world, em, args),
             "equip" => Equip(em, args),
             "drop" => Drop(em, args),
+            "dropall" => DropAll(em, args),
             "claim" => Claim(world, em, args),
             "ui" => Ui(em, args),
             "toggle" => Toggle(em, args),
             "moveall" => MoveAll(world, em, args),
             "spell" => Spell(world, em, args),
             "shapeshift" => Shapeshift(world, em, args),
-            _ => throw new ArgumentException($"unknown kind '{kind}' (build, craft, equip, drop, claim, ui, toggle, moveall, spell, shapeshift)"),
+            _ => throw new ArgumentException($"unknown kind '{kind}' (build, craft, equip, drop, dropall, claim, ui, toggle, moveall, spell, shapeshift)"),
         };
     }
 
@@ -254,6 +260,31 @@ internal static class BotEvents
             eventId = DropItemAtSlotEventId,
             slot,
             note = "sent; observe the donor slot empty and an ItemPickup nearby before claiming success",
+        };
+    }
+
+    /// <summary>
+    /// The inventory menu's "drop everything" button: <c>DropEntireInventoryEvent</c> with its
+    /// <c>Setting</c> (what stays in place). The server's <c>DropItemSystem</c> handles it under the same
+    /// rules as a single drop and may refuse silently; observe the bag and the dropped container.
+    /// </summary>
+    private static unsafe object DropAll(EntityManager em, JsonElement args)
+    {
+        var setting = BotDropAllArgs.Parse(args);
+        int raw = BotDropAllArgs.Raw(setting);
+        var ev = SendFieldPoked<DropEntireInventoryEvent>(em, DropEntireInventoryEventId, p =>
+        {
+            *(int*)(p + Layout.ClientDropEntireInventoryEventSettingOffset) = raw;
+        }, (nameof(DropEntireInventoryEvent.Setting), Layout.ClientDropEntireInventoryEventSettingOffset));
+        Log($"dropall setting {setting} ({raw})", ev);
+        return new
+        {
+            kind = "dropall",
+            @event = Format(ev),
+            eventId = DropEntireInventoryEventId,
+            setting = setting.ToString(),
+            settingValue = raw,
+            note = "sent; observe the bag emptied (minus what the setting keeps) and the dropped container nearby before claiming success",
         };
     }
 
