@@ -35,7 +35,7 @@ Progenitor needs only [BepInExPack V Rising](https://thunderstore.io/c/v-rising/
 - **Hot reload.** Rebuild your mod and it swaps into the running game, with a player connected. No restart.
 - **One context, automatic cleanup.** Register items, buffs, commands, events, settings, keybinds, windows and network messages through your plugin's context; unloading reverses all of it.
 - **The same code** on dedicated servers and on games hosted from the client.
-- **AI-friendly:** a [starter prompt](https://github.com/VRising-Modders/Progenitor/blob/main/docs/ai-starter-prompt.md), an `llms.txt` index and knowledge notes help a coding assistant work with the framework.
+- **AI-friendly.** An [MCP server](https://github.com/VRising-Modders/Progenitor/blob/main/docs/mcp.md) connects a coding assistant to your game client and to your own test server, so it can build and deploy your mod, hot reload it, run commands, read the logs and inspect the running game on both sides. A [starter prompt](https://github.com/VRising-Modders/Progenitor/blob/main/docs/ai-starter-prompt.md), an `llms.txt` index and knowledge notes help it work with the framework. The MCP server and its development bridge come from the repository; they are not in this package and never belong on a public server.
 
 Start with `PROGENITOR_GUIDE.md` (included in this package), the `dotnet new progenitor-mod` template and the [tutorial](https://github.com/VRising-Modders/Progenitor/blob/main/docs/tutorial.md). Mods built on Progenitor depend on `VRising_Modders-Progenitor`.
 

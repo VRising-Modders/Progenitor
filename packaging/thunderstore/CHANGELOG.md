@@ -25,4 +25,5 @@ Progenitor's first package on Thunderstore.
 - `ProgenitorPlugin<TContext>` with automatic cleanup of everything registered on the context.
 - Hot reload of mods and of Progenitor's own Core.
 - Items, buffs, recipes, prefab edits, commands, events, settings with server sync, keybinds, windows, networking, persistence and more. Status of each API: [api.md](https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md).
+- An MCP server (from the repository) that connects a coding assistant to the game client and a test server through the development bridge.
 - The `dotnet new progenitor-mod` template and `PROGENITOR_GUIDE.md`.
