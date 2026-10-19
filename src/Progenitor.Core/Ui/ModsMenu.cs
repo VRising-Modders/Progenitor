@@ -8710,8 +8710,8 @@ internal static class ModsMenuScene
         return new Dictionary<string, object?>
         {
             ["view"] = view,
-            // TITLEVIDEO1: {players, retired, setting, still, why, lastQuit}.
-            ["titleVideo"] = titleVideo ?? TitleVideoPolicy.Readback(0, false, false),
+            // TITLEVIDEO1: {players, retired, pending, lastQuit}.
+            ["titleVideo"] = titleVideo ?? TitleVideoPolicy.Readback(0, false),
             ["viewWhy"] = viewWhy,
             ["ambience"] = ambience ?? MissingObject(),
             ["music"] = music ?? MissingObject(),

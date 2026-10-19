@@ -1,15 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
-using BepInEx.Configuration;
 using Progenitor.Ui;
 using Xunit;
 
 namespace Progenitor.Tests;
 
 /// <summary>
-/// TITLEVIDEO1: the title screen video switch, the decision to retire the video, the bounded wait before a quit, and
+/// TITLEVIDEO1: the bounded wait between retiring the video players and a quit, and
 /// every Progenitor quit path running the retire step. Game-free: the live half (TitleVideoLive.cs) is pinned by source.
 /// </summary>
 [Collection("PluginLogger")]
@@ -21,7 +19,6 @@ public sealed class TitleVideoTests : IDisposable
     public TitleVideoTests()
     {
         Plugin.Logger = _log;
-        CoreUiSettings.Reset();
         TitleVideoQuit.Reset();
         TitleVideoQuit.Clock = () => _now;
     }
@@ -29,81 +26,7 @@ public sealed class TitleVideoTests : IDisposable
     public void Dispose()
     {
         TitleVideoQuit.Reset();
-        CoreUiSettings.Reset();
         Plugin.Logger = null;
-    }
-
-    // ---- when to retire at the title -------------------------------------------------------------------
-
-    [Fact]
-    public void With_the_switch_on_the_title_video_is_never_touched()
-    {
-        Assert.Equal(TitleVideoPolicy.TitleAction.None, TitleVideoPolicy.AtTitle(true, true, true, true, 10));
-        Assert.Equal(TitleVideoPolicy.TitleAction.None, TitleVideoPolicy.AtTitle(true, true, true, false, 0));
-    }
-
-    [Fact]
-    public void With_the_switch_off_the_video_waits_for_its_first_frame_then_retires()
-    {
-        Assert.Equal(TitleVideoPolicy.TitleAction.Wait, TitleVideoPolicy.AtTitle(false, true, true, false, 0));
-        Assert.Equal(TitleVideoPolicy.TitleAction.Wait, TitleVideoPolicy.AtTitle(false, true, true, false, TitleVideoPolicy.FirstFrameWaitSeconds - 0.01));
-        Assert.Equal(TitleVideoPolicy.TitleAction.Retire, TitleVideoPolicy.AtTitle(false, true, true, true, 0));
-        // A video that never draws is retired anyway once the wait is over.
-        Assert.Equal(TitleVideoPolicy.TitleAction.Retire, TitleVideoPolicy.AtTitle(false, true, true, false, TitleVideoPolicy.FirstFrameWaitSeconds));
-    }
-
-    [Fact]
-    public void Nothing_to_retire_without_a_title_view_or_a_live_player()
-    {
-        Assert.Equal(TitleVideoPolicy.TitleAction.None, TitleVideoPolicy.AtTitle(false, false, true, true, 10));
-        // Already retired (this generation or an earlier one): the player is gone.
-        Assert.Equal(TitleVideoPolicy.TitleAction.None, TitleVideoPolicy.AtTitle(false, true, false, false, 10));
-    }
-
-    // ---- the switch -------------------------------------------------------------------------------------
-
-    [Fact]
-    public void The_switch_defaults_on_reads_its_entry_and_is_reported_by_the_readback()
-    {
-        Assert.True(TitleVideoPolicy.SettingOn);
-        Assert.Equal(true, TitleVideoPolicy.Readback(0, false, false)["setting"]);
-
-        string dir = Path.Combine(Path.GetTempPath(), "progenitor-titlevideo-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        try
-        {
-            var file = new ConfigFile(Path.Combine(dir, "progenitor.ui.cfg"), saveOnInit: true);
-            var entry = file.Bind(TitleVideoPolicy.Section, TitleVideoPolicy.Key, true, TitleVideoPolicy.Description);
-            CoreUiSettings.TitleScreenVideo = entry;
-            Assert.True(TitleVideoPolicy.SettingOn);
-            entry.Value = false;
-            Assert.False(TitleVideoPolicy.SettingOn);
-            var back = TitleVideoPolicy.Readback(1, true, true, "setting");
-            Assert.Equal(false, back["setting"]);
-            Assert.Equal(1, back["players"]);
-            Assert.Equal(true, back["retired"]);
-            Assert.Equal(true, back["still"]);
-            Assert.Equal("setting", back["why"]);
-            Assert.True(back.ContainsKey("lastQuit"));
-        }
-        finally
-        {
-            CoreUiSettings.TitleScreenVideo = null;
-            try { Directory.Delete(dir, true); } catch { /* temp */ }
-        }
-    }
-
-    [Fact]
-    public void The_switch_words_are_in_the_players_voice_and_on_Preferences()
-    {
-        Assert.Equal("Title screen video", TitleVideoPolicy.Label);
-        Assert.StartsWith("Turn off the moving background on the title screen. This can also stop rare hangs when quitting the game.",
-            TitleVideoPolicy.Help, StringComparison.Ordinal);
-        Assert.Contains("next time the title screen opens", TitleVideoPolicy.Help, StringComparison.Ordinal);
-        Assert.Equal("Title screen", ConfigurationPane.TitleScreenGroup);
-        Assert.Contains(ConfigurationPane.TitleScreenGroup, ConfigurationPane.ConfigGroups);
-        Assert.Equal(ConfigurationPane.ConfigGroups, ConfigurationPane.DetailSectionHeadings);
-        Assert.Contains(SettingPlaces.All, p => p.SettingId == "progenitor/TitleScreen/Video" && p.Home == SettingPlaces.Preferences);
     }
 
     // ---- the bounded wait -------------------------------------------------------------------------------
@@ -220,7 +143,7 @@ public sealed class TitleVideoTests : IDisposable
     {
         var shaped = ModsMenuScene.Offline();
         var block = Assert.IsType<Dictionary<string, object?>>(shaped["titleVideo"]);
-        foreach (string key in new[] { "players", "retired", "setting", "still", "why", "lastQuit" })
+        foreach (string key in new[] { "players", "retired", "pending", "lastQuit" })
             Assert.True(block.ContainsKey(key), key);
     }
 
@@ -254,14 +177,8 @@ public sealed class TitleVideoTests : IDisposable
         SourcePin.AssertUncommented(SourcePin.MethodBody(src, "private static bool DestroyPlayer(VideoPlayer? player)"), "UnityEngine.Object.Destroy(player);");
         SourcePin.AssertUncommented(SourcePin.MethodBody(src, "internal static void Install()"), "TitleVideoQuit.Retirer = RetireAllForQuit;");
         SourcePin.AssertUncommented(SourcePin.MethodBody(src, "internal static void Uninstall()"), "TitleVideoQuit.FlushForUnload();");
-        SourcePin.AssertUncommented(SourcePin.MethodBody(src, "internal static void Uninstall()"), "ReleaseStill(unload: true);");
-        // The still is copied before the player is stopped, and the title view's own lookup is reused.
-        string tick = SourcePin.MethodBody(src, "private static void TickTitle()");
-        Assert.True(tick.IndexOf("MakeStill(", StringComparison.Ordinal) < tick.IndexOf("RetireStun(", StringComparison.Ordinal));
-        SourcePin.AssertUncommented(tick, "NativeModsEntry.LiveTitleView()");
         // IL2CPP: no C# type tests on interop objects.
-        Assert.DoesNotContain(" as RenderTexture", src, StringComparison.Ordinal);
-        Assert.DoesNotContain(" is RenderTexture", src, StringComparison.Ordinal);
+        Assert.DoesNotContain(" is VideoPlayer", src, StringComparison.Ordinal);
         Assert.DoesNotContain(" as VideoPlayer", src, StringComparison.Ordinal);
 
         string plugin = SourcePin.ReadFile("src", "Progenitor.Core", "Plugin.cs");

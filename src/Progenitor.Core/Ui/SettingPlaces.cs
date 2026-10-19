@@ -249,8 +249,6 @@ internal static class SettingPlaces
         yield return Cfg("AutoUpdate", "Progenitor", Preferences, Shared);
         // BROWSERFILTER1: also drawn as the Join Game browser's own Show Only checkbox (not a Progenitor page row).
         yield return Cfg("ServerBrowser", "ProgenitorOnly", Preferences, UiFile);
-        // TITLEVIDEO1: Preferences · Title screen.
-        yield return Cfg(TitleVideoPolicy.Section, TitleVideoPolicy.Key, Preferences, UiFile);
 
         // Hidden on 2026-10-06 (user: "No user will care to change those"): drawn no more, same keys, defaults and behavior.
         yield return Hidden("Workspace", "BackgroundIntensity", Shared);

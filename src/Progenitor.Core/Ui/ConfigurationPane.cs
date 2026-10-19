@@ -258,9 +258,6 @@ internal sealed class ConfigurationPane
     /// <summary>BROWSERFILTER1: the game's Join Game server browser (the Progenitor servers filter).</summary>
     public const string JoinGameGroup = "Join Game";
 
-    /// <summary>TITLEVIDEO1: the title screen's moving background (<see cref="TitleVideoPolicy"/>).</summary>
-    public const string TitleScreenGroup = TitleVideoPolicy.Group;
-
     /// <summary>BROWSERFILTER1: the Join Game group's switch.</summary>
     public const string ProgenitorServersLabel = "Show only Progenitor servers";
 
@@ -359,7 +356,7 @@ internal sealed class ConfigurationPane
     /// Settings organization stage 3: the tab's sections. The Progenitor group (the raw <b>Progenitor settings</b>
     /// pane) left: its link row is the tab's first row, and everything about Progenitor itself is on its page.
     /// </summary>
-    public static readonly string[] ConfigGroups = { ModsTabGroup, InstallTabGroup, SourcesGroup, UpdatesGroup, JoinGameGroup, TitleScreenGroup, LocalServerGroup };
+    public static readonly string[] ConfigGroups = { ModsTabGroup, InstallTabGroup, SourcesGroup, UpdatesGroup, JoinGameGroup, LocalServerGroup };
 
     public static readonly string[] DetailSectionHeadings =
     {
@@ -368,7 +365,6 @@ internal sealed class ConfigurationPane
         SourcesGroup,
         UpdatesGroup,
         JoinGameGroup,
-        TitleScreenGroup,
         LocalDedicatedHeading,
     };
 
@@ -1953,16 +1949,12 @@ internal sealed class ConfigurationPane
         var browser = new List<ModSettingsItem>();
         AddSetting(browser, CoreUiSettings.ServerBrowserProgenitorOnly, ProgenitorServersLabel, ProgenitorServersHelp, SettingControl.Toggle);
 
-        var title = new List<ModSettingsItem>();
-        AddSetting(title, CoreUiSettings.TitleScreenVideo, TitleVideoPolicy.Label, TitleVideoPolicy.Help, SettingControl.Toggle);
-
         var sections = new List<ModSettingsSection>(4);
         if (menu.Count > 0) sections.Add(new ModSettingsSection(ModsTabGroup, ModSettingsSectionKind.Page, menu));
         if (install.Count > 0) sections.Add(new ModSettingsSection(InstallTabGroup, ModSettingsSectionKind.Page, install));
         sections.Add(new ModSettingsSection(SourcesGroup, ModSettingsSectionKind.Page, sources));
         if (updates.Count > 0) sections.Add(new ModSettingsSection(UpdatesGroup, ModSettingsSectionKind.Page, updates));
         if (browser.Count > 0) sections.Add(new ModSettingsSection(JoinGameGroup, ModSettingsSectionKind.Page, browser));
-        if (title.Count > 0) sections.Add(new ModSettingsSection(TitleScreenGroup, ModSettingsSectionKind.Page, title));
         return sections;
     }
 

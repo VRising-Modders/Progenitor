@@ -5,37 +5,18 @@ using System.Globalization;
 namespace Progenitor.Ui;
 
 /// <summary>
-/// TITLEVIDEO1: the game-free half of retiring the title screen's background video. The live half
-/// (<c>TitleVideoLive</c>) finds the players and destroys them; this file holds the words, the
-/// decisions and the bounded quit delay, so tests can drive them without the game.
+/// TITLEVIDEO1: the game-free half of retiring the video players before a Progenitor quit. The live half
+/// (<c>TitleVideoLive</c>) finds the players and destroys them; this file holds the bounded quit delay and the readback,
+/// so tests can drive them without the game.
 ///
-/// <para><b>Why.</b> Two client quits (2026-10-18 and 2026-10-19) hung in the engine's own cleanup:
-/// the video system's teardown keeps retrying the title video's playback, which still has a pending
-/// release that only the per-frame video update clears, and that update no longer runs. Releasing
-/// the playback while frames still run (destroy the player, let a couple of frames pass, then quit)
-/// leaves nothing for engine cleanup to retry. Clients started with <c>-noVideo</c> never hung.</para>
+/// <para><b>Why.</b> Two client quits (2026-10-18 and 2026-10-19) hung in the engine's own cleanup: the video system's
+/// teardown kept retrying the title video's playback, which still had a pending release that only the per-frame video
+/// update clears, and that update no longer runs. Releasing the playback while frames still run (destroy the player, let
+/// a couple of frames pass, then quit) leaves nothing for engine cleanup to retry. Clients started with <c>-noVideo</c>
+/// never hung.</para>
 /// </summary>
 internal static class TitleVideoPolicy
 {
-    /// <summary><c>[TitleScreen] Video</c> in Core's <c>progenitor.ui.cfg</c>.</summary>
-    internal const string Section = "TitleScreen";
-
-    internal const string Key = "Video";
-
-    internal const string Label = "Title screen video";
-
-    internal const string Help =
-        "Turn off the moving background on the title screen. This can also stop rare hangs when quitting the game. "
-        + "Turning it back on applies the next time the title screen opens.";
-
-    internal const string Description =
-        "Play the moving background on the title screen. Off: the title screen keeps a still picture of it instead, "
-        + "which can also stop rare hangs when quitting the game. Turning it back on applies the next time the title "
-        + "screen opens.";
-
-    /// <summary>The Preferences page's group for this switch.</summary>
-    internal const string Group = "Title screen";
-
     /// <summary>Normal frames that run between retiring the players and <c>Application.Quit</c>.</summary>
     internal const int QuitFrames = 2;
 
@@ -43,58 +24,15 @@ internal static class TitleVideoPolicy
     internal const double QuitMaxSeconds = 0.5;
 
     /// <summary>
-    /// With the switch off, how long a freshly opened title screen may wait for the video's first frame (so the
-    /// still is a picture, not black) before the video is retired anyway.
-    /// </summary>
-    internal const double FirstFrameWaitSeconds = 3.0;
-
-    /// <summary>What the title-screen tick does this frame.</summary>
-    internal enum TitleAction
-    {
-        /// <summary>Leave the video alone.</summary>
-        None,
-
-        /// <summary>The switch is off, but the first frame is not drawn yet: try again next frame.</summary>
-        Wait,
-
-        /// <summary>Retire the title video now.</summary>
-        Retire,
-    }
-
-    /// <summary>
-    /// The title-screen decision. <paramref name="settingOn"/> is the switch; <paramref name="playerAlive"/> is
-    /// whether the view still has a live video player; <paramref name="firstFrameReady"/> is whether that player
-    /// has drawn a frame; <paramref name="secondsSinceSeen"/> is how long this title view has been watched.
-    /// </summary>
-    internal static TitleAction AtTitle(bool settingOn, bool viewAlive, bool playerAlive, bool firstFrameReady, double secondsSinceSeen)
-    {
-        if (settingOn || !viewAlive || !playerAlive) return TitleAction.None;
-        if (firstFrameReady) return TitleAction.Retire;
-        return secondsSinceSeen >= FirstFrameWaitSeconds ? TitleAction.Retire : TitleAction.Wait;
-    }
-
-    /// <summary>The switch's value, read on every use (never cached across a Core reload). Unbound reads on.</summary>
-    internal static bool SettingOn
-    {
-        get
-        {
-            try { return CoreUiSettings.TitleScreenVideo?.Value ?? true; }
-            catch { return true; }
-        }
-    }
-
-    /// <summary>
     /// The <c>mods_ui scene</c> <c>titleVideo</c> block: <c>players</c> (live video players on the title view),
-    /// <c>retired</c> (this title view's video was retired), <c>setting</c>, <c>still</c> (an owned still picture is
-    /// shown) and <c>lastQuit</c>.
+    /// <c>retired</c> (the title view's player is gone), <c>pending</c> (a quit is waiting for its frames) and
+    /// <c>lastQuit</c> (<c>{reason, retired, frames, seconds, note}</c>, or null).
     /// </summary>
-    internal static Dictionary<string, object?> Readback(int players, bool retired, bool still, string? why = null) => new()
+    internal static Dictionary<string, object?> Readback(int players, bool retired) => new()
     {
         ["players"] = players,
         ["retired"] = retired,
-        ["setting"] = SettingOn,
-        ["still"] = still,
-        ["why"] = why ?? "",
+        ["pending"] = TitleVideoQuit.Pending,
         ["lastQuit"] = TitleVideoQuit.LastQuitReadback(),
     };
 }
@@ -141,7 +79,7 @@ internal sealed class TitleVideoQuitGate
 /// join-flow restart and relaunch, the manual Quit to desktop and the Dev bridge <c>quit</c> op. It retires the video
 /// players (the live half sets <see cref="Retirer"/>), waits a bounded number of frames, then runs the quit. Nothing here
 /// can stop the quit: a throwing retire, no retirer (a server, a test) or a Core unload mid-wait all quit at once.
-/// Main thread only.
+/// The game's own Exit button does not pass through here. Main thread only.
 /// </summary>
 internal static class TitleVideoQuit
 {
