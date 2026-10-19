@@ -13,6 +13,16 @@ dotnet test ProgenitorMod.Tests
 
 The tests need no game.
 
+## Keep the template and Progenitor together
+
+Install the template from the same Progenitor checkout you set as `ProgenitorRepo` (`dotnet new install <checkout>/templates/progenitor-mod`), and update both together: a template from a newer checkout uses Progenitor API an older checkout does not have. `ProgenitorMinimumVersion` in `Directory.Build.props` records the Progenitor version the template came from. Before compiling, the build reads the version of the `ProgenitorRepo` checkout from its git history and stops with one error when the checkout is older:
+
+```
+This mod's template needs Progenitor 2026.10.139 or newer; ProgenitorRepo ('D:\src\Progenitor') is a checkout of 2026.10.120. ...
+```
+
+Fix it by updating that checkout (`git pull`) or pointing `ProgenitorRepo` at a newer one. When the version cannot be read (no git, or no `main` in the checkout), the build warns and continues. Raise `ProgenitorMinimumVersion` when your mod starts using newer Progenitor API. `/p:ProgenitorSkipVersionCheck=true` skips the check.
+
 ## Try it in the game
 
 Copy `ProgenitorMod/bin/Debug/net6.0/ProgenitorMod.dll` to `BepInEx/progenitor-reload/` on the client and on the server. A rebuilt copy hot reloads. Remove it when you are done testing.

@@ -934,7 +934,7 @@ LockedInGame = server-rules, updates` } }
 <tr><td><code>BepInEx/progenitor-core/</code></td><td>[[core|Core]], <code>Progenitor.dll</code></td></tr>
 <tr><td><code>BepInEx/progenitor-reload/</code></td><td><strong>Your mod's [[plugin|plugin]] DLL</strong> (the [[reload-folder|reload folder]])</td></tr></tbody></table>` },
         { id: "create-mod", title: "Create your first mod",
-          html: `<p>Recommended: the starter template. It sets up the build, plugin class, a setting, a keybind and a help page.</p>{{code}}`,
+          html: `<p>Recommended: the starter template. It sets up the build, plugin class, a setting, a keybind and a help page.</p>{{code}}<p>Install the template from the Progenitor checkout your mod builds against, and update the two together. If the checkout is older than the template, the build stops and says so.</p>`,
           code: { lang: "shell", text: `dotnet new progenitor-mod -n MyMod
 cd MyMod
 dotnet build` },
