@@ -35,6 +35,7 @@ Enable these when the repository becomes public (some are available only on publ
 | Private vulnerability reporting (the channel [SECURITY.md](../SECURITY.md) and the code of conduct point to) | Settings → Code security |
 | Dependabot alerts | Settings → Code security |
 | Automatically delete head branches after merge (already on) | Settings → General |
+| GitHub Pages from `main`, folder `/docs` (on since 2026-10-19). It serves the online Help Guide that the README and the store listings link: `https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html` | Settings → Pages |
 
 After the switch, open the Security tab once as an outside reader would and confirm **Report a vulnerability** is offered, and confirm the issue forms appear under **New issue**.
 
