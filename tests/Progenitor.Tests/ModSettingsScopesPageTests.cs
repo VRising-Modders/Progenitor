@@ -282,7 +282,7 @@ public sealed class ModSettingsScopesPageTests : IDisposable
         Open();
         var rows = PageRows();
         Assert.Equal(reason, Setting(rows, LimitId).GetProperty("reason").GetString());
-        Assert.Equal("Applies to everyone on 1.2.3.4:9876", Scope(rows, "Server settings").GetProperty("line").GetString());
+        Assert.Equal("Applies to everyone on this server", Scope(rows, "Server settings").GetProperty("line").GetString());
     }
 
     [Fact]

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using Progenitor.Events;
 using Progenitor.Install;
 using ProjectM;
@@ -211,7 +210,11 @@ internal static partial class ScopedSettings
     {
         var generation = Guid.NewGuid();
         var packets = new Queue<byte[]>();
-        string name = ServerIdentity.HostName(Path.GetDirectoryName(BepInEx.Paths.BepInExRootPath));
+        // The name this server runs under, as its signed catalog carries it: its own command line and the game's settings
+        // layering, read once per Core generation. Not ServerIdentity.HostName: that reads this process's command line through
+        // the main-thread process cache, which has no answer on the first call (the first join after a start), and then falls
+        // back to the install folder's default settings file, so the first catalog was sent without a name.
+        string name = ModManifest.OwnServerName();
         var rowPackets = new List<byte[]>();
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in Entries.Values)

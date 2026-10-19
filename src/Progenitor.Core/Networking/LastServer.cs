@@ -40,7 +40,7 @@ internal sealed class LastServerRecord
     public string Endpoint => Address.Trim() + ":" + Port.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>The name the row shows: the server's name, else its address.</summary>
-    public string DisplayName => JoinText.ServerLabel(ServerName, Endpoint);
+    public string DisplayName => JoinText.NameOrAddress(ServerName, Endpoint);
 
     public JoinTarget ToTarget() => new()
     {

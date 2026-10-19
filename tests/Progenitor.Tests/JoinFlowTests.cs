@@ -541,7 +541,12 @@ public sealed class JoinFlowTests
         Assert.Equal("Progenitor Forms Test", JoinText.PickServerName("V Rising", "Progenitor Forms Test"));
         Assert.Equal("", JoinText.PickServerName("V Rising", ""));
         Assert.Equal("this server", JoinText.ServerLabel("", "Aqf27THwTQgIQMCD3pOBAvJNEAA"));
-        Assert.Equal("127.0.0.1:9976", JoinText.ServerLabel("", "127.0.0.1:9976"));
+        // 2026-10-19: the join pages never show an address; the Last server row still tells servers apart by it.
+        Assert.Equal("this server", JoinText.ServerLabel("", "127.0.0.1:9976"));
+        Assert.Equal("Welcome to this server", JoinText.MessageTitle(JoinText.ServerLabel("", "127.0.0.1:9976")));
+        Assert.Equal("127.0.0.1:9976", JoinText.NameOrAddress("", "127.0.0.1:9976"));
+        Assert.Equal("this server", JoinText.NameOrAddress("", "Aqf27THwTQgIQMCD3pOBAvJNEAA"));
+        Assert.Equal("Night Garden", JoinText.NameOrAddress("Night Garden", "127.0.0.1:9976"));
         Assert.Equal("Welcome to this server", JoinText.MessageTitle(JoinText.ServerLabel(JoinText.PickServerName("V Rising", ""), "Aqf27THwTQgIQMCD3pOBAvJNEAA")));
     }
 
@@ -765,7 +770,7 @@ public sealed class JoinFlowTests
     [InlineData("", "Night Garden", "127.0.0.1:9976", "Night Garden")] // known now, not when the page was built
     [InlineData("Night Garden", "", "127.0.0.1:9976", "Night Garden")]
     [InlineData("Old Name", "New Name", "127.0.0.1:9976", "New Name")]
-    [InlineData("", "", "127.0.0.1:9976", "127.0.0.1:9976")]
+    [InlineData("", "", "127.0.0.1:9976", "this server")] // never the address (2026-10-19)
     [InlineData("", "  ", "steamid-relay", "this server")]
     public void Page_titles_name_the_server_when_any_name_is_known(string modelName, string liveName, string host, string expected)
     {
