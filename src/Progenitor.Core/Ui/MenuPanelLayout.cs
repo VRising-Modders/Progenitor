@@ -2113,6 +2113,15 @@ internal sealed class CellSpec
     internal CellTone NoteLeadTone { get; set; } = CellTone.Warn;
 
     /// <summary>
+    /// <see cref="CellWrap.TwoLine"/> cells only: shorter forms of the second line, most complete first, each meant to be
+    /// drawn whole. The runtime draws the first that fits the placed width (measured with the drawn font when it can,
+    /// else the <see cref="CellLayout.EstimateTextWidth"/> estimate), and cuts the last one at the real edge only when
+    /// none fits (<see cref="CellLayout.FitNoteLine"/>). Empty: the note in <see cref="Text"/> is clipped as before.
+    /// The join page's recommended row: the reason, source and version, then the reason and version, then the reason.
+    /// </summary>
+    internal IReadOnlyList<string> NoteChoices { get; set; } = Array.Empty<string>();
+
+    /// <summary>
     /// INSTALLSIDES1, <see cref="CellWrap.TwoLine"/> cells only: width kept free at the right end of
     /// the second line (an overlay cell sits there — the Install row's shortcut over the author line).
     /// </summary>
@@ -2406,12 +2415,25 @@ internal sealed class CellRowSpec
     /// <inheritdoc cref="Section"/>
     internal CellSectionEdge SectionEdge { get; }
 
+    /// <summary>
+    /// JOINLINKS1 seam fix: a section row's drawn height. The panel reserves at least
+    /// <see cref="PanelLayout.CellRowFloor"/> for a cell row that is not <see cref="Compact"/>, but draws the row's
+    /// object at <see cref="Height"/>; a shorter row (the 34 px section heading, the 14 px gap row, a one-line
+    /// "This server requires no mods.") left the rest of its reservation unpainted. The band's gap fill and
+    /// side rims only bridge the <see cref="PanelLayout.RowGap"/> above the next row, so the panel's dark
+    /// background showed through as a full-width seam between a section's heading and its rows. Drawing the
+    /// row at its reserved height keeps every row where it was and closes the band.
+    /// </summary>
+    internal float SectionHeight() =>
+        Compact || ExplicitHeight <= 0f ? ExplicitHeight : Math.Max(ExplicitHeight, PanelLayout.CellRowFloor(this));
+
     /// <summary>JOINLINKS1: the inner padding a section row's cells keep from its rim, each side.</summary>
     internal const float SectionPad = 12f;
 
     /// <summary>
     /// JOINLINKS1: this row inside a section band: the same cells behind a <see cref="SectionPad"/> spacer,
-    /// the same right padding (<see cref="RightInset"/>), and every other facet unchanged.
+    /// the same right padding (<see cref="RightInset"/>), and every other facet unchanged, except that the
+    /// row is drawn as tall as the panel reserves it (<see cref="SectionHeight"/>).
     /// </summary>
     internal CellRowSpec InSection(CellSection section, CellSectionEdge edge)
     {
@@ -2420,7 +2442,7 @@ internal sealed class CellRowSpec
             new CellSpec(CellKind.Spacer, "section-pad").With(width: CellWidth.Px(SectionPad)),
         };
         cells.AddRange(Cells);
-        return new CellRowSpec(Key, cells, TwoLine, ExplicitHeight, Math.Max(RightInset, SectionPad), Band, Plain, Soft, Hover, Skin,
+        return new CellRowSpec(Key, cells, TwoLine, SectionHeight(), Math.Max(RightInset, SectionPad), Band, Plain, Soft, Hover, Skin,
             JoinAbove, Indent, Separator, QuietHover, section, edge, Compact, GapAbove, FitWrap)
         {
             FitWrapFloor = FitWrapFloor,
@@ -3090,6 +3112,62 @@ internal static class CellLayout
         }
 
         return MenuPanelLayout.ClipLabel(full, noteWidth, TwoLineNoteFontSize);
+    }
+
+    /// <summary>The <see cref="EstimateTextWidth"/> estimate of a second line's width (the fallback measure).</summary>
+    internal static float EstimateNoteWidth(string? text) => EstimateTextWidth(text, TwoLineNoteFontSize);
+
+    /// <summary>
+    /// A two-line cell's second line from its <see cref="CellSpec.NoteChoices"/>: <paramref name="lead"/> (already with
+    /// its <c> · </c>) and the first choice whose whole line <paramref name="measure"/> fits <paramref name="noteWidth"/>.
+    /// When none fits, the last choice cut at the edge with <c>…</c>; a choice in quotes (<c>“…”</c>) keeps its closing
+    /// quote after the <c>…</c>. A lead that alone does not fit is cut the same way. <paramref name="measure"/> null or
+    /// unreadable (negative): the estimate.
+    /// </summary>
+    internal static string FitNoteLine(string? lead, IReadOnlyList<string>? choices, float noteWidth, Func<string, float>? measure)
+    {
+        lead ??= "";
+        float Width(string s)
+        {
+            if (s.Length == 0) return 0f;
+            float w = -1f;
+            try { if (measure != null) w = measure(s); }
+            catch { w = -1f; }
+            return w >= 0f && !float.IsNaN(w) && !float.IsInfinity(w) ? w : EstimateNoteWidth(s);
+        }
+
+        bool Fits(string s) => Width(s) <= noteWidth + 0.5f;
+        if (choices == null || choices.Count == 0) return Fits(lead) ? lead : CutToFit(lead, "", "…", Fits);
+        foreach (string choice in choices)
+        {
+            string line = lead + (choice ?? "");
+            if (Fits(line)) return line;
+        }
+
+        string last = choices[choices.Count - 1] ?? "";
+        if (!Fits(lead + "…")) return CutToFit(lead, "", "…", Fits);
+        // “reason” keeps its closing quote: “Shows how many of an item…”.
+        bool quoted = last.Length >= 2 && last[0] == '“' && last[last.Length - 1] == '”';
+        return quoted
+            ? CutToFit(last.Substring(0, last.Length - 1), lead, "…”", Fits)
+            : CutToFit(last, lead, "…", Fits);
+    }
+
+    /// <summary>
+    /// <paramref name="prefix"/> + the longest start of <paramref name="text"/> + <paramref name="tail"/> that
+    /// <paramref name="fits"/> (trailing spaces dropped before the tail); just <paramref name="prefix"/> + <paramref name="tail"/> when none does.
+    /// </summary>
+    private static string CutToFit(string text, string prefix, string tail, Func<string, bool> fits)
+    {
+        int lo = 0, hi = text.Length;
+        while (lo < hi)
+        {
+            int mid = (lo + hi + 1) / 2;
+            if (fits(prefix + text.Substring(0, mid).TrimEnd() + tail)) lo = mid;
+            else hi = mid - 1;
+        }
+
+        return prefix + text.Substring(0, lo).TrimEnd() + tail;
     }
 
     private static bool IsFill(CellSpec spec) =>
