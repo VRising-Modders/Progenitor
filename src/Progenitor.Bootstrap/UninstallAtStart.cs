@@ -199,7 +199,11 @@ internal static class UninstallAtStart
         requestedUtc = DateTime.MinValue;
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(marker));
+            // A UTF-8 byte order mark (a hand-edited marker) is skipped: JsonDocument.Parse rejects one in bytes.
+            // Bootstrap cannot reference Core's JsonFiles helper, so the skip is inline.
+            byte[] bytes = File.ReadAllBytes(marker);
+            int start = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
+            using var doc = JsonDocument.Parse(new ReadOnlyMemory<byte>(bytes, start, bytes.Length - start));
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return false;
             if (!root.TryGetProperty("schema", out var schema)

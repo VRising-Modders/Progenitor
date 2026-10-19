@@ -19,6 +19,7 @@
     <Compile Include="..\Progenitor.Core\Networking\ModMessageCodec.cs" Link="Core\ModMessageCodec.cs" />
     <Compile Include="..\Progenitor.Core\Networking\ModMessageEnvelope.cs" Link="Core\ModMessageEnvelope.cs" />
     <Compile Include="..\Progenitor.Core\Networking\ModMessageFixtures.cs" Link="Core\ModMessageFixtures.cs" />
+    <Compile Include="..\Progenitor.Core\Persistence\JsonFiles.cs" Link="Core\JsonFiles.cs" />
     <Compile Include="..\Progenitor.Core\Networking\ExchangeWire.cs" Link="Core\ExchangeWire.cs" />
     <Compile Include="..\Progenitor.Core\Networking\ExchangeEngine.cs" Link="Core\ExchangeEngine.cs" />
     <Compile Include="..\Progenitor.Core\Plugins\CompatRange.cs" Link="Core\CompatRange.cs" />

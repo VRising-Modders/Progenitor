@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Install;
 
@@ -192,7 +193,7 @@ internal sealed class ServerInstallLedger
         if (!File.Exists(path)) return null;
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            using var doc = JsonFiles.ParseFile(path);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
             if (!root.TryGetProperty("schema", out var schema) || schema.ValueKind != JsonValueKind.Number || schema.GetInt32() != CurrentSchema)

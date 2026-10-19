@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using Progenitor.Persistence;
 
 namespace Progenitor.Networking;
 
@@ -227,7 +228,7 @@ internal static class ModMessageFixtureFormat
             if (!binInfo.Exists) { error = "no payload file beside the sidecar"; return false; }
             if (binInfo.Length > MaxPayloadBytes) { error = "the payload is over " + MaxPayloadBytes + " bytes"; return false; }
 
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(sidecarPath), new JsonDocumentOptions { MaxDepth = 2 * WireFormat.MaxDepth + 8 });
+            using var doc = JsonFiles.ParseFile(sidecarPath, new JsonDocumentOptions { MaxDepth = 2 * WireFormat.MaxDepth + 8 });
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) { error = "the sidecar is not a JSON object"; return false; }
             int format = Int(root, "format", 0);

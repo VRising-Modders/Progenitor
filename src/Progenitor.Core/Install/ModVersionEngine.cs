@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Install;
 
@@ -1541,7 +1542,7 @@ internal sealed class ModVersionJournal
         error = "";
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            using var doc = JsonFiles.ParseFile(path);
             var r = doc.RootElement;
             if (r.ValueKind != JsonValueKind.Object) { error = "not an object"; return null; }
             var j = new ModVersionJournal

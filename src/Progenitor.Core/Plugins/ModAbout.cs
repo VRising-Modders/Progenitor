@@ -5,6 +5,7 @@ using System.IO;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Plugins;
 
@@ -544,7 +545,7 @@ internal sealed class PackageManifestBeside
             string path = Path.Combine(dir, PluginAboutReader.ManifestName);
             var info = new FileInfo(path);
             if (!info.Exists || info.Length > MaxBytes) return null;
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            using var doc = JsonFiles.ParseFile(path);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
             string name = Text(root, "name");

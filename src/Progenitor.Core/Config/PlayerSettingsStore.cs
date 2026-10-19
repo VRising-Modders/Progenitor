@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Progenitor.Persistence;
 
 namespace Progenitor.Config;
 
@@ -349,9 +350,10 @@ internal sealed class PlayerSettingsStore
 
     private JsonObject Parse(byte[] bytes)
     {
-        using var parsed = JsonDocument.Parse(bytes);
+        var json = JsonFiles.WithoutBom(bytes);
+        using var parsed = JsonDocument.Parse(json);
         ValidateUniqueProperties(parsed.RootElement);
-        var document = JsonNode.Parse(bytes) as JsonObject
+        var document = JsonNode.Parse(json.Span) as JsonObject
             ?? throw new InvalidDataException("Player settings must be an object.");
         if (document["schema"]?.GetValue<int>() != 1 ||
             document["mod"]?.GetValue<string>() != _modGuid)

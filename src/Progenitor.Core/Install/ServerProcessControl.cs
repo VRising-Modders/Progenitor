@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using Progenitor.Persistence;
 
 namespace Progenitor.Install;
 
@@ -77,7 +78,7 @@ internal sealed class ServerLaunchRecord
         if (!File.Exists(path)) return null;
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(path));
+            using var doc = JsonFiles.ParseFile(path);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
             if (!root.TryGetProperty("schema", out var schema) || schema.ValueKind != JsonValueKind.Number || schema.GetInt32() != CurrentSchema)
@@ -1059,7 +1060,7 @@ internal static class ServerProcessControl
             if (!File.Exists(candidate)) continue;
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllBytes(candidate));
+                using var doc = JsonFiles.ParseFile(candidate);
                 var root = doc.RootElement;
                 if (root.ValueKind != JsonValueKind.Object) continue;
                 if (root.TryGetProperty("Port", out var p) && p.ValueKind == JsonValueKind.Number) return p.GetInt32();
