@@ -894,6 +894,16 @@ internal sealed unsafe class GameInputBlocker : IUiInputBlocker
 
         try
         {
+            // BUILDESC1: Building_Exit has an interop member too; a renumbering would leave build mode's Escape unheld.
+            int exit = (int)ButtonInputAction.Building_Exit;
+            if (exit != ButtonInputActions.BuildingExit)
+                Plugin.Logger?.LogWarning(
+                    "Ui: ButtonInputAction.Building_Exit is " + exit.ToString(CultureInfo.InvariantCulture)
+                    + " in this build's interop but the close hold blocks the metadata-read constant "
+                    + ButtonInputActions.BuildingExit.ToString(CultureInfo.InvariantCulture)
+                    + ", so an Escape Progenitor takes in build mode may also leave build mode. Re-read "
+                    + "ButtonInputAction from the client metadata and update ButtonInputActions.BuildingExit.");
+
             int back = (int)ButtonInputAction.Back;
             if (back == ButtonInputActions.Back) return;
 
@@ -1311,9 +1321,24 @@ internal sealed unsafe class GameInputBlocker : IUiInputBlocker
                     state.BlockKeyDown((ButtonInputAction)closes[i]);
                 }
 
+                // BUILDESC1 (live 2026-10-18): in build mode Escape is also Building_Exit, which leaves build mode and
+                // closes the build menu; Back/Menu_Close alone did not stop it. Keyboard and mouse only (on a gamepad it
+                // is B, which these holds do not read). Same live-array rule as above.
+                bool buildHeld = MenuHotkeyGuard.HoldsBuildModeClose(closeHeld, state.ControllerType == ControllerType.KeyboardAndMouse);
+                if (buildHeld)
+                {
+                    int[] building = MenuHotkeyGuard.BlockedBuildModeCloseActions();
+                    for (int i = 0; i < building.Length; i++)
+                    {
+                        state.BlockKey((ButtonInputAction)building[i]);
+                        state.BlockKeyDown((ButtonInputAction)building[i]);
+                    }
+                }
+
                 if (MenuHotkeyGuard.NoteCloseHoldApplied())
                     Plugin.Logger?.LogInfo(
-                        "Ui: menu-hotkey guard took Back/Menu_Close ahead of FullscreenMenuMapper (order "
+                        "Ui: menu-hotkey guard took Back/Menu_Close" + (buildHeld ? "/Building_Exit" : "")
+                        + " ahead of FullscreenMenuMapper (order "
                         + UiInputCapture.HotkeyGuardOrder + " < " + UiInputCapture.HudMenuOrder
                         + ") while a key capture, a dialog, a Progenitor window over a game window or a build search owns Escape.");
             }

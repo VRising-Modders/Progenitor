@@ -86,6 +86,9 @@ internal static partial class BuildMenuSearch
     private static bool _frameHooked;
     private static PhotoInputHold? _hold;
 
+    /// <summary>BUILDESC1: one <see cref="UiInputCapture.AcquireCloseKey"/> hold, taken while an unfocused Escape belongs to the search.</summary>
+    private static bool _escapeCloseKey;
+
     private static BuildMenu? _menu;
     private static BuildMenu_StructureSelectionGroup? _group;
     private static GameObject? _root;
@@ -244,6 +247,7 @@ internal static partial class BuildMenuSearch
         ReleaseBuildTools();
         BuildMenuIndex.Forget();
         DisposeSettingLeases();
+        HoldEscapeCloseKey(false);
         try { _hold?.Drop(); } catch { /* */ }
         _hold = null;
         Names.Clear();
@@ -351,6 +355,7 @@ internal static partial class BuildMenuSearch
             else if (_hold is { Engaged: true, Draining: false }) _hold.Exit();
             _hold?.Tick();
             SyncClearButton();
+            HoldEscapeCloseKey(BuildSearchEscape.HoldsCloseKey(EscapeClearsQuery, _escapeCloseKey, MenuHotkeyGuard.CloseHeld));
         }
         catch (Exception e)
         {
@@ -617,6 +622,26 @@ internal static partial class BuildMenuSearch
         if (_field == null) return;
         UnityUiRuntime.SetExternalFieldText(_field, "");
         _liveQuery = "";
+    }
+
+    /// <summary>
+    /// BUILDESC1: take or end the close-key hold, so the menu-hotkey guard context (order 498) is registered while
+    /// the typed-key pump's close hold (<see cref="MenuHotkeyGuard.CloseHeld"/>) needs it. The hold masks only the
+    /// close actions (<see cref="UiMaskScope.CloseKeyOnly"/>); movement, the camera and the build keys are untouched.
+    /// </summary>
+    private static void HoldEscapeCloseKey(bool want)
+    {
+        if (want == _escapeCloseKey) return;
+        _escapeCloseKey = want;
+        try
+        {
+            if (want) UiInputCapture.AcquireCloseKey();
+            else UiInputCapture.ReleaseCloseKey();
+        }
+        catch (Exception e)
+        {
+            NoteError("escape hold", e);
+        }
     }
 
     private static void OnClearPointer(UiPointerEvent e)
