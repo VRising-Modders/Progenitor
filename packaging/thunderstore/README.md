@@ -14,7 +14,7 @@ Progenitor needs only [BepInExPack V Rising](https://thunderstore.io/c/v-rising/
 - **Install mods from inside the game.** The **Install Mods** tab lists the V Rising mods on Thunderstore. Click **Install**; some mods load at once, others after a restart.
 - **Join modded servers.** When a server needs mods you don't have, Progenitor offers to install the exact versions it runs.
 - **Every mod's settings and keys in one place,** with a conflict check when two mods want the same key.
-- **Built-in extras:** a better chat box (tabs, history, links, mentions), build menu search, **Dye all**, photo mode, and back and forward through menus.
+- **Built-in extras:** a better chat box (tabs, history, links, mentions), a build menu with search, a **Recent** list and **Copy building** (middle-click a building to build another), **Dye all**, photo mode, and back and forward through menus.
 - **Collect logs** in one click when something goes wrong. Personal details are removed before the zip is written.
 
 ![Install Mods](https://raw.githubusercontent.com/VRising-Modders/Progenitor/main/packaging/listing/03-install-mods.webp)

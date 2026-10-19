@@ -10,7 +10,7 @@ Progenitor's first package on Thunderstore.
 - **Install Mods**: install, update and turn off V Rising mods from Thunderstore inside the game. Simple and Advanced views; Advanced shows your mods and the server's side by side.
 - Joining a modded server offers to install the exact mod versions it runs.
 - **Keybinds** for every mod in one tab, with a conflict check.
-- Built-in features: a better chat box, build menu search, Dye all, photo mode, back and forward through menus.
+- Built-in features: a better chat box, build menu search with a Recent list and Copy building, Dye all, photo mode, back and forward through menus.
 - **Get help** → **Collect logs**, with personal details removed.
 - The Help Guide for players, server admins and mod authors, opened from the Mods menu.
 
