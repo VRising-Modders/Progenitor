@@ -2573,6 +2573,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             Dictionary<string, object?> playBackdrop;
             try { playBackdrop = NativeModsEntry.DescribePlayBackdrop(); }
             catch { playBackdrop = NativeModsEntry.PlayBackdropHold.Describe(default); }
+            Dictionary<string, object?>? titleVideo = null;
+            try { titleVideo = TitleVideoLive.Describe(); }
+            catch { /* the shape fills the unread block */ }
 
             return ModsMenuScene.Shape(
                 view,
@@ -2588,7 +2591,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 cameras,
                 roots,
                 ModsMenuScene.Stamp(frame, 0, 0),
-                playBackdrop);
+                playBackdrop,
+                titleVideo);
         }
         catch (Exception e)
         {

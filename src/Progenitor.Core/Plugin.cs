@@ -226,6 +226,9 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"DebugTools.Install: {e.Message}"); }
         try { Progenitor.Ui.BuildMenuSearch.Install(); }
         catch (Exception e) { Logger?.LogWarning($"BuildMenuSearch.Install: {e.Message}"); }
+        // TITLEVIDEO1: the video retire step every Progenitor quit runs (client only).
+        try { Progenitor.Ui.TitleVideoLive.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"TitleVideoLive.Install: {e.Message}"); }
         try { Ui.BuildRecentObserver.Install(); }
         catch (Exception e) { Logger?.LogWarning($"BuildRecentObserver.Install: {e.Message}"); }
         // SUPPORT1: Get help's [Support] OutputFolder (Core's ui cfg, client only); the page row reads it.
@@ -430,6 +433,9 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"BuildRecentObserver.Uninstall: {e.Message}"); }
         try { Progenitor.Ui.BuildMenuSearch.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"BuildMenuSearch.Uninstall: {e.Message}"); }
+        // TITLEVIDEO1: a quit still waiting for its frames runs now.
+        try { Progenitor.Ui.TitleVideoLive.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"TitleVideoLive.Uninstall: {e.Message}"); }
         // Photo mode next: it holds a camera shot, an input lease, hidden HUD canvases and (on the
         // server) world-speed freezes, all of which the modules below would otherwise tear out from under it.
         try { Cameras.PhotoMode.Uninstall(); }

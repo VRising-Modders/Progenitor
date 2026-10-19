@@ -817,7 +817,7 @@ server.tool("progenitor_disconnect", "Client only: request the production Leave-
     try { return text(await bridge("client", "disconnect", { statusOnly: statusOnly ?? false })); } catch (e) { return fail(e); }
   });
 
-server.tool("progenitor_quit", "Request UnityEngine.Application.Quit on the given side (client or server). Returns {ok:true} immediately; the process exits after the current frame. Core's Application.quitting handler promotes a staged Progenitor.dll.next. Logs 'quit requested via bridge'. Does not refuse.",
+server.tool("progenitor_quit", "Request UnityEngine.Application.Quit on the given side (client or server). Returns {ok:true, titleVideo} immediately. A client first retires its video players and quits two frames later (at most 0.5 s; log 'TitleVideo: quit (bridge): retired N video player(s)...'); otherwise the process exits after the current frame. Core's Application.quitting handler promotes a staged Progenitor.dll.next. Logs 'quit requested via bridge'. Does not refuse.",
   { side },
   async ({ side }) => {
     try { return text(await bridge(side, "quit")); } catch (e) { return fail(e); }

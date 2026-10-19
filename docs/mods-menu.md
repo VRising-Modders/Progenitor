@@ -489,7 +489,7 @@ A client install, update or removal that loads only at the next start used to le
 1. Writes `BepInEx/config/progenitor-install-restart.json`: the changes (name, plugin id when known, version, `install` / `update` / `remove`) and where the restart returns. No address, no password.
 2. In a world, writes JOINFLOW2's rejoin record `progenitor-rejoin.json` ([join-flow.md](join-flow.md#7-restart-and-rejoin-stage-2)). For a server: its address, port, transport, name and whether it used a password (never the password). For a hosted game: `kind hosted` and `save`.
 3. In a world, leaves the game's own way (the `ExitGame` view, as the bridge's `disconnect`), so the server saves the character, and waits up to 30 s for the world to go.
-4. Starts JOINFLOW2's relauncher (the same detached PowerShell command through `steam://run/1604030`) and quits with `Application.Quit`. On the manual path it quits without a relauncher. One restart per process (`already restarting`).
+4. Starts JOINFLOW2's relauncher (the same detached PowerShell command through `steam://run/1604030`) and quits with `Application.Quit`, after retiring the video players ([Retiring the video before a quit](#retiring-the-video-before-a-quit-titlevideo1)). On the manual path it quits without a relauncher. One restart per process (`already restarting`).
 
 **After the restart.** Bootstrap promotes the pending files at start as always, so the Install rows read Installed and the bar is gone. At the title screen, Core reads the install-restart record once (at most 10 minutes old), then:
 - **Nothing to return to:** a notice, `Restart finished` · `Installed: ChatSkin.` (also `Removed: …`, and `Not loaded: …` for a change this start does not show).
@@ -502,6 +502,18 @@ A client install, update or removal that loads only at the next start used to le
 - The answer adds `lastRestart {dryRun, offer, mode, why, fileName, arguments, leaveFirst, recordPath, rejoinRecordPath}`, `installRecord`, `rejoinRecord` (with `kind` and `save`), `resume {save, phase, error, continueSeen, pressed}`, `lastPickup` and `afterRestart`. Log lines start `Install restart:`; the return logs `JoinFlow:`.
 
 **Not live-verified:** all of it. In particular: the leave-then-quit order, the relauncher under Steam (unproven in JOINFLOW2 too), `_ContinueText` being filled when the title view first reports ready, a title-screen popup blocking Continue, and the hosted server's catalog name matching the save's Continue caption.
+
+### Retiring the video before a quit (TITLEVIDEO1)
+
+*Built and game-free tested (`TitleVideoTests`); the bridge quit verified live once on the Steam client, 2026-10-19.* Core only; Bootstrap is unchanged.
+
+- **Why.** Two client quits (2026-10-18 and 2026-10-19) hung after every plugin had unloaded. The engine's video teardown kept retrying the title video's playback, whose release was still waiting for a per-frame video update that no longer runs at that point. Clients started with `-noVideo` never hung. The hang has not been reproduced on demand: before this change, 0 of 20 bridge quits hung. See the [quit hang note](../knowledge/notes/title-video-quit-hang.md).
+- **What runs.** Before every Progenitor quit (Restart now, Restart and rejoin, the join flow's restart and relaunch, the manual **Quit to desktop**, the Dev bridge `quit` op), Core retires the video players, waits two normal frames (at most 0.5 s) so the video system releases the playback the normal way, then calls `Application.Quit`.
+- **How a player is retired.** The game's own `StunVideoPlayer.Stop()`, then the wrapper disabled (its `Update` never touches the player again), then `Object.Destroy` on the `UnityEngine.Video.VideoPlayer` component. Destroying the component is what releases its playback in a normal frame. `Stop` or `Pause` alone leave the player and its playback for engine cleanup, and disabling it leaves a player the game can start again. The title view's own `Update` reads only the wrapper's `isPrepared` field, so it is unaffected. The Mods entry's video read (`NativeModsEntry.TitleVideoPlaying`) reads `false` for a retired video instead of reading the destroyed player.
+- **Never blocks the quit.** A retire that throws, no video player, a server, or a Core unload during the wait all quit at once. One log line: `TitleVideo: quit (<reason>): retired N video player(s); quitting after F frame(s), T s`.
+- **Not covered:** the game's own Exit button. It does not pass through Progenitor, so a quit from there can still hang the same way.
+- **Readback.** `mods_ui scene` carries `titleVideo {players, retired, pending, lastQuit}`: live video players on the title view, whether its player is gone, whether a quit is waiting for its frames, and the last quit this generation ran (`{reason, retired, frames, seconds, note}`). The bridge `quit` op answers `{ok, titleVideo {state, pending, maxFrames, maxSeconds, lastQuit}}`.
+- **Live (2026-10-19, Steam client, main + this change, cold launch to the title).** A bridge `quit` logged `TitleVideo: quit (bridge): retired 1 video player(s); quitting after 2 frame(s), 0 s` and the game exited normally. Not live-verified: the install restart, Restart and rejoin and the manual Quit to desktop with the step in place.
 
 ## Install tab in the game's idiom (VANILLA1)
 

@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **1037** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **1038** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -1268,7 +1268,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 1037 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 1038 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1639,6 +1639,7 @@ Purpose lines are the first sentence of each type's own doc comment.
 | Type | Purpose | Why public |
 |---|---|---|
 | `PhotoModeBridge` | The Dev bridge's `photo` op over Core's built-in photo mode (`on`, `off`, `status`). Photo mode itself has no plugin API. | Dev bridge |
+| `TitleVideoQuitBridge` | The Dev bridge's `quit` op: retires the video players, then `Application.Quit` after at most two frames (0.5 s). Not a plugin API. | Dev bridge |
 | `CameraPreviewBridge` | CAMOFFSET1: the Dev bridge's `camera_preview` readback of the newest running `ctx.Camera.Preview` (the offset asked, where the point really projects, the framing's readings). | Dev bridge |
 
 #### `Progenitor.Access`

@@ -462,11 +462,11 @@ Six pure policy tests and the Dev build pass. Live request/poll reached verified
 
 ## `quit`
 
-Client **or** server, main thread. Calls `UnityEngine.Application.Quit()` and returns `{ok:true}` immediately. Unity exits after the current frame. Does **not** refuse: a running world, a launch in flight, and the main menu are all valid. Logs a BepInEx warning `quit requested via bridge`. Bootstrap's `Application.quitting` handler then promotes staged `progenitor-core/Progenitor.dll.next` and `plugins/Progenitor.Bootstrap.dll.next`. This is the graceful process-exit the test loop should prefer over killing `VRising.exe`. Killing the process skips the quit handler.
+Client **or** server, main thread. Retires the video players first, then calls `UnityEngine.Application.Quit()` (TITLEVIDEO1, verified live once on the Steam client, 2026-10-19: `retired 1 video player(s); quitting after 2 frame(s)`, clean exit): on a client with a video player it waits two frames (at most 0.5 s) before the quit, and logs `TitleVideo: quit (bridge): retired N video player(s); quitting after F frame(s), T s`; with none (a server, a client in a world) it quits at once. Returns immediately; Unity exits after the frame the quit is called in. See [mods-menu.md](mods-menu.md#retiring-the-video-before-a-quit-titlevideo1). Does **not** refuse: a running world, a launch in flight, and the main menu are all valid. Logs a BepInEx warning `quit requested via bridge`. Bootstrap's `Application.quitting` handler then promotes staged `progenitor-core/Progenitor.dll.next` and `plugins/Progenitor.Bootstrap.dll.next`. This is the graceful process-exit the test loop should prefer over killing `VRising.exe`. Killing the process skips the quit handler.
 
 ```
 → {"id":22,"token":"...","op":"quit"}
-← {"id":22,"ok":true,"result":{"ok":true}}
+← {"id":22,"ok":true,"result":{"ok":true,"titleVideo":{"state":"quitting-after-frames","pending":true,"maxFrames":2,"maxSeconds":0.5,"lastQuit":null}}}
 ```
 
 No args. Works from the client main menu (no world). On the test server it also quits that process — do not point this at `C:\VRisingServer`.
