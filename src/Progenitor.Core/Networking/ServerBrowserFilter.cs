@@ -63,8 +63,11 @@ internal static class ServerBrowserFilter
     /// <summary>The caption after the filter failed open.</summary>
     internal const string FailedLabel = "Progenitor Servers (unavailable)";
 
-    /// <summary>Appended to the game's <c>Servers: N (M total)</c> line while the filter is on.</summary>
-    internal const string CountSuffix = " · Progenitor only";
+    /// <summary>Appended to the game's <c>Servers: N (M total)</c> line while the filter is on and it fits.</summary>
+    internal const string CountSuffix = ServerBrowserCountLine.Suffix;
+
+    /// <summary>The hidden label under the count line that measures it with the line's font.</summary>
+    internal const string MeasurerName = "progenitor-browser-count-measure";
 
     /// <summary>The game's rebuild interval (<c>timeBetweenInternalFetches</c>, 2 s), kept while the clock is held.</summary>
     internal const float RebuildSeconds = 2f;
@@ -85,6 +88,10 @@ internal static class ServerBrowserFilter
     private static Toggle? _toggle;
     private static TMP_Text? _caption;
     private static TMP_Text? _countText;
+    private static TextMeshProUGUI? _countMeasurer;
+    private static string? _countWritten;
+    private static float _countWidth = -1f;
+    private static float _countMeasured = -1f;
     private static ushort _slot;
     private static IntPtr _builtFor;
     private static IntPtr _failedFor;
@@ -136,6 +143,7 @@ internal static class ServerBrowserFilter
         catch (Exception e) { Plugin.Logger?.LogWarning("ServerBrowser: rebuilding the full list at unload threw: " + e.Message); }
 
         DropCheckbox();
+        DropCountMeasurer();
         _view = null;
         _countText = null;
         _holding = false;
@@ -187,6 +195,7 @@ internal static class ServerBrowserFilter
             _countText = null;
             _holding = false;
             DropCheckbox();
+            DropCountMeasurer();
             State.Forget();
         }
 
@@ -332,19 +341,127 @@ internal static class ServerBrowserFilter
         finally { _redrawing = false; }
     }
 
-    /// <summary>While the filter acts, the count line says so: <c>Servers: N (M total) · Progenitor only</c>.</summary>
+    /// <summary>
+    /// While the filter acts, the count line says so: <c>Servers: N (M total) · Progenitor</c>, only when that whole line
+    /// fits the line's width measured with its own font (<see cref="ServerBrowserCountLine.Fit"/>); otherwise the game's
+    /// text stays. Live 2026.10.143: the earlier <c> · Progenitor only</c> wrapped below the filter panel at 1920x1080.
+    /// Measuring uses a hidden label, never the game's own text component (measuring there would replace the parsed
+    /// text it draws). A line this pass already wrote, at the same width, is not measured again.
+    /// </summary>
     private static void MarkCount(PlayJoinMenuView view)
     {
         if (!Active) return;
         try
         {
-            if (!Alive(_countText)) _countText = CountTmp(view);
+            if (!Alive(_countText))
+            {
+                DropCountMeasurer();
+                _countText = CountTmp(view);
+            }
+
             var tmp = _countText;
             if (tmp == null) return;
             string text = tmp.text ?? "";
-            if (text.Length > 0 && !text.EndsWith(CountSuffix, StringComparison.Ordinal)) tmp.text = text + CountSuffix;
+            if (text.Length == 0) return;
+            float width = CountWidth(tmp);
+            if (string.Equals(text, _countWritten, StringComparison.Ordinal) && Math.Abs(width - _countWidth) < 0.5f) return;
+            var measurer = EnsureCountMeasurer(tmp);
+            string line = ServerBrowserCountLine.Fit(text, width, measurer == null ? null : s => Measure(measurer, s));
+            _countWidth = width;
+            _countMeasured = measurer == null ? -1f : Measure(measurer, line);
+            if (!string.Equals(line, text, StringComparison.Ordinal)) tmp.text = line;
+            _countWritten = line;
         }
         catch { /* cosmetic */ }
+    }
+
+    /// <summary>The count line's text width: its rect less its side margins; -1 when unreadable.</summary>
+    private static float CountWidth(TMP_Text tmp)
+    {
+        try
+        {
+            var margin = tmp.margin;
+            float w = tmp.rectTransform.rect.width - margin.x - margin.z;
+            return w > 0f && !float.IsNaN(w) && !float.IsInfinity(w) ? w : -1f;
+        }
+        catch { return -1f; }
+    }
+
+    private static float Measure(TextMeshProUGUI measurer, string text)
+    {
+        try
+        {
+            float w = measurer.GetPreferredValues(text).x;
+            return w >= 0f && !float.IsNaN(w) && !float.IsInfinity(w) ? w : -1f;
+        }
+        catch { return -1f; }
+    }
+
+    /// <summary>
+    /// A hidden, transparent, unwrapped label under the count line copying its font, size, style and spacing. One left
+    /// by an earlier Core (found by <see cref="MeasurerName"/>) is reused.
+    /// </summary>
+    private static TextMeshProUGUI? EnsureCountMeasurer(TMP_Text source)
+    {
+        var m = _countMeasurer;
+        if (!Alive(m))
+        {
+            m = null;
+            _countMeasurer = null;
+            GameObject? go = null;
+            try
+            {
+                var found = source.transform.Find(MeasurerName);
+                go = found != null ? found.gameObject : new GameObject(MeasurerName);
+                if (found == null) go.transform.SetParent(source.transform, false);
+                var rt = go.GetComponent<RectTransform>() ?? go.AddComponent<RectTransform>();
+                rt.sizeDelta = Vector2.zero;
+                var layout = go.GetComponent<LayoutElement>() ?? go.AddComponent<LayoutElement>();
+                layout.ignoreLayout = true;
+                m = go.GetComponent<TextMeshProUGUI>() ?? go.AddComponent<TextMeshProUGUI>();
+                if (m == null)
+                {
+                    UnityUiRuntime.TryDestroy(go, immediate: false);
+                    return null;
+                }
+
+                m.text = "";
+                m.raycastTarget = false;
+                m.richText = source.richText;
+                m.enableWordWrapping = false;
+                m.color = new Color(1f, 1f, 1f, 0f);
+                _countMeasurer = m;
+            }
+            catch
+            {
+                if (go != null) UnityUiRuntime.TryDestroy(go, immediate: false);
+                return null;
+            }
+        }
+
+        try
+        {
+            if (m!.font != source.font) m.font = source.font;
+            if (m.fontSize != source.fontSize) m.fontSize = source.fontSize;
+            if (m.fontStyle != source.fontStyle) m.fontStyle = source.fontStyle;
+            if (m.characterSpacing != source.characterSpacing) m.characterSpacing = source.characterSpacing;
+            if (m.wordSpacing != source.wordSpacing) m.wordSpacing = source.wordSpacing;
+        }
+        catch { /* measures with what it has */ }
+        return m;
+    }
+
+    private static void DropCountMeasurer()
+    {
+        var m = _countMeasurer;
+        _countMeasurer = null;
+        _countWritten = null;
+        if (m == null) return;
+        try
+        {
+            if (Alive(m)) UnityUiRuntime.TryDestroy(m.gameObject, immediate: false);
+        }
+        catch { /* teardown */ }
     }
 
     private static Il2CppSystem.Collections.Generic.List<ServerListEntryData>? SafeList(PlayJoinMenuView view)
@@ -746,6 +863,9 @@ internal static class ServerBrowserFilter
 
         try { d["countText"] = CountTmp(view)?.text; }
         catch { d["countText"] = null; }
+        d["countWidth"] = _countWidth;
+        d["countMeasured"] = _countMeasured;
+        d["countFits"] = _countWidth > 0f && _countMeasured >= 0f && _countMeasured <= _countWidth + 0.5f;
 
         try
         {
