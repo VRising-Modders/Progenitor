@@ -111,6 +111,13 @@ internal sealed class RejoinRecord
     /// </summary>
     public bool DryRun { get; set; }
 
+    /// <summary>
+    /// REJOINSELF1: the game process that wrote the record (<see cref="RejoinStore.ProcessStamp"/>: its id and start
+    /// time). A start pickup in that same process leaves the record alone, so only the relaunched game uses it. Empty in
+    /// records written before this field existed: they are picked up as before.
+    /// </summary>
+    public string Writer { get; set; } = "";
+
     public List<RejoinRow> Rows { get; set; } = new();
 
     public const string KindDedicated = "dedicated";
@@ -199,6 +206,7 @@ internal sealed class RejoinRecord
             w.WriteNumber("schema", Schema);
             w.WriteString("serverName", ServerName);
             w.WriteBoolean("used", Used);
+            w.WriteString("writer", Writer);
             w.WriteEndObject();
         }
 
@@ -229,6 +237,7 @@ internal sealed class RejoinRecord
                 DryRun = Bool(root, "dryRun"),
                 Kind = Str(root, "kind") == KindHosted ? KindHosted : KindDedicated,
                 Save = Str(root, "save").Trim(),
+                Writer = Str(root, "writer").Trim(),
             };
             if (root.TryGetProperty("rows", out var rows) && rows.ValueKind == JsonValueKind.Array)
             {
@@ -280,6 +289,12 @@ internal enum RejoinPickup
 
     /// <summary>Not a record (malformed, another schema, no address): deleted, ignored.</summary>
     Invalid = 4,
+
+    /// <summary>
+    /// REJOINSELF1: written by this same game process (it is restarting): left on disk untouched, neither marked used
+    /// nor deleted, for the relaunched game to pick up.
+    /// </summary>
+    OwnProcess = 5,
 }
 
 /// <summary>
@@ -329,10 +344,45 @@ internal static class RejoinStore
     }
 
     /// <summary>
-    /// Take the record for this start: <see cref="RejoinPickup.Rejoin"/> with the record (now marked used on
-    /// disk), or why it was ignored (and deleted). Never throws.
+    /// REJOINSELF1: this game process, as <c>&lt;process id&gt;:&lt;start time, UTC ticks&gt;</c> (a reused id never
+    /// matches). It is the same for every Core generation of one process, since it comes from the process itself.
+    /// Tests replace it to stand in for a relaunched game.
     /// </summary>
-    public static RejoinPickup Take(string path, DateTime nowUtc, out RejoinRecord? record)
+    internal static Func<string> ProcessStamp { get; set; } = CurrentProcessStamp;
+
+    private static string? _currentStamp;
+
+    internal static string CurrentProcessStamp()
+    {
+        var cached = _currentStamp;
+        if (cached != null) return cached;
+        string stamp;
+        try
+        {
+            using var self = System.Diagnostics.Process.GetCurrentProcess();
+            stamp = self.Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":"
+                + self.StartTime.ToUniversalTime().Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            stamp = Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":0";
+        }
+
+        _currentStamp = stamp;
+        return stamp;
+    }
+
+    /// <summary>The record was written by <paramref name="process"/> (an empty stamp on either side never matches).</summary>
+    public static bool WrittenBy(RejoinRecord r, string? process) =>
+        r != null && !string.IsNullOrEmpty(process) && r.Writer.Length > 0 && string.Equals(r.Writer, process, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Take the record for this start: <see cref="RejoinPickup.Rejoin"/> with the record (now marked used on
+    /// disk), or why it was ignored (and deleted). REJOINSELF1: with <paramref name="ownProcess"/> (the start pickup
+    /// passes <see cref="ProcessStamp"/>), a record that process wrote answers <see cref="RejoinPickup.OwnProcess"/>
+    /// and stays on disk unchanged; null skips that check (the bridge's <c>rejoin_now</c>). Never throws.
+    /// </summary>
+    public static RejoinPickup Take(string path, DateTime nowUtc, out RejoinRecord? record, string? ownProcess = null)
     {
         record = null;
         try
@@ -353,6 +403,7 @@ internal static class RejoinStore
                 return RejoinPickup.Invalid;
             }
 
+            if (WrittenBy(r, ownProcess)) return RejoinPickup.OwnProcess;
             var verdict = Judge(r, nowUtc);
             if (verdict != RejoinPickup.Rejoin)
             {
@@ -398,6 +449,7 @@ internal static class RejoinStore
         RejoinPickup.Expired => "expired",
         RejoinPickup.AlreadyUsed => "already-used",
         RejoinPickup.Invalid => "invalid",
+        RejoinPickup.OwnProcess => "own-process",
         _ => "none",
     };
 }

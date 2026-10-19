@@ -747,6 +747,7 @@ internal static partial class JoinFlowClient
 
         var record = RejoinRecord.From(target, rows, DateTime.UtcNow);
         record.DryRun = dryRun;
+        record.Writer = RejoinStore.ProcessStamp();
         try { RejoinStore.Write(RejoinPath, record); }
         catch (Exception e)
         {
@@ -776,6 +777,9 @@ internal static partial class JoinFlowClient
         Plugin.Logger?.LogInfo("JoinFlow: restart and rejoin" + (dryRun ? " (dry run)" : "") + ": record written to " + RejoinPath
             + "; relaunch " + (plan.Mode == RelaunchMode.Automatic ? "automatic" : "manual" + (plan.Why.Length > 0 ? " (" + plan.Why + ")" : "")));
         if (dryRun) return "dry-run";
+
+        // REJOINSELF1: the record is for the relaunched game; this process never picks it up.
+        MarkRejoinPickupDone();
 
         if (plan.Mode != RelaunchMode.Automatic) return AfterRestartStart(relauncher, false, plan.Why);
         return BeginRelaunch(relauncher, plan, (started, error) => AfterRestartStart(relauncher, started, error));
@@ -1385,10 +1389,21 @@ internal static partial class JoinFlowClient
 
     // ---- after-relaunch pickup -------------------------------------------------------------------
 
+    /// <summary>
+    /// REJOINSELF1: this process wrote the restart records and is quitting: the start pickup must not run here (it would
+    /// spend the records the relaunched game needs).
+    /// </summary>
+    internal static void MarkRejoinPickupDone() => _rejoinChecked = true;
+
+    /// <summary>The start pickup already ran (or was ruled out) in this Core generation.</summary>
+    internal static bool RejoinPickupChecked => _rejoinChecked;
+
     /// <summary>Once per Core generation, when the main menu is ready: pick up a rejoin record a relaunch left.</summary>
     private static void TickRejoinPickup()
     {
         if (_rejoinChecked) return;
+        // REJOINSELF1: a restart is under way in this process (a Core swap reset the flag above): leave the records alone.
+        if (Interlocked.CompareExchange(ref _relaunching, 0, 0) != 0) return;
         var host = ConnectHost;
         if (host == null) return;
         bool ready;
@@ -1411,7 +1426,9 @@ internal static partial class JoinFlowClient
     /// <summary>Take the record and rejoin (or say why not). <paramref name="source"/> is <c>start</c> or <c>bridge</c>.</summary>
     internal static string PickUp(string source)
     {
-        var pickup = RejoinStore.Take(RejoinPath, DateTime.UtcNow, out var record);
+        // REJOINSELF1: the start pickup leaves a record this process wrote on disk (the relaunched game uses it); the
+        // bridge's rejoin_now takes it anyway, so dry runs stay testable in one process.
+        var pickup = RejoinStore.Take(RejoinPath, DateTime.UtcNow, out var record, source == "start" ? RejoinStore.ProcessStamp() : null);
         _lastPickup = RejoinStore.PickupName(pickup);
         Plugin.Logger?.LogInfo("JoinFlow: rejoin record at " + source + ": " + _lastPickup);
         if (pickup == RejoinPickup.Rejoin && record != null)
@@ -1477,6 +1494,8 @@ internal static partial class JoinFlowClient
             ["kind"] = r.Kind,
             ["save"] = r.Save,
             ["dryRun"] = r.DryRun,
+            ["writer"] = r.Writer,
+            ["ownProcess"] = RejoinStore.WrittenBy(r, RejoinStore.ProcessStamp()),
             ["verdictNow"] = RejoinStore.PickupName(RejoinStore.Judge(r, DateTime.UtcNow)),
             ["rows"] = rows,
         };

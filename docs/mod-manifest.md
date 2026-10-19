@@ -674,7 +674,7 @@ The `users` bridge op's `handshake` field shows `awaiting-install` while a windo
 | `ModManifest: Thunderstore batch confirmed for operator fp=… host=… (N package(s))` | client; JOINFLOW2, the Thunderstore confirmation recorded in `thunderstoreAcks` ([join-flow.md](join-flow.md#5-install-from-thunderstore-stage-2)) |
 | `JoinFlow: installing from Thunderstore: <Owner-Name@version>, … (confirmed\|confirmed earlier)` / `JoinFlow: Thunderstore batch done: <join-now\|restart-needed\|incomplete\|nothing>; <summary>` | client; JOINFLOW2 |
 | `JoinFlow: restart and rejoin[ (dry run)]: record written to …; relaunch automatic\|manual (…)` / `JoinFlow: relauncher started (pid N)…` / `JoinFlow: quitting V Rising for the restart in N s` | client; JOINFLOW2 |
-| `JoinFlow: rejoin record at start\|bridge: rejoin\|expired\|already-used\|invalid\|none` / `JoinFlow: rejoining\|joining <address> (<transport>)` / `JoinFlow: reconnect: back to the main menu\|leaving the server (ExitGame view)\|LaunchGame …` / `JoinFlow: reconnect joined\|failed\|canceled (…)` | client; JOINFLOW2 |
+| `JoinFlow: rejoin record at start\|bridge: rejoin\|expired\|already-used\|invalid\|own-process\|none` / `JoinFlow: rejoining\|joining <address> (<transport>)` / `JoinFlow: reconnect: back to the main menu\|leaving the server (ExitGame view)\|LaunchGame …` / `JoinFlow: reconnect joined\|failed\|canceled (…)` | client; JOINFLOW2 |
 
 ## Not this phase
 

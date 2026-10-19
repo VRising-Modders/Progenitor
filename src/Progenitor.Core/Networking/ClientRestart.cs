@@ -332,6 +332,10 @@ internal sealed class InstallRestartRecord
     public string ReturnTo { get; set; } = ClientRestartOffer.ReturnNone;
 
     public string ReturnName { get; set; } = "";
+
+    /// <summary>REJOINSELF1: the process that wrote it (<see cref="RejoinStore.ProcessStamp"/>); empty in older records.</summary>
+    public string Writer { get; set; } = "";
+
     public List<PendingClientChange> Mods { get; set; } = new();
 
     public static InstallRestartRecord From(ClientRestartOffer offer, DateTime nowUtc, bool dryRun)
@@ -372,6 +376,7 @@ internal sealed class InstallRestartRecord
             w.WriteString("returnName", ReturnName);
             w.WriteString("returnTo", ReturnTo);
             w.WriteNumber("schema", Schema);
+            w.WriteString("writer", Writer);
             w.WriteEndObject();
         }
 
@@ -394,6 +399,7 @@ internal sealed class InstallRestartRecord
                 DryRun = root.TryGetProperty("dryRun", out var d) && d.ValueKind == JsonValueKind.True,
                 ReturnTo = Str(root, "returnTo"),
                 ReturnName = Str(root, "returnName"),
+                Writer = Str(root, "writer").Trim(),
             };
             if (root.TryGetProperty("mods", out var mods) && mods.ValueKind == JsonValueKind.Array)
                 foreach (var el in mods.EnumerateArray())

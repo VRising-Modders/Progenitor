@@ -641,6 +641,74 @@ public sealed class JoinFlowStage2Tests
     }
 
     [Fact]
+    public void A_rejoin_record_written_by_this_process_is_left_untouched_by_its_own_start_pickup()
+    {
+        string path = TempFile();
+        try
+        {
+            var now = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
+            var record = RejoinRecord.From(Target(), Array.Empty<RejoinRow>(), now);
+            record.Writer = "4242:638000000000000000";
+            RejoinStore.Write(path, record);
+            string before = File.ReadAllText(path);
+            Assert.Contains("\"writer\": \"4242:638000000000000000\"", before, StringComparison.Ordinal);
+
+            // The same process: neither marked used nor deleted, however often it looks.
+            Assert.Equal(RejoinPickup.OwnProcess, RejoinStore.Take(path, now.AddMinutes(1), out var mine, "4242:638000000000000000"));
+            Assert.Null(mine);
+            Assert.Equal(RejoinPickup.OwnProcess, RejoinStore.Take(path, now.AddMinutes(2), out _, "4242:638000000000000000"));
+            Assert.Equal(before, File.ReadAllText(path));
+            Assert.Equal("own-process", RejoinStore.PickupName(RejoinPickup.OwnProcess));
+
+            // A reused process id with another start time is another process: it takes the record once.
+            Assert.Equal(RejoinPickup.Rejoin, RejoinStore.Take(path, now.AddMinutes(3), out var theirs, "4242:638000000000000001"));
+            Assert.Equal("4242:638000000000000000", theirs!.Writer);
+            Assert.True(RejoinStore.Peek(path)!.Used);
+            Assert.Equal(RejoinPickup.AlreadyUsed, RejoinStore.Take(path, now.AddMinutes(3), out _, "4242:638000000000000001"));
+            Assert.False(File.Exists(path));
+
+            // No process given (the bridge's rejoin_now): the writer is not checked.
+            RejoinStore.Write(path, record);
+            Assert.Equal(RejoinPickup.Rejoin, RejoinStore.Take(path, now.AddMinutes(1), out _));
+        }
+        finally
+        {
+            try { Directory.Delete(Path.GetDirectoryName(path)!, true); } catch { /* temp */ }
+        }
+    }
+
+    [Fact]
+    public void An_older_rejoin_record_without_a_writer_is_picked_up_by_any_start()
+    {
+        string path = TempFile();
+        try
+        {
+            var now = DateTime.UtcNow;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "{\"schema\":1,\"address\":\"127.0.0.1\",\"port\":9976,\"protocol\":\"Lidgren\",\"created\":\""
+                + ModManifestJson.FormatIssued(now) + "\",\"used\":false}");
+            Assert.Equal("", RejoinStore.Peek(path)!.Writer);
+            Assert.False(RejoinStore.WrittenBy(RejoinStore.Peek(path)!, RejoinStore.ProcessStamp()));
+            Assert.Equal(RejoinPickup.Rejoin, RejoinStore.Take(path, now, out var r, RejoinStore.ProcessStamp()));
+            Assert.Equal("127.0.0.1:9976", r!.ToTarget().Endpoint);
+            Assert.Equal(RejoinPickup.AlreadyUsed, RejoinStore.Take(path, now, out _, RejoinStore.ProcessStamp()));
+        }
+        finally
+        {
+            try { Directory.Delete(Path.GetDirectoryName(path)!, true); } catch { /* temp */ }
+        }
+    }
+
+    [Fact]
+    public void The_process_stamp_is_this_process_and_stable()
+    {
+        string stamp = RejoinStore.CurrentProcessStamp();
+        Assert.StartsWith(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":", stamp, StringComparison.Ordinal);
+        Assert.NotEqual(Environment.ProcessId + ":0", stamp);
+        Assert.Equal(stamp, RejoinStore.CurrentProcessStamp());
+    }
+
+    [Fact]
     public void Only_the_two_direct_connect_transports_can_be_rejoined()
     {
         Assert.Equal("SteamIPv4", JoinTarget.CanonicalProtocol("steamipv4"));

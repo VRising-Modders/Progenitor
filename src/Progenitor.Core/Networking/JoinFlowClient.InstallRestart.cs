@@ -242,7 +242,9 @@ internal static partial class JoinFlowClient
         string rejoinPath = "";
         try
         {
-            InstallRestartRecord.Write(InstallRestartPath, InstallRestartRecord.From(offer, now, dryRun));
+            var installRecord = InstallRestartRecord.From(offer, now, dryRun);
+            installRecord.Writer = RejoinStore.ProcessStamp();
+            InstallRestartRecord.Write(InstallRestartPath, installRecord);
             if (offer.ReturnTo != ClientRestartOffer.ReturnNone)
             {
                 var record = offer.ReturnTo == ClientRestartOffer.ReturnHosted
@@ -255,6 +257,7 @@ internal static partial class JoinFlowClient
                     }
                     : RejoinRecord.From(offer.Target!, Array.Empty<RejoinRow>(), now);
                 record.DryRun = dryRun;
+                record.Writer = RejoinStore.ProcessStamp();
                 RejoinStore.Write(RejoinPath, record);
                 rejoinPath = RejoinPath;
             }
@@ -287,6 +290,11 @@ internal static partial class JoinFlowClient
             + offer.Count + " change(s); return " + offer.ReturnTo + (offer.ReturnName.Length > 0 ? " " + offer.ReturnName : "")
             + "; relaunch " + (offer.Manual ? "manual (" + offer.ManualWhy + ")" : "automatic") + (inWorld ? "; leaving the world first" : ""));
         if (dryRun) return "dry-run";
+
+        // REJOINSELF1 (live 2026-10-19): the records are for the relaunched game. When this generation never saw the
+        // title screen ready (a join from the server list, a Core swap in the world), leaving the world below lands on
+        // the title screen in this process, and the start pickup would take and spend the record it just wrote.
+        MarkRejoinPickupDone();
 
         if (inWorld && ConnectHost != null)
         {
@@ -357,6 +365,13 @@ internal static partial class JoinFlowClient
         if (record.DryRun && source == "start")
         {
             _lastInstallPickup = "dry-run-waiting";
+            return _lastInstallPickup;
+        }
+
+        // REJOINSELF1: this process wrote it and is restarting; the relaunched game shows the line.
+        if (source == "start" && record.Writer.Length > 0 && string.Equals(record.Writer, RejoinStore.ProcessStamp(), StringComparison.Ordinal))
+        {
+            _lastInstallPickup = "own-process";
             return _lastInstallPickup;
         }
 
