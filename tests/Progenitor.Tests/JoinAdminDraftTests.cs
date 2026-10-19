@@ -248,6 +248,42 @@ public sealed class JoinAdminDraftTests
         Assert.Equal("Applied 1 change. Players see it on their next join.", ok.Summary());
     }
 
+    /// <summary>
+    /// Live 2026-10-19 (2026.10.133): the popup redraws when the run finishes, inside the last answer and before the
+    /// client's change event. The run makes each answer's state the draft's base at once, so an accepted add is drawn
+    /// from the server's rows, not lost between the old base and the emptied draft.
+    /// </summary>
+    [Fact]
+    public void Each_answers_state_becomes_the_base_before_the_run_reports_done()
+    {
+        var d = Draft();
+        Assert.Null(d.Recommend("", "Owner-Zoom", "1.0.0", "Zoom in", "Zoom"));
+        Assert.Null(d.SetPolicyMode("approved"));
+        var after = Server();
+        after.Recommended.Add(new JoinAdminRecRow { Package = "Owner-Zoom", Version = "1.0.0", Reason = "Zoom in", Name = "Zoom" });
+        var server = new FakeServer { Decide = r => new JoinAdminResponse { Op = r.Op, Ok = true, State = r.Op == JoinAdminOps.RecommendAdd ? after : null } };
+        string[]? drawn = null;
+        JoinAdminState? baseWhenDone = null;
+        var run = new JoinAdminApplyRun(d, server.Send, _ =>
+        {
+            baseWhenDone = d.Base;
+            drawn = d.RecommendedRows().Select(x => x.Row.Key + ":" + JoinAdminDraft.MarkName(x.Mark)).ToArray();
+        });
+        run.Start();
+        Assert.Same(after, baseWhenDone);
+        Assert.Equal(new[] { "author.mapmarkers:" + JoinAdminDraft.MarkName(JoinAdminRowMark.None), "Owner-Zoom:" + JoinAdminDraft.MarkName(JoinAdminRowMark.None) }, drawn);
+        Assert.False(d.HasChanges);
+        Assert.Equal(2, run.Applied);
+
+        // An answer without a state (a refusal before authorization) leaves the base alone.
+        var e = Draft();
+        var old = e.Base;
+        e.SetPolicyMode("approved");
+        new JoinAdminApplyRun(e, new FakeServer { Decide = r => new JoinAdminResponse { Op = r.Op, Ok = false, Error = "No." } }.Send).Start();
+        Assert.Same(old, e.Base);
+        Assert.Equal("No.", e.Changes.Single().Error);
+    }
+
     [Fact]
     public void Apply_stops_when_the_server_stops_answering_and_keeps_the_rest()
     {

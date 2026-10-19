@@ -877,7 +877,9 @@ internal static class JoinAdminPanel
 
         ForgetRows();
         _builtPage = _page;
-        _builtSignature = MainSignature(JoinAdminClient.State, Draft);
+        // The rows are drawn from the draft's base, so the signature names that state: a base that lags the client's
+        // last answer then differs from the rebased one and the next change event rebuilds instead of updating in place.
+        _builtSignature = MainSignature(Draft.Base ?? JoinAdminClient.State, Draft);
         if (IsModPicker(_page)) RebuildPicks();
         string title = _page switch
         {
@@ -901,9 +903,7 @@ internal static class JoinAdminPanel
             RowKey = RowButtons,
             Body = _page switch
             {
-                Page.PickRecommend => JoinAdminText.PickRecommendBody,
-                Page.PickRequire => ClientPolicyText.PickRequireBody,
-                Page.PickApprove => ClientPolicyText.PickApproveBody,
+                // The pickers' subtitles are a wrapping row of their own (PickBody), not the dialog body.
                 Page.ConfirmApproveAll => ClientPolicyText.ConfirmBody(_confirmItems),
                 Page.ConfirmClose => JoinAdminText.CloseBody(Draft.Count),
                 _ => "",
@@ -1241,6 +1241,7 @@ internal static class JoinAdminPanel
 
     private static void BuildPickRecommend(IUiPanel panel, float width)
     {
+        panel.CellRow(JoinAdminRowLayout.PickBody(PickBodyText(_page), width));
         var search = panel.CellRow(new CellRowSpec(RowSearch, new List<CellSpec>
         {
             new CellSpec(CellKind.Input, CellInput) { MaxLength = 64 }.With(text: _search, width: CellWidth.Fill(200f), skin: CellSkin.ValueBox,
@@ -1264,6 +1265,14 @@ internal static class JoinAdminPanel
         FillSlots();
         StatusAndButtons(panel, width, back: true);
     }
+
+    /// <summary>The picker's subtitle (<see cref="JoinAdminRowLayout.PickBody"/>).</summary>
+    internal static string PickBodyText(Page page) => page switch
+    {
+        Page.PickRequire => ClientPolicyText.PickRequireBody,
+        Page.PickApprove => ClientPolicyText.PickApproveBody,
+        _ => JoinAdminText.PickRecommendBody,
+    };
 
     private static string PickCaption() => _page switch
     {

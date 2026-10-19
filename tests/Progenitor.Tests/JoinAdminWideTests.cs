@@ -102,6 +102,52 @@ public sealed class JoinAdminWideTests
     }
 
     /// <summary>
+    /// Live 2026-10-19 (2026.10.133): the Recommend picker's subtitle read "Client mods only: installed on this PC, or found
+    /// on Thund…". As the dialog body it got only the frame height the search field and ten pick rows left (one line). It
+    /// is now a wrapping content row as tall as its estimated lines, so the whole sentence shows.
+    /// </summary>
+    [Theory]
+    [InlineData("recommend")]
+    [InlineData("require")]
+    [InlineData("approve")]
+    public void The_pickers_subtitle_wraps_whole_on_its_own_row(string which)
+    {
+        string text = which switch
+        {
+            "require" => ClientPolicyText.PickRequireBody,
+            "approve" => ClientPolicyText.PickApproveBody,
+            _ => JoinAdminText.PickRecommendBody,
+        };
+        Assert.EndsWith(".", text, StringComparison.Ordinal);
+        foreach (float width in new[] { MinContent, DialogLayout.ContentRowWidth(DialogLayout.WideFrameWidth) })
+        {
+            var spec = JoinAdminRowLayout.PickBody(text, width);
+            var cell = Assert.Single(spec.Cells);
+            Assert.Equal(text, cell.Text);
+            Assert.Equal(CellWrap.Wrap, cell.Wrap);
+            int lines = MenuPanelLayout.WrappedLines(text, width - 8f, JoinAdminRowLayout.PickBodyFontSize, 12);
+            Assert.True(spec.ExplicitHeight >= lines * JoinAdminRowLayout.PickBodyFontSize * 1.3f + 8f - 0.01f);
+        }
+
+        // The longest one needs two lines even in the wide frame, and gets them.
+        if (which != "approve")
+        {
+            var wide = JoinAdminRowLayout.PickBody(text, DialogLayout.ContentRowWidth(DialogLayout.WideFrameWidth));
+            Assert.True(wide.ExplicitHeight >= 2 * JoinAdminRowLayout.PickBodyFontSize * 1.3f);
+        }
+
+        // The estimate's glyph is wider than the drawn one (live: 58 characters filled the 460 px body at 17 px, 0.47 em).
+        Assert.True(MenuPanelLayout.AverageGlyphEm > 460f / 58f / 17f);
+
+        string panel = Source("Networking", "JoinAdminPanel.cs");
+        Assert.DoesNotContain("Page.PickRecommend => JoinAdminText.PickRecommendBody,", panel);
+        Assert.Contains("panel.CellRow(JoinAdminRowLayout.PickBody(PickBodyText(_page), width));", panel);
+        Assert.Contains("Page.PickRequire => ClientPolicyText.PickRequireBody,", panel);
+        Assert.Contains("Page.PickApprove => ClientPolicyText.PickApproveBody,", panel);
+        Assert.Contains("_ => JoinAdminText.PickRecommendBody,", panel);
+    }
+
+    /// <summary>
     /// TEXTEXPAND2 ("the ... does nothing"): every settings host has the dialog source the expanded editor opens with,
     /// because the Server tab and Preferences build through <c>EnsureBindings</c>, which now provides it.
     /// </summary>
