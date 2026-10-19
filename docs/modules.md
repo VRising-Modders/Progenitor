@@ -2424,6 +2424,7 @@ the Before hooks next runs is dropped (`lostAfter`), so a skipped update is neve
 - **Which inventories.** The ones the event names. A station named by its owner is observed in all
   its instances; one named by an inventory entity, just that one. The player's own character and
   bag are recognized by their network ids and never reported, so a bag-only sort raises nothing.
+  A drop from the player's own bag to the ground is [`OnGroundDrop`](#bag-drops-to-the-ground)'s.
 - **Attribution.** The game handles every request of one system update in one call, so the diff is
   per update. Requests naming different containers are attributed exactly. Requests naming the
   same container are one record per item with `Requests` above 1 (two fast clicks in one frame);
@@ -2642,6 +2643,243 @@ of the save made for this test.
     the total) may have put units back into a bar slot, so the bar can gain units then, and those
     units count in `left=`. Without `keepbar` the bar stack moves too.
 11. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
+
+## Drops
+
+`ctx.Drops` (`Progenitor.Drops`) reads the item piles on the ground and takes from them into an
+inventory; `ctx.Inventory.OnGroundDrop` and `ctx.Inventory.OnDropAll` report what players drop
+from their own bag. Pile calls and both events are server only and main-thread only; on the client
+they throw `InvalidOperationException`. `ctx.Drops.TryPrefabs` works on both sides.
+**Experimental**: source-checked, built and game-free tested (`DropTests`), **not live-verified**
+(procedure below). API rows: [api.md, Drops](api.md#drops).
+
+```csharp
+// An autoloot pass: take every stackable pile within 4 m of the player into their bag.
+var bag = ctx.Inventory.Of(character);
+foreach (var pile in ctx.Drops.Near(x, y, z, radius: 4f))
+{
+    if (!pile.CanTake) continue;                    // gear, jewels and unknown items stay on the ground
+    GroundTakeResult r = ctx.Drops.TakeInto(pile.Id, bag, pile.Amount);
+    if (r.Outcome == InventoryOutcome.Inconsistent) break;  // the bag could not be read back: stop
+}
+
+// Who dropped what from their own bag, and where they stood.
+ctx.Inventory.OnGroundDrop(d => ctx.Log.LogInfo($"{d.User} dropped {d.Item} x{d.Amount} at {d.X:0.0},{d.Z:0.0}"));
+
+// A whole-inventory drop and the container it left.
+ctx.Inventory.OnDropAll(d =>
+{
+    if (d.HasContainer) ctx.Log.LogInfo($"{d.User} dropped {d.Items.Count} item types into {d.Container}");
+});
+```
+
+Source-checked; the same calls are compiled in the Sample's `.drops` verbs (below).
+
+### Piles on the ground
+
+A pile is an entity with the game's `ItemPickup` component (both sides' metadata):
+`Radius` (0x0), `ItemId` (0x4, a `PrefabGUID`), `ItemAmount` (0x8) and the generated name
+(0xC). `ItemPickup` does not say who dropped the pile.
+
+| Member | Contract |
+|---|---|
+| `Near(x, y, z, radius, max = 64)` → `IReadOnlyList<GroundPile>` | Every pile within `radius` metres (3-D distance) of the point, nearest first; ties by entity, so the order is stable. `radius` is clamped to 0–500 m, `max` to 1–4096. |
+| `NearInto(x, y, z, radius, List<GroundPile> into, max = 64)` → `int` | The same into a caller list (cleared first); returns the count. |
+| `TryGet(GroundPileId, out GroundPile, out string reason)` | The pile as it is now. False with the reason when the handle is stale, the pile is gone, being removed or empty. |
+| `TakeInto(GroundPileId, InventoryRef into, int amount)` → `GroundTakeResult` | Up to `amount` units into the inventory, the pile shrunk or removed (below). |
+
+- **Which piles.** Asleep piles (`Disabled`, an area nobody is near) are listed with
+  `GroundPile.Disabled`. Piles with `DestroyTag`, an item of 0 or an amount of 0 are left out.
+  The position is `Translation`, else `LocalToWorld`; a pile with neither is skipped.
+- **`GroundPile`**: `Id`, `Item`, `Amount`, `X`/`Y`/`Z`, `Distance` and `DistanceSquared` from the
+  asked point, `Disabled`, `MaxStack` (the stack size in the server item table, 0 when the table
+  does not know the item), `HasItemEntity` with `ItemEntity` (`ItemEntityIndex`/`Version`),
+  `IsStackable` (stack size above 1), `IsUnique` (`HasItemEntity` or not stackable) and `CanTake`
+  (not unique and units left).
+- **The pile's own item entity.** When a pile carries the game's throw component
+  `DropItemThrowSystem.DropItem` (`ItemEntity` at 0x0, `ItemType` 0x8, `Amount` 0xC) and its
+  `ItemEntity` names a live entity, the pile reports it. The game's drop handlers pass a dropped
+  slot's item entity on to the drop (`DropItemAroundPosition.ItemEntity`). That the pile keeps it
+  in this component is **inferred** from the metadata, not observed; a pile of gear without it is
+  still refused, because gear does not stack.
+- **`GroundPileId`** is the entity's index and version plus the world-load epoch it was listed in
+  (`IsStaleIn(epoch)`, `Key` for a dictionary within one epoch). A handle from before a save reload
+  is refused as stale. Never persist one.
+- **Cost.** One cached query over `ItemPickup` (asleep piles included), one entity array per call,
+  then one position read per pile. Only piles inside the radius get the further reads (the item
+  fields, `DestroyTag`, `Disabled`, the throw component and a cached item-table lookup). A server
+  with thousands of piles pays the position reads on every call: poll at a few hertz, not every
+  frame.
+
+### Taking from a pile
+
+`TakeInto` runs in one main-thread call, so no game system and no other mod call runs between its
+steps:
+
+1. **Refusals** (nothing touched, `Outcome = Refused`), in this order: `GroundPileId.None`, no
+   target inventory, `amount` below 1, a stale handle, a pile that is gone, being removed
+   (`DestroyTag`) or empty, a pile with its own item entity, an item the server item table does not
+   know, an item that does not stack (stack size 1).
+2. **The add.** `ctx.Inventory.TryAdd(into, item, min(amount, pile))`: the game's server add,
+   read back. A refused add is `Refused` with its reason; `Inconsistent` (the inventory could not be
+   read back) leaves the pile untouched. The caller should then leave that pile alone, because the
+   units may already be in the inventory.
+3. **The pile.** It shrinks by exactly what the inventory read back as added, never by what was
+   asked. A pile with units left gets its new `ItemAmount`, written alone through the component
+   overlay (`GetComponentDataRawRW` at offset 0x8). An emptied pile gets `ItemAmount` 0 first, so
+   a second take in the same frame finds it empty, then the replicated removal
+   (`DestroyUtility.Destroy` alone, the [unit removal path](#units); live 2026-09-24 it removed a
+   loot drop on the server and the client within 2 s).
+4. **The result.** `Outcome` (`Complete`, `Partial`, `Nothing` when nothing fit), `Done`,
+   `PileBefore`, `PileAfter`, `PileRemoved`, `Reason`, `Add` (the inventory result).
+
+Proven and assumed:
+
+- The removal path and the add are the framework's existing paths. That clients see a lower
+  `ItemAmount` written this way (the field is a synced int on the game's side) is **assumed**:
+  the Autoloot mod writes the amount the same way, and this framework has not observed it live.
+- **Unique items are refused.** No proven path moves a pile's own item entity into an inventory
+  (the game's own pickup, `ItemPickupSystem`, runs from an interaction spell and was not traced).
+  Re-creating the item with `TryAdd` would drop its rolled stats, so `TakeInto` refuses rather than
+  copy it.
+
+### Bag drops to the ground
+
+`ctx.Inventory.OnGroundDrop(handler)` raises one `PlayerGroundDrop` per item each time a player
+drops something from their **own bag** onto the ground. Container-window drops stay with
+[`OnPlayerMove`](#player-moves) (`Kind = Drop`, `Counterpart = Ground`), which never reports the
+player's own bag; a separate event keeps that contract unchanged for existing subscribers.
+
+| Field | What |
+|---|---|
+| `User`, `Character` (`UserIndex`/`UserVersion`, `CharacterIndex`/`CharacterVersion`) | The sender, from the event's `FromCharacter`. Valid in the world load of the drop only. |
+| `Source` | `DropKey` (`DropItemAtSlotEvent`, the inventory menu's drop key) or `DragOut` (`DropInventoryItemEvent` naming the player's own inventory, a slot dragged onto the ground). |
+| `Item`, `Amount` | Item hash and the units that left the bag (always above 0). |
+| `CountBefore`, `CountAfter` | The bag's total of the item around the game's update. |
+| `WithItemEntity` | Some units left in a slot with its own item entity (gear, a jewel). |
+| `HasPosition`, `X`, `Y`, `Z` | The character's `Translation` right after the update. |
+| `Requests` | Drop requests of this player that update covered (two quick drops are one record per item with 2). |
+| `Sequence`, `UtcTime` | Grows by one per raised drop; when the server handled it. |
+
+**How it works.** `DropItemSystem` handles `DropItemAtSlotEvent` (and `DropEquippedItemEvent` and
+`DropEntireInventoryEvent`); `DropInventoryItemSystem` handles `DropInventoryItemEvent`. Both handle
+their events on the main thread inside their own update. A `SystemHooks.Before` on each (priority
+-10000, after every other plugin's Before) reads the requests and the sender's bag rows (instance 0,
+read raw and read-only); the `SystemHooks.After` (priority +10000) reads the rows again and the
+character's position. The difference is the drop. Nothing is written, patched or skipped. A
+`DropInventoryItemEvent` that names a container, or another player, is not this event's.
+
+Game facts (the game's server handlers, source-checked; nothing here was observed live):
+
+- **No drop request carries an amount.** Every drop is the whole slot; a partial drop needs a split
+  into an empty slot first.
+- **The drop key has no interaction check**: it names a slot of the sender's own inventory. A
+  drag-out requires that the player is interacting with the named inventory and may change it.
+- Both handlers refuse silently while the character is casting or under certain travel, ghost or
+  drop-impairing buffs, skip items with one item-data flag set (which items carry it is not
+  traced), and refuse action-bar slots (0–7) in PvP combat. A refused drop changes no slot and
+  raises nothing.
+- A dropped slot's item entity is unequipped first, the slot cleared, and a `DropItemAroundPosition`
+  entity created at the character's `Translation`, thrown along the character's facing. The pile
+  itself appears afterwards (`DropItemThrowSystem`), so the event carries the character's position,
+  not the pile's.
+
+Limits, by design:
+
+1. At most 64 requests and 32 dropping characters per system update; the rest are counted and not
+   observed. At most 1024 drops wait for delivery; past that the oldest are dropped (gaps in
+   `Sequence`).
+2. `DropEquippedItemEvent` (dragging a worn item onto the ground) does not pass through the bag and
+   is not reported.
+3. When the same update also carries that player's whole-inventory drop, the whole loss is
+   reported by `OnDropAll` (marked `Ambiguous`), not here.
+4. Delivery is from the next frame tick, never inside the game's update; a throwing handler is
+   logged and the others still run. Tracked: unload removes the subscription.
+
+**Cost.** The hooks exist only while something listens to either event, and fire only on frames
+where their system runs; such a run with no event costs one or two cached-query emptiness checks.
+Per handled update: one entity array per event kind, a typed read and one raw read per request, and
+two raw bag reads and one position read per dropping character.
+
+### Whole-inventory drops
+
+`ctx.Inventory.OnDropAll(handler)` raises one `PlayerDropAll` each time a player drops their whole
+inventory: `DropEntireInventoryEvent`, handled by `DropItemSystem`'s `DropEntireInventoryJob`
+(`DropInventorySystem` is the game's destroy-time drop table system, not this one). The system
+fills a container from the prefab `RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID`.
+
+| Field | What |
+|---|---|
+| `User`, `Character` | The sender, from `FromCharacter`. |
+| `Setting` (`DropAllSetting`) | The request's `DropEntireInventorySetting`: `All` (0), `ExceptAnyEquipped` (1), `ExceptEquippedInActionBar` (2), `ExceptAnyWeaponInActionBar` (3), `ExceptAnyWeaponInActionBarOrAnyEquipped` (4), `ExceptAnythingInActionBar` (5), `ExceptAnythingInActionBarOrEquipped` (6); `Unknown` (-1) for any other value. The values are the game's (layout constants). |
+| `Items` (`DroppedStack`: `Item`, `Amount`, `WithItemEntity`) | What left the bag, per item type. Worn equipment the setting let go was never in the bag and is not listed. |
+| `HasPosition`, `X`, `Y`, `Z` | The character's `Translation` right after the update. |
+| `Container`, `ContainerInventory`, `ContainerIndex`/`ContainerVersion`, `Epoch`, `HasContainer` | The dropped-inventory container, when found. |
+| `ContentsMatch` | The container held, per item type, at least what left the bag when it was found. |
+| `Ambiguous` | The same update also carried a drop-key request of this player, or a second new container was within 0.5 m of the chosen distance. |
+| `Reason` | Why there is no container, or a note on the match. |
+
+**How the container is found.** The Before of an update with a `DropEntireInventoryEvent` notes the
+containers of that prefab that already exist (every live entity with `InventoryBuffer` or
+`InventoryInstanceElement` and that `PrefabGUID`). From the next frame tick, every 5 frames for up to
+60 frames, a container of that prefab that was not there before and lies within 8 m of where the
+player stood is that drop's. Requests are paired with containers nearest first, each container once.
+After 60 frames the event is raised anyway with `HasContainer` false and the reason.
+
+Proven and assumed: the handler and the prefab field are in the metadata (source-checked). That the
+container appears within 60 frames and within 8 m of the player, and that it carries one of the two
+inventory components, is **assumed**; a bag that did not change (a refused request) raises nothing.
+**Cost**: the container scan reads the prefab of every inventory-bearing entity, once in the Before
+and every 5 frames while a drop waits. It runs only on frames after a whole-inventory drop.
+
+### Drop prefabs
+
+`ctx.Drops.TryPrefabs(out DropPrefabs prefabs, out string reason)` reads the singleton
+`RootPrefabCollection` raw at these offsets, which the server and the client metadata agree on, and
+caches the result per world and world epoch. False with a reason until the table exists and the
+four player container fields are non-zero (retried at most once a second).
+
+| `DropPrefabs` | Field | Offset |
+|---|---|---|
+| `DropItem` | `DropItemPrefabGUID` (the item pile) | 0x48 |
+| `DeathContainer` | `DeathContainerPrefabGUID` (the game's generic death container) | 0x54 |
+| `PlayerDeathContainerAnyone` | `PlayerDeathContainerAnyonePrefabGUID` | 0x58 |
+| `PlayerDeathContainerClanMembers` | `PlayerDeathContainerClanMembersPrefabGUID` | 0x5C |
+| `PlayerDeathContainerOnlySelf` | `PlayerDeathContainerOnlySelfPrefabGUID` | 0x60 |
+| `PlayerInventoryDropContainer` | `PlayerInventoryDropContainerPrefabGUID` | 0x68 |
+
+`AccessOf(prefab)` → `DeathContainerAccess` (`None`, `OnlySelf`, `ClanMembers`, `Anyone`) names a
+player death container by its prefab; `IsPlayerDeathContainer`, `IsPlayerInventoryDrop` and
+`IsComplete` test the same table. The field names say who may open each death container; which one
+the game spawns for a death is not traced here.
+
+### Sample commands
+
+`samples/Progenitor.Sample/SampleDrops.cs`, admin only, through `.drops`: `near [radius]` (piles
+within the radius, default 10 m, with their handles and whether `TakeInto` takes them),
+`take [amount]` (the nearest takeable pile within 10 m into your bag), `log` (toggle a
+`Sample drops: ground drop …` / `drop all …` line per bag drop), `prefabs`. Built; not run in the
+game.
+
+### Live acceptance (procedure, not run)
+
+Isolated test server with Core, the Dev bridge and `Progenitor.Sample`; an admin character with
+Iron Ore, a weapon and a few other stacks in the bag.
+
+1. `.drops prefabs`: six non-zero GUIDs.
+2. `.drops log`. Drop an Iron Ore stack with the inventory menu's drop key. Expect one
+   `ground drop … DropKey item=<ore> x<stack> bag=<n>->0 at <your position>`. Drag another stack
+   onto the ground: `DragOut`. Drop the weapon: the line ends with `item-entity`.
+3. `.drops near 5`: the two ore piles (and the weapon, `own item entity: not taken` or
+   `does not stack: not taken`).
+4. `.drops take 10`: `Partial` or `Complete … pile <n>-><n-10>`; the pile in the world shows the
+   lower amount on a second client. `.drops take`: `Complete … removed`; the pile disappears on
+   both clients within 2 s.
+5. Drop all (the game's drop-all). Expect `drop all … container=<i:v> match items=…`, and the
+   container on the ground holds what left the bag.
+6. While casting, or in PvP combat with an action-bar slot: drop; nothing is logged.
+7. `.drops log` again to stop. Clean up: remove the Sample from the test server's reload folder
+   and confirm the clean unload.
 
 ## Player state
 

@@ -51,6 +51,7 @@ These commands are the author-facing examples for facades that previously had no
 |---|---|---|
 | `.items grant` / `.items equip` | `ctx.Items` | `SampleItems.cs` |
 | `.stations list` / `recipes` / `toggle` / `status` | `ctx.Stations` | `SampleStations.cs` |
+| `.drops near` / `take` / `log` / `prefabs` | `ctx.Drops`, `ctx.Inventory.OnGroundDrop` / `OnDropAll` | `SampleDrops.cs` |
 | `.protect on\|alive\|off` | `ctx.Debug` | `SampleDebugProtect.cs` |
 | `.players` | `ctx.Players` | `SamplePlayerDirectory.cs` |
 | `.shot` (`preview [hold]` / `hold` / `end` pair the server `Observe` lease with the client `Preview`) | `ctx.Camera` | `SampleCamera.cs` |

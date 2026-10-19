@@ -343,6 +343,7 @@ public sealed class Plugin : ProgenitorPlugin<SampleContext>
         SampleEcs.Detach();
         SamplePlayers.Detach();
         SampleInventory.Detach();
+        SampleDrops.Detach();
         SampleServants.Detach();
         SampleLogPanel.Detach();
         SampleEpoch.Reset();

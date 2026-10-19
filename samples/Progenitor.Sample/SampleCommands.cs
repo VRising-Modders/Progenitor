@@ -553,6 +553,25 @@ internal static class SampleCommands
         }
     }
 
+    // adminOnly: take moves items off the ground into the caller's bag.
+    [Command("drops", adminOnly: true, usage: ".drops near [radius] | take [amount] | log | prefabs", description: "Admin only. ctx.Drops: list item piles near you, take one into your bag, log bag drops (OnGroundDrop, OnDropAll), show the drop prefabs.")]
+    public static void Drops(ICommandContext ctx, string verb = "", string arg = "")
+    {
+        try
+        {
+#if !PROGENITOR_TESTS
+            SampleDrops.Handle(ctx, verb, arg);
+#else
+            ctx.Reply(verb + arg);
+#endif
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Sample .drops threw: " + e);
+            ctx.Reply("Sample drops failed. See the server log.");
+        }
+    }
+
     // adminOnly: toggle changes a recipe switch on any station, including another player's.
     [Command("stations", adminOnly: true, usage: ".stations list [radius] | recipes [id] | toggle <recipeNameOrGuid> on|off [id] | status [id]", description: "Admin only. Read castle station recipes and progress, and switch refinement recipes, through ctx.Stations.")]
     public static void Stations(ICommandContext ctx, string verb = "", string a = "", string b = "", string c = "")

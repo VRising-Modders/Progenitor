@@ -43,6 +43,13 @@ internal static class InventoryRuntime
 
     internal static bool Installed => _engine != null;
 
+    /// <summary>Item facts from the server item table (the stack size the game's own add applies); false when unknown or not installed.</summary>
+    internal static bool TryItemInfo(int item, out InventoryItemInfo info)
+    {
+        info = default;
+        return _backend != null && _backend.TryItemInfo(item, out info);
+    }
+
     internal static InventoryEngine Engine =>
         _engine ?? throw new InvalidOperationException("ctx.Inventory runs on the server side only; this process has no inventory engine.");
 
@@ -110,6 +117,7 @@ internal static class InventoryRuntime
         _book = new ContainerIdRegistry();
         _netIds = new NetworkIdResolver(new ServerNetworkIdSource());
         PlayerMoveRuntime.Install();
+        Progenitor.Drops.DropRuntime.Install();
         _loaded = false;
         _store = ModSave.Store(StoreId);
         _ready = _store.WhenReady(store =>
@@ -139,6 +147,8 @@ internal static class InventoryRuntime
         catch (Exception e) { Plugin.Logger?.LogWarning("Inventory: saving container ids on unload threw: " + e.Message); }
         try { PlayerMoveRuntime.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Inventory: player-move observer uninstall threw: " + e.Message); }
+        try { Progenitor.Drops.DropRuntime.Uninstall(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Drops: uninstall threw: " + e.Message); }
         _hub?.Clear();
         if (_stamps != null)
         {
@@ -174,6 +184,7 @@ internal static class InventoryRuntime
             _stamps?.Tick();
             _hub?.Tick(now);
             PlayerMoveRuntime.Tick();
+            Progenitor.Drops.DropRuntime.Tick();
             if (_book is { Dirty: true }) Flush();
             if (now < _nextUpkeep) return;
             _nextUpkeep = now + UpkeepMs;

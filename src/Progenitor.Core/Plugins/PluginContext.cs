@@ -441,6 +441,14 @@ public class PluginContext
         get { EnsureAttached(); return _inventory ??= new Progenitor.Inventory.PluginInventory(this); }
     }
 
+    private Progenitor.Drops.PluginDrops? _drops;
+
+    /// <summary>Server item piles on the ground: list them near a point, take from one into an inventory; the drop prefabs (both sides). Pile calls throw on the client.</summary>
+    public Progenitor.Drops.PluginDrops Drops
+    {
+        get { EnsureAttached(); return _drops ??= new Progenitor.Drops.PluginDrops(this); }
+    }
+
     private Progenitor.Materials.PluginMaterialSource? _materialSource;
 
     /// <summary>
