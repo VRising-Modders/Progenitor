@@ -1,0 +1,62 @@
+[center][img]https://raw.githubusercontent.com/VRising-Modders/Progenitor/main/packaging/listing/00-primary.webp[/img][/center]
+
+[size=4][b]A mod manager and modding framework for V Rising.[/b][/size]
+
+Install, update and turn off mods from an in-game [b]Mods[/b] menu, keep every mod's settings and keys in one place, and join modded servers without hunting for the right versions. Mod authors get a framework with hot reload: rebuild a mod and the running game picks it up.
+
+Progenitor needs only [url=https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/]BepInExPack V Rising[/url]. It works in the game, on dedicated servers, and on private games you host from the game.
+
+[center][img]https://raw.githubusercontent.com/VRising-Modders/Progenitor/main/packaging/listing/01-three-in-one.webp[/img][/center]
+
+[size=4][b]For players[/b][/size]
+[list]
+[*][b]The Mods menu.[/b] Open [b]Mods[/b] on the title screen or in the Escape menu. Every installed mod is listed with its status, settings and help page.
+[*][b]Install mods from inside the game.[/b] The [b]Install Mods[/b] tab lists the V Rising mods on Thunderstore. Click [b]Install[/b]; some mods load at once, others after a restart.
+[*][b]Join modded servers.[/b] When a server needs mods you don't have, Progenitor offers to install the exact versions it runs.
+[*][b]Every mod's settings and keys in one place,[/b] with a conflict check when two mods want the same key.
+[*][b]Built-in extras:[/b] a better chat box (tabs, history, links, mentions), a build menu with search, a [b]Recent[/b] list and [b]Copy building[/b] (middle-click a building to build another), [b]Dye all[/b], photo mode, and back and forward through menus.
+[*][b]Collect logs[/b] in one click when something goes wrong. Personal details are removed before the zip is written.
+[/list]
+
+[size=4][b]For server admins[/b][/size]
+[list]
+[*][b]The Server tab:[/b] change server-wide mod settings in the game, choose which mods players need, and set join rules.
+[*][b]Install and update server mods[/b] from the same menu, with the server's mods shown next to yours.
+[*][b]Backups and restores, scheduled wipes and chat moderation[/b] (word filter, Discord relay).
+[*][b]Save safety:[/b] a world saved with a content mod still loads after that mod is removed.
+[/list]
+
+[size=4][b]For mod authors[/b][/size]
+[list]
+[*][b]Hot reload.[/b] Rebuild your mod and it swaps into the running game, with a player connected. No restart.
+[*][b]One context, automatic cleanup.[/b] Register items, buffs, commands, events, settings, keybinds, windows and network messages through your plugin's context; unloading reverses all of it.
+[*][b]The same code[/b] on dedicated servers and on games hosted from the client.
+[*][b]AI-friendly.[/b] An [url=https://github.com/VRising-Modders/Progenitor/blob/main/docs/mcp.md]MCP server[/url] connects a coding assistant to your game client and to your own test server, so it can build and deploy your mod, hot reload it, run commands, read the logs and inspect the running game on both sides. A starter prompt, an llms.txt index and knowledge notes help it work with the framework. The MCP server and its development bridge come from the repository; they are not in this download and never belong on a public server.
+[/list]
+Start with the [url=https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html]Help Guide's mod developer chapters[/url], the [url=https://github.com/VRising-Modders/Progenitor/blob/main/docs/tutorial.md]tutorial[/url], the [b]dotnet new progenitor-mod[/b] template and [b]PROGENITOR_GUIDE.md[/b] in the repository.
+
+[center][img]https://raw.githubusercontent.com/VRising-Modders/Progenitor/main/packaging/listing/06-hot-reload.webp[/img][/center]
+
+[size=4][b]Install[/b][/size]
+[list=1]
+[*]Install [url=https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/]BepInExPack V Rising[/url] into the folder that holds [b]VRising.exe[/b] (for a dedicated server, the folder that holds [b]VRisingServer.exe[/b]).
+[*]Quit the game (or stop the server).
+[*]Download the main file and extract it into the same folder. It holds one [b]BepInEx[/b] folder; let it replace files when you update.
+[*]Start the game. [b]Mods[/b] appears on the title screen.
+[/list]
+The same file works in the game and on a dedicated server. Progenitor adds [b]BepInEx/plugins/Progenitor.Bootstrap.dll[/b], [b]BepInEx/patchers/Progenitor.Preloader.dll[/b] and the [b]BepInEx/progenitor-core[/b] folder. To remove it, use [b]Remove Progenitor from this PC[/b] in the Mods menu, or delete those three items while the game is closed.
+
+[b]Internet use.[/b] Installing mods is Progenitor's main job: the Install Mods tab, joining modded servers and updates read Thunderstore's public V Rising mod list and download the mods you choose from Thunderstore. [b]Use Thunderstore[/b] in [b]Mods[/b] → [b]Preferences[/b] turns the Thunderstore list off.
+
+[size=4][b]Help[/b][/size]
+[list]
+[*]The [b]Help Guide[/b] opens from the Mods menu. It covers players, server admins and mod authors. You can also [url=https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html]read it online[/url] before you install.
+[*][b]Video guides[/b] for players, server admins and mod authors are on [url=https://www.youtube.com/@ProgenitorMods]Progenitor's YouTube channel[/url].
+[*]Something wrong? [b]Mods[/b] → [b]Progenitor[/b] → [b]Get help[/b] → [b]Collect logs[/b], then post the zip in the [url=https://discord.com/channels/978094827830915092/1112888087836631090]Progenitor channel[/url] on the V Rising Mod Community Discord ([url=https://vrisingmods.com/discord]join it[/url] first) or [url=https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml]open a bug report[/url].
+[/list]
+
+[size=4][b]About[/b][/size]
+Progenitor is in active development. Its API covers much of what a mod needs, not yet everything; missing pieces are welcome as feedback or as pull requests. Original code under the LGPL-2.1 license; its only dependency is BepInEx. Progenitor was developed with AI coding assistants, and its artwork was made with AI image tools.
+
+Source, documentation and issues: [url=https://github.com/VRising-Modders/Progenitor]github.com/VRising-Modders/Progenitor[/url]
+Follow Progenitor on [url=https://www.youtube.com/@ProgenitorMods]YouTube[/url] and [url=https://x.com/ProgenitorMods]X[/url].

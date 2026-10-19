@@ -1,9 +1,9 @@
 {
   "name": "Progenitor",
-  "author": "Progenitor",
-  "version_number": "0.1.0",
-  "website_url": "",
-  "description": "V Rising modding framework. One dependency (BepInEx). Original LGPL-2.1-only code. Hot reload, debug bridge, prefab registry with client sync, commands, events, persistence, and a hosted-game launcher.",
+  "author": "VRising_Modders",
+  "version_number": "0.0.0",
+  "website_url": "https://github.com/VRising-Modders/Progenitor",
+  "description": "In-game mod manager and modding framework for V Rising. Install, update and set up mods from a Mods menu; join modded servers; hot reload for mod authors.",
   "dependencies": [
     "BepInEx-BepInExPack_V_Rising-1.733.2"
   ]

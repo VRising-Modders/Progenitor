@@ -4,7 +4,7 @@ An AI-first modding framework for [V Rising](https://playvrising.com/), built as
 
 > **Status: pre-release and experimental.** There is no published release yet. APIs can change between commits, and only the features marked *verified live* in [`docs/api.md`](docs/api.md) have been observed working in the game. Read the [roadmap](docs/roadmap.md) for what is done and what is planned.
 
-**New here? Open [`docs/guide/progenitor-guide.html`](docs/guide/progenitor-guide.html)** in a browser: a short, interactive Help Guide for players, server admins and mod developers, with a glossary. It works offline from disk. Mods can ship a help page in the same look from [`templates/help`](templates/help/README.md).
+**New here? [Read the Help Guide online](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html)** (or open [`docs/guide/progenitor-guide.html`](docs/guide/progenitor-guide.html) in a browser): a short, interactive Help Guide for players, server admins and mod developers, with a glossary. It works offline from disk. Video guides are on [Progenitor's YouTube channel](https://www.youtube.com/@ProgenitorMods). Mods can ship a help page in the same look from [`templates/help`](templates/help/README.md).
 
 ## What it does
 
@@ -169,6 +169,8 @@ To test a plugin on both sides, host a private game from the client, or stage a 
 ## Contributing and support
 
 Contributions are welcome: read [CONTRIBUTING.md](CONTRIBUTING.md). AI coding agents read [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md). Report security problems privately as described in [SECURITY.md](SECURITY.md). Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
+Follow Progenitor on [YouTube](https://www.youtube.com/@ProgenitorMods) and [X](https://x.com/ProgenitorMods).
 
 ## License
 

@@ -1,16 +1,29 @@
 # Changelog
 
-## 0.1.0
+## First public release
 
-First packaged release. Milestone 1 of the framework, verified in-game with `samples/Progenitor.Sample`.
+Progenitor's first package on Thunderstore.
 
-- Ships `Progenitor.Bootstrap.dll` in `BepInEx/plugins` (chainloader guid `progenitor`) and `Progenitor.dll` in `BepInEx/progenitor-core` (loaded by Bootstrap; not a chainloader plugin).
-- Plugin base (`ProgenitorPlugin<TContext>`, `[ProgenitorSide]`) with unload reversing every registration on the context.
-- Hot reload from `BepInEx/progenitor-reload` (`Progenitor.Bootstrap.dll` stays in `BepInEx/plugins`; `Progenitor.dll` stays in `BepInEx/progenitor-core`; both are restart-only until Core is collectible).
-- Event bus: `WorldReady`, `PlayerConnected`, `PlayerDisconnected`, cancellable `ChatMessage`.
-- ECS system hooks (managed and Burst) and named virtual systems (`ctx.Systems.Add`).
-- Entity toolkit, chat commands, custom networking, version handshake with kick.
-- Prefab registry with client sync: cloned items (icon, localized name and description), `ItemKeyLookup` alignment, soft unapply and tombstones.
-- Per-mod JSON persistence next to the world save; config file-watch; `localization/en.json`.
-- Hosted-game launcher implemented and fenced to the game root; **not** yet verified in a live private-game launch.
-- Debug bridge (`Progenitor.Dev`) is **not** in the public zip; pass `-IncludeDev` to `tools/package.ps1` for a local package that also drops it under `BepInEx/progenitor-reload`.
+**Players**
+
+- The **Mods** menu on the title screen and in the Escape menu: installed mods with their status, settings, keys and help pages.
+- **Install Mods**: install, update and turn off V Rising mods from Thunderstore inside the game. Simple and Advanced views; Advanced shows your mods and the server's side by side.
+- Joining a modded server offers to install the exact mod versions it runs.
+- **Keybinds** for every mod in one tab, with a conflict check.
+- Built-in features: a better chat box, build menu search with a Recent list and Copy building, Dye all, photo mode, back and forward through menus.
+- **Get help** → **Collect logs**, with personal details removed.
+- The Help Guide for players, server admins and mod authors, opened from the Mods menu.
+
+**Server admins**
+
+- The **Server** tab: server-wide mod settings, required and recommended mods, join rules, server listing text and locked settings.
+- Server mod installs and updates, backups and restores, scheduled wipes, chat moderation.
+- Save safety: a world saved with a content mod still loads after that mod is removed.
+
+**Mod authors**
+
+- `ProgenitorPlugin<TContext>` with automatic cleanup of everything registered on the context.
+- Hot reload of mods and of Progenitor's own Core.
+- Items, buffs, recipes, prefab edits, commands, events, settings with server sync, keybinds, windows, networking, persistence and more. Status of each API: [api.md](https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md).
+- An MCP server (from the repository) that connects a coding assistant to the game client and a test server through the development bridge.
+- The `dotnet new progenitor-mod` template and `PROGENITOR_GUIDE.md`.
