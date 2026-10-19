@@ -42,7 +42,9 @@ namespace Progenitor.Dev.Ops;
 /// <c>TeleportAndSetSpawnPosition</c> overload for when that is wanted.
 ///
 /// <b>The fallback is size- and layout-guarded</b> (R30 finding 12). Every poke goes through
-/// <see cref="TeleportArgs.PositionWriteRefusal"/>, which sizes the component exactly the way
+/// <see cref="TeleportArgs.PositionWriteRefusal"/> (since 2026-10-19 the pokes and the guard are
+/// Core's <c>PlayerTeleport.TryWritePosition</c> and <c>PlayerTeleportPolicy.PositionWriteRefusal</c>,
+/// shared with the debug-buff map teleport), which sizes the component exactly the way
 /// the <c>set</c> op does and hands that budget to
 /// <c>RawWriteGuard.EnsureOverlayMemcpy</c>, after checking that the component still carries a
 /// <c>float3</c> at offset 0. A component that fails is <b>refused</b>, not warned about; when
@@ -139,7 +141,7 @@ public static unsafe class TeleportOps
     }
 
     private const string GameMethod = "TeleportUtilityServer.Teleport";
-    private const string WriteMethod = "Translation+LastTranslation+PlayerLastValidPosition";
+    private const string WriteMethod = Progenitor.Players.PlayerTeleport.PositionWriteMethod;
 
     /// <summary>
     /// The game's own helper first; the three-component write only if it is gone. A helper
@@ -173,101 +175,16 @@ public static unsafe class TeleportOps
     /// </summary>
     private static void WritePosition(EntityManager em, Entity character, float3 destination)
     {
+        // The guarded pokes live in Core (PlayerTeleport.TryWritePosition) since the debug-buff map teleport runs the
+        // same fallback; the guard itself is PlayerTeleportPolicy.PositionWriteRefusal.
         var refusals = new List<string>();
-        bool wroteAny = false;
-        wroteAny |= PokeFloat3<Unity.Transforms.Translation>(em, character, destination, "Translation", refusals);
-        wroteAny |= PokeFloat3<LastTranslation>(em, character, destination, "LastTranslation", refusals);
-        wroteAny |= PokeFloat3<PlayerLastValidPosition>(em, character, destination, "PlayerLastValidPosition", refusals);
-
-        if (wroteAny) return;
+        if (Progenitor.Players.PlayerTeleport.TryWritePosition(em, character, destination, refusals)) return;
 
         if (refusals.Count > 0)
             throw new InvalidOperationException(TeleportArgs.FallbackRefusalMessage(Format(character), refusals));
 
         throw new InvalidOperationException(
             $"entity {Format(character)} has none of Translation / LastTranslation / PlayerLastValidPosition, so there is nothing to write");
-    }
-
-    /// <summary>
-    /// One guarded poke. The component's raw ECS <c>TypeSize</c> and its interop
-    /// <c>Marshal.SizeOf</c> are read separately (R31 finding 16) and its <c>float3</c> located
-    /// from the interop struct's <c>FieldOffset</c> attributes, then all of it goes to
-    /// <see cref="TeleportArgs.PositionWriteRefusal"/>, which applies the interop offset/extent
-    /// checks always and <c>RawWriteGuard.EnsureOverlayMemcpy</c> whenever <c>TypeSize</c> is
-    /// something other than the documented 0 "poke fields, do not memcpy" case. False
-    /// with nothing added to <paramref name="refusals"/> means "not on this entity"; false with
-    /// a reason means the write was refused.
-    /// </summary>
-    private static bool PokeFloat3<T>(
-        EntityManager em,
-        Entity entity,
-        float3 value,
-        string label,
-        List<string> refusals)
-    {
-        ComponentType type;
-        try
-        {
-            type = ComponentIndex.Of<T>(ComponentType.AccessMode.ReadWrite);
-            if (!em.HasComponent(entity, type)) return false;
-        }
-        catch (Exception e)
-        {
-            refusals.Add($"{label}: could not resolve the component: {e.Message}");
-            return false;
-        }
-
-        string typeName = typeof(T).FullName ?? typeof(T).Name;
-        int ecsTypeSize, interopSize;
-        int positionOffset = -1, positionFieldSize = 0;
-        try
-        {
-            // Two separate numbers, deliberately (R31 finding 16): the raw ECS TypeSize the
-            // RawWriteGuard rules are written against, and the interop extent the FieldOffset
-            // metadata is read out of. ComponentDump.SizeOf collapses them and would hand the
-            // guard an interop size in place of the TypeSize it checks.
-            ecsTypeSize = TypeManager.GetTypeInfo(type.TypeIndex).TypeSize;
-            interopSize = ComponentDump.SizeOf(typeof(T), ecsTypeSize);
-            foreach (var spec in ComponentDump.FieldsOf(typeof(T), interopSize))
-            {
-                if (spec.Kind != ComponentDump.FieldKind.Float3) continue;
-                positionOffset = spec.Offset;
-                positionFieldSize = spec.Size;
-                break;
-            }
-        }
-        catch (Exception e)
-        {
-            refusals.Add($"{label}: could not size '{typeName}' for the write guard: {e.Message}");
-            return false;
-        }
-
-        var refusal = TeleportArgs.PositionWriteRefusal(label, typeName, ecsTypeSize, interopSize, positionOffset, positionFieldSize);
-        if (refusal != null)
-        {
-            Plugin.Logger?.LogWarning($"teleport: refusing the fallback write on {Format(entity)} — {refusal}");
-            refusals.Add(refusal);
-            return false;
-        }
-
-        try
-        {
-            byte* raw = (byte*)em.GetComponentDataRawRW(entity, type.TypeIndex);
-            if (raw == null)
-            {
-                refusals.Add($"{label}: GetComponentDataRawRW returned null on {Format(entity)}");
-                return false;
-            }
-            *(float*)(raw + TeleportArgs.PositionOffset) = value.x;
-            *(float*)(raw + TeleportArgs.PositionOffset + 4) = value.y;
-            *(float*)(raw + TeleportArgs.PositionOffset + 8) = value.z;
-            return true;
-        }
-        catch (Exception e)
-        {
-            refusals.Add($"{label}: write on {Format(entity)} failed: {e.Message}");
-            return false;
-        }
     }
 
     private static void ResolveDestination(

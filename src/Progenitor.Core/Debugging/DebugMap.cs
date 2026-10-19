@@ -44,9 +44,14 @@ namespace Progenitor.Debugging;
 /// Progenitor's to the same spot.</item>
 /// <item><b>The server</b> re-checks admin (the admin list, <c>adminauth</c> or the private-game host), character and buff, finds the nearest valid spot within
 /// <c>[DebugMap] SearchRadius</c> (100 m) — ground under the point, on the world grid, and with
-/// <c>[DebugMap] WalkableCheck</c> (default off, not live-verified) a standable pathfinding tile — teleports
-/// with <see cref="PlayerTeleport"/>, and answers with a reply event and a chat line: "Teleported" or
-/// "Teleported (moved N m to the nearest valid spot)", or the refusal.</item>
+/// <c>[DebugMap] WalkableCheck</c> (default off, not live-verified) a standable pathfinding tile. Inside castle
+/// territory the ground read walks down the stacked layers to the lowest one, the castle's ground floor, instead of
+/// taking the top one, which can be a roof (<see cref="DebugMapPolicy.PickFloor"/>). It teleports with
+/// <see cref="PlayerTeleport.TeleportVerified"/>: the game's helper, a read-back a second later and, when the
+/// character did not arrive, the Dev bridge op's guarded position write and a second read-back. Then it answers with
+/// a reply event and a chat line: "Teleported" or "Teleported (moved N m to the nearest valid spot)" only when a
+/// read-back found the character there, "Couldn't teleport there: the game refused that spot." when none did, or the
+/// refusal.</item>
 /// </list>
 /// <c>.debug tp &lt;x&gt; &lt;z&gt;</c> runs the same server path from chat (or the Dev bridge's <c>command</c>
 /// op), and <c>.debug status</c> reports both powers. The four messages use Core's reserved event range.
@@ -255,21 +260,31 @@ internal static unsafe class DebugMap
             if (!CustomEvents.TryRead<RequestMsg>(payload, length, out var request) || request.Magic != Magic) return;
             var world = Worlds.Server;
             if (world == null || !world.IsCreated) return;
-            var outcome = Teleport(world, userEntity, request.X, request.Z, "map");
-            var reply = new ReplyMsg
+            Teleport(world, userEntity, request.X, request.Z, "map", outcome =>
             {
-                Magic = Magic,
-                Nonce = request.Nonce,
-                Code = (int)outcome.Result,
-                RequestedX = request.X,
-                RequestedZ = request.Z,
-                X = outcome.Spot.X,
-                Y = outcome.Spot.Y,
-                Z = outcome.Spot.Z,
-                Moved = outcome.Spot.Distance,
-            };
-            CustomEvents.SendToUser(world, userEntity, ReplyEventId, reply);
-            Progenitor.Chat.Chat.SendTo(world, userEntity, Notice(outcome.Result, outcome.Spot.Distance, Radius));
+                try
+                {
+                    if (!world.IsCreated) return;
+                    var reply = new ReplyMsg
+                    {
+                        Magic = Magic,
+                        Nonce = request.Nonce,
+                        Code = (int)outcome.Result,
+                        RequestedX = request.X,
+                        RequestedZ = request.Z,
+                        X = outcome.Spot.X,
+                        Y = outcome.Spot.Y,
+                        Z = outcome.Spot.Z,
+                        Moved = outcome.Spot.Distance,
+                    };
+                    CustomEvents.SendToUser(world, userEntity, ReplyEventId, reply);
+                    Progenitor.Chat.Chat.SendTo(world, userEntity, Notice(outcome.Result, outcome.Spot.Distance, Radius));
+                }
+                catch (Exception e)
+                {
+                    Plugin.Logger?.LogError("Debug map reply threw: " + e);
+                }
+            });
         }
         catch (Exception e)
         {
@@ -281,10 +296,12 @@ internal static unsafe class DebugMap
     internal readonly record struct Outcome(Result Result, Spot Spot, string Method, string Line);
 
     /// <summary>
-    /// The server path both the map request and <c>.debug tp</c> run: re-check, search, teleport, log.
-    /// <paramref name="via"/> is <c>map</c> or <c>command</c>, for the log line.
+    /// The server path both the map request and <c>.debug tp</c> run: re-check, search, teleport, read back, log.
+    /// <paramref name="via"/> is <c>map</c> or <c>command</c>, for the log line. <paramref name="done"/> runs once on
+    /// the main thread: at once for a refusal before the move, else after the read-back
+    /// (<see cref="PlayerTeleport.TeleportVerified"/>, one or two seconds). A Core unload in between drops it.
     /// </summary>
-    internal static Outcome Teleport(World world, Entity userEntity, float x, float z, string via)
+    internal static void Teleport(World world, Entity userEntity, float x, float z, string via, Action<Outcome> done)
     {
         var em = world.EntityManager;
         var none = new Spot(false, x, float.NaN, z, 0f, 0, "");
@@ -297,55 +314,110 @@ internal static unsafe class DebugMap
         }
         catch
         {
-            return Finish(who, Result.NoCharacter, x, z, none, "", via);
+            done(Finish(who, Result.NoCharacter, x, z, none, "", via));
+            return;
         }
 
         var character = user.LocalCharacter._Entity;
         bool hasCharacter = character != Entity.Null && em.Exists(character);
         var refusal = Gate(IsAdmin(user), hasCharacter, hasCharacter && DebugBuff.HoldsBuff(em, character));
-        if (refusal.HasValue) return Finish(who, refusal.Value, x, z, none, "", via);
-        if (!IsUsablePoint(x, z)) return Finish(who, Result.BadPoint, x, z, none, "", via);
-
-        using var ground = GroundProbe.TryOpen(world, out string why);
-        if (ground == null)
-            return Finish(who, Result.NoGround, x, z, none with { Why = why }, "", via);
-
-        bool walk = WalkCheck;
-        bool walkRan = walk;
-        var spot = FindNearestValid(x, z, Radius, Step, (px, pz) =>
+        if (refusal.HasValue)
         {
-            if (!ground.TryGetHeight(px, ProbeHeight, pz, out float h)) return Probe.No("no ground");
-            if (!walkRan) return Probe.Ok(h);
-            if (!ground.TryIsWalkable(world, px, h, pz, out bool standable))
+            done(Finish(who, refusal.Value, x, z, none, "", via));
+            return;
+        }
+
+        if (!IsUsablePoint(x, z))
+        {
+            done(Finish(who, Result.BadPoint, x, z, none, "", via));
+            return;
+        }
+
+        Spot spot;
+        bool walkRan;
+        bool castle = InCastleTerritory(x, z);
+        using (var ground = GroundProbe.TryOpen(world, out string why))
+        {
+            if (ground == null)
             {
-                // The check itself cannot run here (no agent prefab, the call threw): say so once and fall
-                // back to the height test rather than refuse every point.
-                walkRan = false;
-                Log("walkable check unavailable; height only for this request");
-                return Probe.Ok(h);
+                done(Finish(who, Result.NoGround, x, z, none with { Why = why }, "", via));
+                return;
             }
 
-            return standable ? Probe.Ok(h) : Probe.No("not walkable");
+            walkRan = WalkCheck;
+            spot = FindNearestValid(x, z, Radius, Step, (px, pz) =>
+            {
+                // Inside castle territory the top layer can be a roof the game will not teleport onto: walk down to
+                // the ground floor (PickFloor). Outside, the single read from ProbeHeight, as before.
+                var floor = PickFloor(probeY => ground.TryGetHeight(px, probeY, pz, out float h) ? h : null, castle);
+                if (!floor.Found) return Probe.No("no ground");
+                if (!walkRan) return Probe.Ok(floor.Y, floor.Top);
+                if (!ground.TryIsWalkable(world, px, floor.Y, pz, out bool standable))
+                {
+                    // The check itself cannot run here (no agent prefab, the call threw): say so once and fall
+                    // back to the height test rather than refuse every point.
+                    walkRan = false;
+                    Log("walkable check unavailable; height only for this request");
+                    return Probe.Ok(floor.Y, floor.Top);
+                }
+
+                return standable ? Probe.Ok(floor.Y, floor.Top) : Probe.No("not walkable");
+            });
+        }
+
+        if (!spot.Found)
+        {
+            done(Finish(who, Result.NoValidSpot, x, z, spot, "", via, walkRan, castle));
+            return;
+        }
+
+        bool walk = walkRan;
+        PlayerTeleport.TeleportVerified(world, character, new float3(spot.X, spot.Y, spot.Z), DebugTools.Owner, verified =>
+        {
+            string verify = verified.Arrived
+                ? "arrived"
+                : "not-arrived (" + verified.Why + ")" + (verified.After is { } a
+                    ? " at (" + a.x.ToString("0.0", CultureInfo.InvariantCulture) + ", "
+                        + a.y.ToString("0.0", CultureInfo.InvariantCulture) + ", "
+                        + a.z.ToString("0.0", CultureInfo.InvariantCulture) + ")"
+                    : "");
+            var result = !verified.Arrived
+                ? (verified.Method.Length == 0 ? Result.TeleportFailed : Result.Refused)
+                : spot.Distance > 0.5f ? Result.Moved : Result.Teleported;
+            done(Finish(who, result, x, z, spot, verified.Method, via, walk, castle, verify));
         });
-
-        if (!spot.Found) return Finish(who, Result.NoValidSpot, x, z, spot, "", via, walkRan);
-
-        string? method = PlayerTeleport.Teleport(em, character, new float3(spot.X, spot.Y, spot.Z), out string fail);
-        if (method == null)
-            return Finish(who, Result.TeleportFailed, x, z, spot with { Why = fail }, "", via, walkRan);
-
-        var result = spot.Distance > 0.5f ? Result.Moved : Result.Teleported;
-        return Finish(who, result, x, z, spot, method, via, walkRan);
     }
 
-    private static Outcome Finish(string who, Result result, float x, float z, Spot spot, string method, string via, bool walkCheck = false)
+    /// <summary>
+    /// Whether (<paramref name="x"/>, <paramref name="z"/>) lies in a castle's territory (X/Z only,
+    /// <see cref="Progenitor.Castles.Castles.At(Progenitor.Castles.CastleVec3)"/>). False when the castle module cannot
+    /// answer, which keeps the single top-layer read.
+    /// </summary>
+    private static bool InCastleTerritory(float x, float z)
     {
-        string line = Readback(who, result, x, z, spot, method, walkCheck) + " via=" + via;
+        try
+        {
+            return Progenitor.Castles.Castles.At(new Progenitor.Castles.CastleVec3(x, 0f, z)).Enabled;
+        }
+        catch (Exception e)
+        {
+            Log("castle territory lookup failed (" + e.Message + "); top floor only");
+            return false;
+        }
+    }
+
+    private static Outcome Finish(string who, Result result, float x, float z, Spot spot, string method, string via,
+        bool walkCheck = false, bool castle = false, string verify = "")
+    {
+        string line = Readback(who, result, x, z, spot, method, walkCheck, castle, verify) + " via=" + via;
         Log(line);
         return new Outcome(result, spot, method, line);
     }
 
-    /// <summary><c>.debug tp &lt;x&gt; &lt;z&gt;</c>: the same path as the map, with the readback as the reply.</summary>
+    /// <summary>
+    /// <c>.debug tp &lt;x&gt; &lt;z&gt;</c>: the same path as the map, with the readback as the reply. The reply comes
+    /// after the read-back, a second or two later.
+    /// </summary>
     internal static void RunCommand(World world, Entity userEntity, Action<string> reply, float x, float z)
     {
         if (world == null || !world.IsCreated)
@@ -354,9 +426,12 @@ internal static unsafe class DebugMap
             return;
         }
 
-        var outcome = Teleport(world, userEntity, x, z, "command");
-        reply(Notice(outcome.Result, outcome.Spot.Distance, Radius));
-        reply(outcome.Line);
+        Teleport(world, userEntity, x, z, "command", outcome =>
+        {
+            if (!world.IsCreated) return;
+            reply(Notice(outcome.Result, outcome.Spot.Distance, Radius));
+            reply(outcome.Line);
+        });
     }
 
     /// <summary>The <c>.debug status</c> lines for this character.</summary>

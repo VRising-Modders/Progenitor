@@ -35,49 +35,17 @@ internal static class TeleportArgs
     /// </summary>
     public const float ArrivedEpsilon = 2f;
 
-    /// <summary>
-    /// The offset the fallback pokes at. All three fallback components carry their
-    /// <c>float3</c> at 0 in this build, and the fallback
-    /// writes nowhere else — a build where one of them moved is refused, not adapted to.
-    /// </summary>
-    public const int PositionOffset = 0;
+    /// <summary>The offset the fallback pokes at (<see cref="Progenitor.Players.PlayerTeleportPolicy.PositionOffset"/>).</summary>
+    public const int PositionOffset = Progenitor.Players.PlayerTeleportPolicy.PositionOffset;
 
     /// <summary>Bytes one position poke writes: a <c>float3</c>.</summary>
-    public const int PositionWriteBytes = 12;
+    public const int PositionWriteBytes = Progenitor.Players.PlayerTeleportPolicy.PositionWriteBytes;
 
     /// <summary>
-    /// The game-free half of the fallback write guard (R30 finding 12). The fallback used to
-    /// write 12 bytes at offset 0 behind nothing but <c>HasComponent</c> and a null check,
-    /// which is exactly the shape <c>RawWriteGuard</c> exists for; this routes it through
-    /// <see cref="RawWriteGuard.EnsureOverlayMemcpy"/> — the overlay-pointer gate, since a poke
-    /// is a write *through* <c>GetComponentDataRawRW</c>, not a <c>SetComponentDataRaw</c> of
-    /// the whole component — and adds the two checks that guard is not given enough
-    /// information to make: that the component still has a <c>float3</c>, and that it is still
-    /// at <see cref="PositionOffset"/>.
-    ///
-    /// The two sizes are kept apart (R31 finding 16). <paramref name="ecsTypeSize"/> is the raw
-    /// <c>TypeManager.GetTypeInfo(...).TypeSize</c> — the number <c>RawWriteGuard</c> is written
-    /// against — and <paramref name="interopSize"/> is the interop struct's
-    /// <c>Marshal.SizeOf</c>, the extent the <c>FieldOffset</c> metadata describes. Feeding the
-    /// interop size in as the guard's <c>ecsTypeSize</c> made the guard decorative: on this build
-    /// <c>TypeSize</c> reads 0 for all three position components (CLAUDE.md raw-write policy), so
-    /// the substituted 12 always cleared its own 12-byte budget.
-    ///
-    /// The documented TypeSize-0 rule is <c>RawWriteGuard.OverlayMemcpyBudget</c>'s: TypeSize 0
-    /// means "poke fields through the pointer; do not memcpy a guessed sizeof", and
-    /// <c>EnsureOverlayMemcpy</c>'s own doc says field pokes do not call it. This <em>is</em> a
-    /// field poke, so at TypeSize 0 the guard is not called at all — calling it would refuse
-    /// every write and delete the fallback on this build. What guards the poke there is the
-    /// interop pair below: the component must still have a 12-byte <c>float3</c> at offset 0 and
-    /// must be at least <c>PositionOffset + PositionWriteBytes</c> bytes long. When TypeSize is
-    /// anything other than 0 it is the authority and goes to <c>EnsureOverlayMemcpy</c> unchanged,
-    /// so a build that starts reporting a real (or negative) TypeSize is checked against it.
-    ///
-    /// <paramref name="positionOffset"/> is negative when the component has no <c>float3</c>
-    /// field at all.
-    ///
-    /// Returns null when the poke is allowed; otherwise the refusal, which the caller raises
-    /// rather than logs.
+    /// The fallback write guard (R30 finding 12, R31 finding 16). It lives in Core now
+    /// (<see cref="Progenitor.Players.PlayerTeleportPolicy.PositionWriteRefusal"/>) because the debug-buff map teleport
+    /// runs the same fallback; this forwards so the op and its tests keep their names. Null when the poke is allowed;
+    /// otherwise the refusal, which the caller raises rather than logs.
     /// </summary>
     public static string? PositionWriteRefusal(
         string label,
@@ -85,51 +53,9 @@ internal static class TeleportArgs
         int ecsTypeSize,
         int interopSize,
         int positionOffset,
-        int positionFieldSize)
-    {
-        if (string.IsNullOrEmpty(typeName)) typeName = label;
-
-        if (positionOffset < 0)
-        {
-            return $"{label}: '{typeName}' has no float3 field in this build, so there is no position to write " +
-                   $"(the fallback only pokes a float3 at offset {PositionOffset})";
-        }
-        if (positionOffset != PositionOffset)
-        {
-            return $"{label}: '{typeName}' carries its float3 at offset {positionOffset} in this build, not {PositionOffset}; " +
-                   "the fallback writes offset " + PositionOffset.ToString(CultureInfo.InvariantCulture) + " only";
-        }
-        if (positionFieldSize != PositionWriteBytes)
-        {
-            return $"{label}: '{typeName}' reports a {positionFieldSize}-byte field at offset {PositionOffset}, " +
-                   $"not the {PositionWriteBytes} bytes this write would put there";
-        }
-
-        // The interop extent the FieldOffset metadata is read out of. This is the check that
-        // actually fires on this build, so it is named rather than smuggled in as a TypeSize.
-        int required = PositionOffset + PositionWriteBytes;
-        if (interopSize < required)
-        {
-            return $"{label}: '{typeName}' measures {interopSize} interop bytes, which is smaller than the "
-                   + $"{required} bytes this write needs (a {PositionWriteBytes}-byte float3 at offset {PositionOffset})";
-        }
-
-        // TypeSize 0 is the documented "poke fields, do not memcpy" case and is what every
-        // position component reads on this build; any other value is the guard's own number.
-        if (ecsTypeSize != 0)
-        {
-            try
-            {
-                RawWriteGuard.EnsureOverlayMemcpy(ecsTypeSize, required, typeName);
-            }
-            catch (Exception e) when (e is InvalidOperationException or ArgumentException)
-            {
-                return $"{label}: {e.Message}";
-            }
-        }
-
-        return null;
-    }
+        int positionFieldSize) =>
+        Progenitor.Players.PlayerTeleportPolicy.PositionWriteRefusal(
+            label, typeName, ecsTypeSize, interopSize, positionOffset, positionFieldSize);
 
     /// <summary>
     /// The error the fallback raises when every component it can write was refused by
