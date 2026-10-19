@@ -269,6 +269,7 @@ internal static unsafe class MaterialSeamRuntime
         Overlay.Clear();
         Dirty.Clear();
         Pass.Clear();
+        _pendingAll = false;
         _inBuildMode = false;
         _buildMenuFrame = -1;
         _inCharacterCraftMenu = false;
@@ -519,7 +520,8 @@ internal static unsafe class MaterialSeamRuntime
 
     private const string WorkName = "materials";
 
-    private static readonly MaterialRefreshPass Pass = new(PushItem);
+    private static readonly MaterialRefreshPass Pass = new(PushItem, line => Plugin.Logger?.LogWarning(line));
+    private static bool _pendingAll;
     private static readonly List<MaterialPushItem> PassItems = new();
     private static ServerBootstrapSystem? _passBootstrap;
     private static World? _passWorld;
@@ -534,8 +536,14 @@ internal static unsafe class MaterialSeamRuntime
         if (Scope.OpenSystem == null && (_service.OpenSessions > 0 || _service.PendingEvents > 0)) CloseOperations();
         registry.DrainInvalidations(Drain, out bool all);
         foreach (var u in Drain) Dirty.Add(u);
-        // Every view stale (InvalidateAll, a provider registered or went away): recompute everyone.
-        if (all) _service.ForgetViews();
+        // Every view stale (InvalidateAll, a provider registered or went away): recompute everyone. The
+        // forced resend it asks for is kept until the refresh policy is next consulted (no pass running and
+        // the shared-storage index built), so an invalidation during a pass or before the index is not lost.
+        if (all)
+        {
+            _service.ForgetViews();
+            _pendingAll = true;
+        }
 
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
@@ -547,11 +555,26 @@ internal static unsafe class MaterialSeamRuntime
             bool indexing = _world.SharedIndexRemaining > 0;
             _world.StepSharedIndex(budget);
             worked = indexing || _world.SharedIndexRemaining > 0;
-            if (!Pass.Active && _world.SharedIndexReady
-                && Refresh.Tick(Environment.TickCount64, all, Dirty.Count > 0, out bool everyone, out bool force))
+            if (!Pass.Active && _world.SharedIndexReady)
             {
+                bool invalidateAll = _pendingAll;
+                _pendingAll = false;
+                if (Refresh.Tick(Environment.TickCount64, invalidateAll, Dirty.Count > 0, out bool everyone, out bool force))
+                {
+                    worked = true;
+                    if (StartPass(world, everyone, force)) Dirty.Clear();
+                }
+            }
+            else if (Pass.Active && Dirty.Count > 0)
+            {
+                // A payment or an invalidation during a pass: those players go first, read fresh.
                 worked = true;
-                if (StartPass(world, everyone, force)) Dirty.Clear();
+                if (CollectItems(world, everyone: false, force: false))
+                {
+                    Pass.Prepend(PassItems);
+                    PassItems.Clear();
+                    Dirty.Clear();
+                }
             }
             if (Pass.Active && !budget.Exhausted)
             {
@@ -590,10 +613,24 @@ internal static unsafe class MaterialSeamRuntime
     private static bool StartPass(World world, bool everyone, bool force)
     {
         if (_service == null || _world == null) return false;
-        var em = world.EntityManager;
         if (world.GetExistingSystemManaged<ServerBootstrapSystem>() == null) return false;
         Reads ??= new MaterialStockReads(_world);
         if (everyone) _service.BeginFullRefresh();
+        if (!CollectItems(world, everyone, force)) return false;
+        Pass.Start(PassItems, everyone, Reads);
+        PassItems.Clear();
+        return true;
+    }
+
+    /// <summary>
+    /// Fill <see cref="PassItems"/> with one item per operation of every online player that reads views
+    /// (only the dirty ones unless <paramref name="everyone"/>). A dirty player's cached views are dropped
+    /// after their dependencies were taken, so they are recomputed. False when the world was not ready.
+    /// </summary>
+    private static bool CollectItems(World world, bool everyone, bool force)
+    {
+        if (_service == null || _world == null) return false;
+        var em = world.EntityManager;
         PassItems.Clear();
         foreach (var p in PlayerDirectory.Online(world))
         {
@@ -629,8 +666,6 @@ internal static unsafe class MaterialSeamRuntime
             // recomputed when it is next refreshed instead of reused.
             if (dirty) _service.ForgetViews(character);
         }
-        Pass.Start(PassItems, everyone, Reads);
-        PassItems.Clear();
         return true;
     }
 

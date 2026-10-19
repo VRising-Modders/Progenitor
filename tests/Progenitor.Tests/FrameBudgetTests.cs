@@ -321,19 +321,23 @@ public class FrameBudgetTests
     {
         var queued = new List<Action>();
         var stamp = new DateTime(2026, 10, 19, 12, 0, 0, DateTimeKind.Utc);
-        var poller = new SaveStampPoller(_ => stamp, queued.Add);
+        double clock = 1.0;
+        var poller = new SaveStampPoller(_ => { clock += 0.4; return stamp; }, () => clock, queued.Add);
 
-        poller.Request("folder", 1.0);
+        poller.Request("folder");
         Assert.True(poller.Busy);
-        poller.Request("folder", 1.5); // one sample at a time
+        poller.Request("folder"); // one sample at a time
         Assert.Single(queued);
-        Assert.False(poller.TryTake(out _, out _));
+        Assert.False(poller.TryTake(out _, out _, out _));
 
+        clock = 5.0; // the worker runs later than the request
         queued[0]();
-        Assert.True(poller.TryTake(out var got, out double askedAt));
+        Assert.True(poller.TryTake(out var got, out double readStart, out double readEnd));
         Assert.Equal(stamp, got);
-        Assert.Equal(1.0, askedAt);
-        Assert.False(poller.TryTake(out _, out _));
+        // Judged on when the worker read the folder, not when it was asked.
+        Assert.Equal(5.0, readStart, 6);
+        Assert.Equal(5.4, readEnd, 6);
+        Assert.False(poller.TryTake(out _, out _, out _));
         Assert.False(poller.Busy);
     }
 
@@ -341,51 +345,174 @@ public class FrameBudgetTests
     public void Poller_ResetDropsASampleAskedForBeforeIt()
     {
         var queued = new List<Action>();
-        var poller = new SaveStampPoller(_ => DateTime.UtcNow, queued.Add);
-        poller.Request("f", 1);
+        var poller = new SaveStampPoller(_ => DateTime.UtcNow, () => 0, queued.Add);
+        poller.Request("f");
         poller.Reset();
         queued[0]();
-        Assert.False(poller.TryTake(out _, out _));
+        Assert.False(poller.TryTake(out _, out _, out _));
         Assert.False(poller.Busy);
-        poller.Request("f", 2);
+        poller.Request("f");
         Assert.Equal(2, queued.Count);
     }
 
     [Fact]
     public void Poller_AThrowingSampleReadsAsNoStamp()
     {
-        var poller = new SaveStampPoller(_ => throw new IOException("busy"), work => work());
-        poller.Request("f", 3);
-        Assert.True(poller.TryTake(out var got, out _));
+        var poller = new SaveStampPoller(_ => throw new IOException("busy"), () => 3, work => work());
+        poller.Request("f");
+        Assert.True(poller.TryTake(out var got, out _, out _));
         Assert.Equal(DateTime.MinValue, got);
     }
 
     [Fact]
-    public void Poller_DrivesTheSuspensionToTheSameResumeAsInlineSampling()
+    public void Suspension_SettlesOnRealStillnessWhenReadsTakeTime()
     {
-        // The save file's stamp moves at t=2 s and stands still; samples are asked every 0.25 s and land a tick later.
+        var before = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var after = before.AddMinutes(1);
+        var s = new SyncSaveSuspension();
+        s.Begin(0, before);
+        // A slow read from 2.0 to 2.6 s first sees the new stamp: the write landed at some moment up to 2.6 s.
+        Assert.False(s.ShouldResume(2.0, 2.6, after));
+        // A read starting 3.5 s is only 0.9 s after that: not yet.
+        Assert.False(s.ShouldResume(3.5, 3.9, after));
+        // From 3.6 s on the folder was still for a full second since the latest moment the write could have landed.
+        Assert.True(s.ShouldResume(3.6, 3.7, after));
+        // The one-time form keeps its old rule.
+        var inline = new SyncSaveSuspension();
+        inline.Begin(0, before);
+        Assert.False(inline.ShouldResume(2.0, after));
+        Assert.True(inline.ShouldResume(3.0, after));
+    }
+
+    [Fact]
+    public void Poller_NeverResumesBeforeASecondOfRealStillness()
+    {
+        // The save's stamp moves at t=2 s and stands still. Reads take 0.3 s and the worker starts a tick
+        // after the request; whatever the timing, the guard resumes only after a second of real stillness.
         var before = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var after = before.AddMinutes(1);
         double now = 0;
+        double clock = 0;
         var queued = new Queue<Action>();
-        var poller = new SaveStampPoller(_ => now >= 2 ? after : before, queued.Enqueue);
+        var poller = new SaveStampPoller(_ => { var stamp = clock >= 2 ? after : before; clock += 0.3; return stamp; }, () => clock, queued.Enqueue);
         var suspension = new SyncSaveSuspension();
         suspension.Begin(0, before);
         double resumedAt = double.NaN;
-        for (int tick = 0; tick < 40 && double.IsNaN(resumedAt); tick++)
+        for (int tick = 0; tick < 80 && double.IsNaN(resumedAt); tick++)
         {
             now = tick * 0.25;
-            bool resume = poller.TryTake(out var stamp, out double askedAt)
-                ? suspension.ShouldResume(askedAt, stamp)
-                : suspension.ShouldResume(now, DateTime.MinValue);
+            bool resume = poller.TryTake(out var stamp, out double readStart, out double readEnd)
+                ? suspension.ShouldResume(readStart, readEnd, stamp)
+                : suspension.ShouldResume(now, now, DateTime.MinValue);
             if (resume) { resumedAt = now; break; }
-            if (!poller.Busy) poller.Request("f", now);
-            while (queued.Count > 0) queued.Dequeue()(); // the sample runs between frames
+            if (!poller.Busy) poller.Request("f");
+            clock = now + 0.25; // the worker runs one tick later
+            while (queued.Count > 0) queued.Dequeue()();
         }
         Assert.False(double.IsNaN(resumedAt));
         Assert.False(suspension.TimedOut);
-        // Never before the stamp has stood still for the settle time.
         Assert.True(resumedAt >= 2 + SyncSaveSuspension.SettleSeconds);
+    }
+
+    // ---- queue front, faults, cache trim, dirty players first ---------------------------------------
+
+    [Fact]
+    public void Queue_FrontItemsRunFirstAndAThrowIsLoggedOnce()
+    {
+        var order = new List<int>();
+        var logs = new List<string>();
+        var queue = new BudgetedQueue<int>(i => { if (i < 0) throw new InvalidOperationException("bad " + i); order.Add(i); return true; }, logs.Add, "test");
+        queue.Enqueue(1);
+        queue.Enqueue(-1);
+        queue.Enqueue(-2);
+        queue.Enqueue(2);
+        queue.EnqueueFront(9);
+        queue.Run(new FrameBudget(1000));
+        Assert.Equal(new[] { 9, 1, 2 }, order);
+        Assert.Equal(2, queue.Faults);
+        Assert.Single(logs);
+        Assert.Contains("bad -1", logs[0]);
+    }
+
+    [Fact]
+    public void CacheTrim_RemovesWhatTheRuleSelects()
+    {
+        var cache = new Dictionary<int, string> { [1] = "live", [2] = "gone", [3] = "gone", [4] = "throws" };
+        int removed = CacheTrim.RemoveWhere(cache, (k, v) => v == "throws" ? throw new Exception() : v == "gone");
+        Assert.Equal(3, removed);
+        Assert.Equal(new[] { 1 }, cache.Keys);
+        Assert.Equal(0, CacheTrim.RemoveWhere(cache, (_, _) => false));
+    }
+
+    [Fact]
+    public void Pass_DirtyPlayersJumpAheadAndReadFresh()
+    {
+        var (world, service) = BenchService();
+        var reads = new MaterialStockReads(world);
+        var pushed = new List<MaterialOperation>();
+        var totals = new List<IReadOnlyList<MaterialLine>>();
+        var pass = new MaterialRefreshPass(item =>
+        {
+            pushed.Add(item.Operation);
+            service.RefreshView(item.Character, item.Operation, reads, item.Recompute, out var view);
+            totals.Add(view.Rows);
+        });
+        MaterialPushItem Item(MaterialOperation op, bool dirty)
+        {
+            var item = new MaterialPushItem { Character = world.Player, User = world.User, Operation = op, Recompute = dirty, Force = dirty };
+            service.CachedDependencies(world.Player, op, item.WarmIds, item.WarmStocks);
+            return item;
+        }
+
+        // Compute once so the views have dependencies, then start a long pass.
+        pass.Start(new[] { Item(MaterialOperation.Build, false), Item(MaterialOperation.Craft, false) }, true, reads);
+        while (pass.Active) pass.Run(new FrameBudget(1000));
+        pushed.Clear();
+        totals.Clear();
+        pass.Start(new[] { Item(MaterialOperation.Craft, false), Item(MaterialOperation.Upgrade, false) }, true, reads);
+        var clock = new StepClock();
+        pass.Run(Budget(clock, 3)); // part of the pass: some chests are already in the pass's reads
+
+        // A payment empties a chest the Build view depends on; the player is marked dirty and goes first.
+        var chest = world.ChestRefs[0];
+        foreach (var inv in world.ChestRefs) reads.Stock(inv); // the pass has read every chest by now
+        world.Slots[chest] = new (int, int)[MaterialViewRefreshBenchTests.SlotsPerChest];
+        var dirty = Item(MaterialOperation.Build, true);
+        Assert.Contains(chest, dirty.WarmStocks);
+        pass.Prepend(new[] { dirty });
+        while (pushed.Count == 0) pass.Run(Budget(clock, 3));
+        Assert.Equal(MaterialOperation.Build, pushed[0]);
+
+        // The Build view was recomputed from a fresh read of the emptied chest, not the pass's earlier read.
+        var fresh = new MaterialService(RegistryFor(world), world, _ => { });
+        var expected = new Dictionary<int, int>();
+        Assert.True(fresh.TryView(world.Player, MaterialOperation.Build, expected, out _, out _));
+        var got = new Dictionary<int, int>();
+        foreach (var line in totals[0]) got[line.Item] = line.Amount;
+        Assert.Equal(expected, got);
+        while (pass.Active) pass.Run(Budget(clock, 3));
+        Assert.Equal(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade }, pushed);
+    }
+
+    private static MaterialSourceRegistry RegistryFor(MaterialViewRefreshBenchTests.BenchWorld world)
+    {
+        var registry = new MaterialSourceRegistry { HookState = () => (true, "") };
+        registry.Register(new MaterialViewRefreshBenchTests.BenchProvider(world.ChestIds), "bench");
+        return registry;
+    }
+
+    [Fact]
+    public void Reads_ForgetDropsOneCachedRead()
+    {
+        var (world, _) = BenchService();
+        var reads = new MaterialStockReads(world);
+        var chest = world.ChestRefs[1];
+        reads.Stock(chest);
+        reads.Stock(chest);
+        Assert.Equal(1, reads.WorldReads);
+        reads.Forget(chest);
+        reads.Stock(chest);
+        Assert.Equal(2, reads.WorldReads);
     }
 
     // ---- item removal DLL metadata -----------------------------------------------------------------

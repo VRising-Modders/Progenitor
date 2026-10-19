@@ -174,16 +174,25 @@ internal sealed class SyncSaveSuspension
     }
 
     /// <summary>Whether the entries go back now; true ends the suspension.</summary>
-    internal bool ShouldResume(double now, DateTime stampNow)
+    internal bool ShouldResume(double now, DateTime stampNow) => ShouldResume(now, now, stampNow);
+
+    /// <summary>
+    /// The same rule for a stamp read over a span of time (a folder listing off the main thread, between
+    /// <paramref name="readStart"/> and <paramref name="readEnd"/>): a new stamp starts the settle at the end
+    /// of the read that first saw it (the write may have landed at any moment of that read), and the
+    /// settle is checked at the start of the read that saw it again (the folder is only known still up to
+    /// then), so the window is never shorter than <see cref="SettleSeconds"/> of real stillness.
+    /// </summary>
+    internal bool ShouldResume(double readStart, double readEnd, DateTime stampNow)
     {
         if (!Active) return false;
         if (stampNow != DateTime.MinValue && stampNow > _before)
         {
-            if (stampNow != _lastSeen || double.IsNaN(_settleFrom)) { _lastSeen = stampNow; _settleFrom = now; }
-            if (now - _settleFrom >= SettleSeconds) { End(); return true; }
+            if (stampNow != _lastSeen || double.IsNaN(_settleFrom)) { _lastSeen = stampNow; _settleFrom = readEnd; }
+            if (readStart - _settleFrom >= SettleSeconds) { End(); return true; }
             return false;
         }
-        if (now - _since >= TimeoutSeconds) { End(); TimedOut = true; return true; }
+        if (readEnd - _since >= TimeoutSeconds) { End(); TimedOut = true; return true; }
         return false;
     }
 

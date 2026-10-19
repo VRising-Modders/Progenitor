@@ -214,6 +214,7 @@ internal static class ItemRemovalRuntime
         {
             int budget = 128;
             int start = budget;
+            int slotsThisStep = 0;
             // At most one ledger read per step, and only when a stack is about to be quarantined.
             ItemOwnerLedger? ledger = null;
             while (_index < _entities.Count && budget-- > 0 && (budget >= start - 1 || !time.Exhausted))
@@ -252,7 +253,8 @@ internal static class ItemRemovalRuntime
                     int length = em.GetBuffer<InventoryBuffer>(entity, true).Length;
                     if (length > 1024) throw new InvalidOperationException("Inventory exceeds cleanup bounds.");
                     if (_slot < 0) _slot = length - 1;
-                    while (_slot >= 0 && budget-- > 0 && !time.Exhausted)
+                    // At least one slot per step, whatever the clock says, so a slow inventory still moves forward.
+                    while (_slot >= 0 && budget-- > 0 && (slotsThisStep++ == 0 || !time.Exhausted))
                     {
                         int i = _slot--;
                         var buffer = em.GetBuffer<InventoryBuffer>(entity, true);

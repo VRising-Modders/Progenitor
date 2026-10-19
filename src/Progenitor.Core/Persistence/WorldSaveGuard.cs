@@ -101,15 +101,16 @@ internal static class WorldSaveGuard
         }
         if (!Suspension.Active) return;
         // The folder is listed off the main thread (StampPoller): on the main thread, right as the game wrote a
-        // large save, it stalled a frame for 254 ms. A sample is judged at the time it was asked for; with
-        // none ready, only the timeout is checked. The guarded state goes back no earlier than before.
+        // large save, it stalled a frame for 254 ms. A sample is judged at the times the worker read the folder
+        // (its own clock reads around the listing), so the settle is never shorter than a second of real
+        // stillness; with none ready, only the timeout is checked.
         long start = Stopwatch.GetTimestamp();
         bool resume;
-        if (StampPoller.TryTake(out var stamp, out double askedAt)) resume = Suspension.ShouldResume(askedAt, stamp);
+        if (StampPoller.TryTake(out var stamp, out double readStart, out double readEnd)) resume = Suspension.ShouldResume(readStart, readEnd, stamp);
         else resume = Suspension.ShouldResume(now, DateTime.MinValue);
         if (!resume)
         {
-            if (!StampPoller.Busy) StampPoller.Request(WorldSaveTrigger.SaveFolder(), now);
+            if (!StampPoller.Busy) StampPoller.Request(WorldSaveTrigger.SaveFolder());
             Progenitor.Perf.FrameWork.Note(WorkName, Stopwatch.GetTimestamp() - start, 0);
             return;
         }
@@ -122,7 +123,8 @@ internal static class WorldSaveGuard
 
     private const string WorkName = "saveGuard";
 
-    private static readonly SaveStampPoller StampPoller = new(WorldSaveTrigger.NewestSaveWriteUtc);
+    // Clock.Elapsed reads the Stopwatch's timestamp: safe from the worker thread while the clock runs.
+    private static readonly SaveStampPoller StampPoller = new(WorldSaveTrigger.NewestSaveWriteUtc, () => Clock.Elapsed.TotalSeconds);
 
     private static void Raise(Action? handlers, string what)
     {

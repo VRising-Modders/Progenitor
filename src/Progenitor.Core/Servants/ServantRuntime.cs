@@ -839,7 +839,19 @@ internal static unsafe partial class ServantRuntime
         foreach (var heart in MissionHearts)
             earliest = Math.Min(earliest, ServantLogic.EarliestCompletion(ReadRows(em, heart)));
         _nextDueTicks = earliest;
+
+        // Once a minute, drop cached hearts and coffins the game destroyed, so the per-world-load caches
+        // hold live entities only (a castle torn down, a coffin removed).
+        if (now - _pruneTicks >= PruneEveryTicks)
+        {
+            _pruneTicks = now;
+            Progenitor.Perf.CacheTrim.RemoveWhere(HeartTerritories, (heart, _) => !em.Exists(heart));
+            Progenitor.Perf.CacheTrim.RemoveWhere(CoffinHearts, (coffin, heart) => !em.Exists(coffin) || !em.Exists(heart));
+        }
     }
+
+    private const long PruneEveryTicks = 60 * ServantLogic.TicksPerSecond;
+    private static long _pruneTicks;
 
     /// <summary>
     /// The earliest completion among every hunt record, read with the heart list (once a second, after

@@ -70,19 +70,45 @@ internal readonly struct BudgetRun
 /// </summary>
 internal sealed class BudgetedQueue<T>
 {
-    private readonly Queue<T> _items = new();
+    private readonly LinkedList<T> _items = new();
     private readonly Func<T, bool> _step;
+    private readonly Action<string>? _log;
+    private readonly string _name;
+    private bool _throwLogged;
 
-    internal BudgetedQueue(Func<T, bool> step) => _step = step ?? throw new ArgumentNullException(nameof(step));
+    /// <param name="log">Where the first throwing step of this queue is reported (once); none when null.</param>
+    internal BudgetedQueue(Func<T, bool> step, Action<string>? log = null, string name = "work")
+    {
+        _step = step ?? throw new ArgumentNullException(nameof(step));
+        _log = log;
+        _name = name ?? "work";
+    }
 
     internal int Count => _items.Count;
 
-    internal void Enqueue(T item) => _items.Enqueue(item);
+    /// <summary>Steps that threw (their items were dropped), since construction.</summary>
+    internal int Faults { get; private set; }
+
+    internal void Enqueue(T item) => _items.AddLast(item);
+
+    /// <summary>Put <paramref name="item"/> ahead of everything queued, after the item a step is working on.</summary>
+    internal void EnqueueAfterCurrent(T item)
+    {
+        if (_items.First == null) _items.AddFirst(item);
+        else _items.AddAfter(_items.First, item);
+    }
+
+    /// <summary>Put <paramref name="item"/> ahead of everything queued, the item in progress included.</summary>
+    internal void EnqueueFront(T item) => _items.AddFirst(item);
 
     internal void Clear() => _items.Clear();
 
     /// <summary>The item the next step works on.</summary>
-    internal bool TryPeek(out T item) => _items.TryPeek(out item!);
+    internal bool TryPeek(out T item)
+    {
+        item = _items.First != null ? _items.First.Value : default!;
+        return _items.First != null;
+    }
 
     /// <summary>Take steps until <paramref name="budget"/> is used up or nothing is left (at least one step when anything is queued).</summary>
     internal BudgetRun Run(FrameBudget budget)
@@ -92,20 +118,47 @@ internal sealed class BudgetedQueue<T>
         while (_items.Count > 0)
         {
             if (steps > 0 && budget.Exhausted) break;
-            var item = _items.Peek();
+            var node = _items.First!;
             steps++;
             bool done;
-            try { done = _step(item); }
-            catch
+            try { done = _step(node.Value); }
+            catch (Exception e)
             {
-                // A throwing step drops its item: it would throw again every frame.
+                // A throwing step drops its item: it would throw again every frame. Reported once per queue.
                 done = true;
+                Faults++;
+                if (!_throwLogged)
+                {
+                    _throwLogged = true;
+                    try { _log?.Invoke(_name + ": a queued step threw and its item was dropped (later ones are counted, not logged): " + e.Message); }
+                    catch { }
+                }
             }
             if (!done) continue;
-            _items.Dequeue();
+            if (node.List != null) _items.Remove(node);
             completed++;
         }
         return new BudgetRun(steps, completed, _items.Count, budget.ElapsedTicks - start);
+    }
+}
+
+/// <summary>Trimming long-lived lookup caches (game-free).</summary>
+internal static class CacheTrim
+{
+    /// <summary>Remove every entry <paramref name="drop"/> selects; returns how many went.</summary>
+    internal static int RemoveWhere<TKey, TValue>(Dictionary<TKey, TValue> cache, Func<TKey, TValue, bool> drop) where TKey : notnull
+    {
+        List<TKey>? gone = null;
+        foreach (var kv in cache)
+        {
+            bool remove;
+            try { remove = drop(kv.Key, kv.Value); }
+            catch { remove = true; }
+            if (remove) (gone ??= new List<TKey>()).Add(kv.Key);
+        }
+        if (gone == null) return 0;
+        foreach (var key in gone) cache.Remove(key);
+        return gone.Count;
     }
 }
 

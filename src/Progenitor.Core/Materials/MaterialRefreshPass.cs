@@ -44,10 +44,11 @@ internal sealed class MaterialRefreshPass
     private readonly Action<MaterialPushItem> _push;
     private MaterialStockReads? _reads;
 
-    internal MaterialRefreshPass(Action<MaterialPushItem> push)
+    /// <param name="log">Where the first refresh step that throws is reported (once); none when null.</param>
+    internal MaterialRefreshPass(Action<MaterialPushItem> push, Action<string>? log = null)
     {
         _push = push ?? throw new ArgumentNullException(nameof(push));
-        _queue = new BudgetedQueue<MaterialPushItem>(Step);
+        _queue = new BudgetedQueue<MaterialPushItem>(Step, log, "materials: view refresh");
     }
 
     /// <summary>A pass has items left.</summary>
@@ -73,6 +74,26 @@ internal sealed class MaterialRefreshPass
         _reads.Clear();
         Everyone = everyone;
         foreach (var item in items) _queue.Enqueue(item);
+    }
+
+    /// <summary>
+    /// Put <paramref name="items"/> ahead of the rest of the pass, in their order: players whose totals
+    /// just changed (a governed payment, an invalidation) are refreshed within a frame or two instead of
+    /// after the whole pass. What their views read is dropped from the pass's reads first, so it is read
+    /// again now rather than taken from before the change. Ignored with no pass running (the next pass
+    /// covers them).
+    /// </summary>
+    internal void Prepend(IReadOnlyList<MaterialPushItem> items)
+    {
+        if (_reads == null) return;
+        for (int i = items.Count - 1; i >= 0; i--)
+        {
+            var item = items[i];
+            item.Cursor = 0;
+            foreach (var id in item.WarmIds) _reads.Forget(id);
+            foreach (var inv in item.WarmStocks) _reads.Forget(inv);
+            _queue.EnqueueFront(item);
+        }
     }
 
     /// <summary>Steps under <paramref name="budget"/> (at least one); what is left carries over to the next call.</summary>
