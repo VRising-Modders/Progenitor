@@ -6780,8 +6780,13 @@ disabled categories), `BuildMenuRecentTab.cs` (the Recent category button), `Bui
   the copy was freed within the delay. One letter filtered the tab. A Core hot swap with results showing restored
   the game's blob, with no copy left, and re-attached the box.
 
-Recent, Copy building, the box position and the disabled categories (added 2026-10-15) are **unit-tested; not
-live-verified** on the current main. Before the port onto it, a Copy building press was observed on the Steam
+Recent, Copy building, the box position and the disabled categories (added 2026-10-15) are **unit-tested**.
+Recent is **verified live in part on 2026-10-18**: release package 2026.10.128 (main 07bad52da), installed cold on the client, the server and a headless second client, no hot swap. A candle rack placed for real passed every
+observer stage on the server and was added on the client (the [`build_search` diagnostics](bridge-ops-client.md#build_search)
+counters); a lamp post was recorded too, so the history held two blueprints and the Recent category read "2 recent";
+placing again from Recent moved that building to the top. Copy building's name fill was verified live the same day.
+The rest of Recent, Copy building, the box position and the disabled categories are not live-verified on the current main ([not yet proven](#build-search-not-yet-proven)).
+Before the port onto it, a Copy building press was observed on the Steam
 client (2026-10-15, one wooden floor blueprint): it picked the hovered building, the same press with the menu
 closed did nothing, and the hint showed the game's middle-mouse graphic at 1920x1080 and 3840x1080
 ([knowledge note](../knowledge/notes/build-mode-mouse-hint.md)). That run did not cover Recent.
@@ -6811,8 +6816,9 @@ compared (at most 512 in a frame; a larger burst is skipped), never every struct
 servers are covered. A building sequence is not required: a piece whose blueprint has none spawns no sequence.
 Hellos are taken in every frame and count for 30 seconds from when they arrived, so a client that reloaded Core is
 recognized by its new hello within 10 seconds. The Dev bridge's [`build_search` diagnostics](bridge-ops-client.md#build_search)
-shows each stage's counters on both sides (built and unit-tested; not live-verified; a live placement on
-2026-10-18 recorded nothing before this change). Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
+shows each stage's counters on both sides (unit-tested; used live on 2026-10-18 with release package 2026.10.128,
+where one real placement went through every stage; an earlier live placement that day recorded nothing, before the
+observer change). Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
 `ReceiveSlotPolicy.CoreProtocolIds`; adding it is a Bootstrap change.
 
 **Copy building.** With the build menu open, point at a building and press **Copy building** (default Middle
@@ -6822,7 +6828,10 @@ that item, picked for placement exactly as a click on it would be, even when the
 item that is not unlocked stays unavailable and costs are the game's own. Typing or the x button changes or clears
 the search as usual. Without the box (the gamepad layout) or an item name, the search is cleared instead and the menu
 switches to the item's tab. The name fill and its selection are unit-tested in their decisions (the filled name, the
-copied item kept in capped results); not live-verified. Nothing happens while the box has the keyboard, in the castle relocation
+copied item kept in capped results). The name fill is **verified live on 2026-10-18** (release package 2026.10.128,
+cold install): after a copy the box showed the copied item's name and "1 found", and the menu moved to that item's
+category and tag. Copy building copies what the build cursor targets, so a decoration standing on a floor is copied
+only when the cursor is on the decoration itself. Nothing happens while the box has the keyboard, in the castle relocation
 menu, or with the menu closed. The key's current binding is shown in the game's key-hint row of the build screen,
 with the game's mouse-button graphic for a mouse button and the key name otherwise; it follows a remap and goes
 when the key is unbound.
@@ -6973,9 +6982,11 @@ unlocks every recipe for a test character.
   fallback), and the row's "new" marks with a search active.
 - Physical keystrokes into the box: the OS-typing run was interrupted when someone else used the client.
 - The settings switches with the menu open. (Closing with a search active and reopening unfiltered ran live through the bridge's `open` / `close` on 2026-10-04.)
-- Recent: a placement reaching the list (server and client both on this Core), a refused placement staying out,
-  the order after a rebuild, the `RecentCount` trim, the list after a restart, and filtering inside Recent.
-- Copy building on the current main: a building inside a group, an item on another category, a locked item, a
+- Recent: a refused placement staying out, relocation staying out, the `RecentCount` trim, the history save
+  debounce, the list after a restart and across a Core hot swap, and filtering inside Recent. (A placement reaching
+  the list, two items and the order after a rebuild were verified live on 2026-10-18.)
+- Copy building on the current main: Escape clearing the search while the box is not focused (the name fill was
+  verified live on 2026-10-18), the build keybind share rule with a Progenitor gameplay key, a building inside a group, an item on another category, a locked item, a
   remapped keyboard key and its hint, and the Push To Talk warning in the Keybinds tab.
 - The box beside and above the variant selector at narrow widths, and the disabled categories while searching.
 

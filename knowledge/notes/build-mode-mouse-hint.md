@@ -26,7 +26,7 @@ Observed: the default middle button was blocked first by RepairItem and then Spl
 
 ## Verification
 
-Working changes on the stated base, Core generation 20: a registered press selected wooden stables floor blueprint 2025363113 from the hovered building. The same press with the menu closed was suppressed. Readback identified Icon_MMB1; screenshots at 1920x1080 and 3840x1080 showed the graphic alongside native hints. Both prior Core generations collected after reload. Scope/conflict tests passed. This does not qualify Recent history ingestion or every building variant.
+Working changes on the stated base, Core generation 20: a registered press selected wooden stables floor blueprint 2025363113 from the hovered building. The same press with the menu closed was suppressed. Readback identified Icon_MMB1; screenshots at 1920x1080 and 3840x1080 showed the graphic alongside native hints. Both prior Core generations collected after reload. Scope/conflict tests passed. This does not qualify Recent history ingestion or every building variant. Recent history ingestion was verified live separately on 2026-10-18 (release package 2026.10.128, cold install): real placements reached the list and a rebuild moved to the top.
 
 ## Gotchas
 
