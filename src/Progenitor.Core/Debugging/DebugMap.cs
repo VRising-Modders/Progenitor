@@ -45,10 +45,11 @@ namespace Progenitor.Debugging;
 /// <item><b>The server</b> re-checks admin (the admin list, <c>adminauth</c> or the private-game host), character and buff, finds the nearest valid spot within
 /// <c>[DebugMap] SearchRadius</c> (100 m) — ground under the point, on the world grid, and with
 /// <c>[DebugMap] WalkableCheck</c> (default off, not live-verified) a standable pathfinding tile. Inside castle
-/// territory the ground read walks down the stacked layers to the lowest one, the castle's ground floor, instead of
-/// taking the top one, which can be a roof (<see cref="DebugMapPolicy.PickFloor"/>). It teleports with
-/// <see cref="PlayerTeleport.TeleportVerified"/>: the game's helper, a read-back a second later and, when the
-/// character did not arrive, the Dev bridge op's guarded position write and a second read-back. Then it answers with
+/// territory the ground read walks down the game's 5 m height levels to the castle's ground floor instead of taking
+/// the top one, which can be a roof (<see cref="DebugMapPolicy.PickFloor"/>, <see cref="Progenitor.Terrain.GroundProbeLevels"/>).
+/// It teleports with <c>PlayerTeleport.TeleportVerified</c> over the floors under the chosen spot: the game's helper
+/// with a read-back a second later, then the helper on each lower floor, and the Dev bridge op's guarded position
+/// write only onto a known walkable floor (<see cref="DebugMapPolicy.WriteAllowed"/>), never a roof. Then it answers with
 /// a reply event and a chat line: "Teleported" or "Teleported (moved N m to the nearest valid spot)" only when a
 /// read-back found the character there, "Couldn't teleport there: the game refused that spot." when none did, or the
 /// refusal.</item>
@@ -335,7 +336,11 @@ internal static unsafe class DebugMap
 
         Spot spot;
         bool walkRan;
-        bool castle = InCastleTerritory(x, z);
+        var territory = CastleBand(x, z);
+        bool castle = territory.Castle;
+        var band = territory.Band;
+        int reads = 0;
+        Walk at;
         using (var ground = GroundProbe.TryOpen(world, out string why))
         {
             if (ground == null)
@@ -347,9 +352,10 @@ internal static unsafe class DebugMap
             walkRan = WalkCheck;
             spot = FindNearestValid(x, z, Radius, Step, (px, pz) =>
             {
-                // Inside castle territory the top layer can be a roof the game will not teleport onto: walk down to
-                // the ground floor (PickFloor). Outside, the single read from ProbeHeight, as before.
-                var floor = PickFloor(probeY => ground.TryGetHeight(px, probeY, pz, out float h) ? h : null, castle);
+                // Inside castle territory the top layer can be a roof the game will not teleport onto: walk down the
+                // height levels to the ground floor (PickFloor). Outside, the single read from ProbeHeight, as before.
+                var floor = PickFloor(probeY => ground.TryGetHeight(px, probeY, pz, out float h) ? h : null, castle, band);
+                reads += floor.Reads;
                 if (!floor.Found) return Probe.No("no ground");
                 if (!walkRan) return Probe.Ok(floor.Y, floor.Top);
                 if (!ground.TryIsWalkable(world, px, floor.Y, pz, out bool standable))
@@ -363,16 +369,28 @@ internal static unsafe class DebugMap
 
                 return standable ? Probe.Ok(floor.Y, floor.Top) : Probe.No("not walkable");
             });
+
+            // A full level walk at the chosen spot (no ground-band stop): the floors under it, for the fallback order and
+            // for whether the position write may be used there.
+            at = spot.Found
+                ? WalkFloors(probeY => ground.TryGetHeight(spot.X, probeY, spot.Z, out float h) ? h : null)
+                : new Walk(Array.Empty<float>(), 0);
+            reads += at.Reads;
         }
 
         if (!spot.Found)
         {
-            done(Finish(who, Result.NoValidSpot, x, z, spot, "", via, walkRan, castle));
+            done(Finish(who, Result.NoValidSpot, x, z, spot, "", via, walkRan, castle, reads: reads));
             return;
         }
 
+        var candidates = Candidates(spot.Y, at, castle, band);
+        var targets = new PlayerTeleport.TeleportTarget[candidates.Count];
+        for (int i = 0; i < candidates.Count; i++)
+            targets[i] = new PlayerTeleport.TeleportTarget(new float3(spot.X, candidates[i].Y, spot.Z), candidates[i].WriteAllowed);
+
         bool walk = walkRan;
-        PlayerTeleport.TeleportVerified(world, character, new float3(spot.X, spot.Y, spot.Z), DebugTools.Owner, verified =>
+        PlayerTeleport.TeleportVerified(world, character, targets, DebugTools.Owner, verified =>
         {
             string verify = verified.Arrived
                 ? "arrived"
@@ -384,32 +402,43 @@ internal static unsafe class DebugMap
             var result = !verified.Arrived
                 ? (verified.Method.Length == 0 ? Result.TeleportFailed : Result.Refused)
                 : spot.Distance > 0.5f ? Result.Moved : Result.Teleported;
-            done(Finish(who, result, x, z, spot, verified.Method, via, walk, castle, verify));
+            float landed = verified.Arrived && verified.Target > 0 && verified.Target < candidates.Count
+                ? candidates[verified.Target].Y
+                : float.NaN;
+            done(Finish(who, result, x, z, spot, verified.Method, via, walk, castle, verify, candidates, reads, landed));
         });
     }
 
     /// <summary>
     /// Whether (<paramref name="x"/>, <paramref name="z"/>) lies in a castle's territory (X/Z only,
-    /// <see cref="Progenitor.Castles.Castles.At(Progenitor.Castles.CastleVec3)"/>). False when the castle module cannot
-    /// answer, which keeps the single top-layer read.
+    /// <see cref="Progenitor.Castles.Castles.At(Progenitor.Castles.CastleVec3)"/>), and that territory's ground band
+    /// (<c>CastleTerritory.MinHeightLevel</c> to <c>MaxHeightLevel</c>, null when it reads as empty). Not a castle when
+    /// the castle module cannot answer, which keeps the single top-layer read.
     /// </summary>
-    private static bool InCastleTerritory(float x, float z)
+    private static (bool Castle, GroundBand? Band) CastleBand(float x, float z)
     {
         try
         {
-            return Progenitor.Castles.Castles.At(new Progenitor.Castles.CastleVec3(x, 0f, z)).Enabled;
+            var handle = Progenitor.Castles.Castles.At(new Progenitor.Castles.CastleVec3(x, 0f, z));
+            if (!handle.Enabled) return (false, null);
+            var t = handle.Territory;
+            GroundBand? band = t.MaxHeightLevel > 0 && t.MinHeightLevel <= t.MaxHeightLevel
+                ? new GroundBand(t.MinHeightLevel, t.MaxHeightLevel)
+                : null;
+            return (true, band);
         }
         catch (Exception e)
         {
             Log("castle territory lookup failed (" + e.Message + "); top floor only");
-            return false;
+            return (false, null);
         }
     }
 
     private static Outcome Finish(string who, Result result, float x, float z, Spot spot, string method, string via,
-        bool walkCheck = false, bool castle = false, string verify = "")
+        bool walkCheck = false, bool castle = false, string verify = "", IReadOnlyList<Candidate>? floors = null, int reads = 0,
+        float landed = float.NaN)
     {
-        string line = Readback(who, result, x, z, spot, method, walkCheck, castle, verify) + " via=" + via;
+        string line = Readback(who, result, x, z, spot, method, walkCheck, castle, verify, floors, reads, landed) + " via=" + via;
         Log(line);
         return new Outcome(result, spot, method, line);
     }

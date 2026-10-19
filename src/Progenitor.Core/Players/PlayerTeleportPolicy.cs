@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Progenitor.Ecs;
 
@@ -88,6 +89,9 @@ public static class PlayerTeleportPolicy
 
         /// <summary>Nothing moved the character there: report a refusal, never success.</summary>
         Refused,
+
+        /// <summary>The game's helper did not move the character: run it again on the next lower candidate floor.</summary>
+        HelperOnNext,
     }
 
     /// <summary>
@@ -104,6 +108,73 @@ public static class PlayerTeleportPolicy
 
     /// <summary>The method token of a helper that returned without moving, followed by the position write.</summary>
     public static string HelperThenWrite(string helper, string write) => helper + " refused; " + write;
+
+    // ---- several candidate floors ------------------------------------------------------------------
+
+    /// <summary>
+    /// The next step of a verified teleport over several candidate floors (<see cref="PlayerTeleport.TeleportTarget"/>),
+    /// and which candidate it applies to.
+    /// </summary>
+    /// <param name="Next"><see cref="Next.Done"/> (arrived at <paramref name="Index"/>), <see cref="Next.HelperOnNext"/>
+    /// (the game's helper on <paramref name="Index"/>), <see cref="Next.WritePosition"/> (write <paramref name="Index"/>)
+    /// or <see cref="Next.Refused"/>.</param>
+    /// <param name="Index">The candidate; -1 for <see cref="Next.Refused"/>.</param>
+    public readonly record struct Step(Next Next, int Index);
+
+    /// <summary>
+    /// After the game's helper was sent to candidate <paramref name="tried"/> and the read-back said
+    /// <paramref name="arrival"/>. Arrived is done. An unreadable position is a refusal (nothing is forced on a
+    /// character whose position cannot be checked). Not arrived: the game's helper again on the next candidate, which is
+    /// the next lower floor; once every candidate has been refused by the game, the position write on the first
+    /// candidate whose <paramref name="writeAllowed"/> is true (a known walkable floor), else a refusal that leaves the
+    /// player where the game left them.
+    /// </summary>
+    public static Step AfterHelperAt(Arrival arrival, int tried, IReadOnlyList<bool> writeAllowed)
+    {
+        if (writeAllowed == null) throw new ArgumentNullException(nameof(writeAllowed));
+        if (arrival == Arrival.Arrived) return new Step(Next.Done, tried);
+        if (arrival == Arrival.Unknown) return new Step(Next.Refused, -1);
+        if (tried + 1 < writeAllowed.Count) return new Step(Next.HelperOnNext, tried + 1);
+        return WriteOrRefuse(writeAllowed);
+    }
+
+    /// <summary>
+    /// The game's helper threw (moved or renamed by a game update), so running it on other candidates would throw too:
+    /// the position write on the first candidate that allows it, else a refusal.
+    /// </summary>
+    public static Step AfterHelperThrew(IReadOnlyList<bool> writeAllowed)
+    {
+        if (writeAllowed == null) throw new ArgumentNullException(nameof(writeAllowed));
+        return WriteOrRefuse(writeAllowed);
+    }
+
+    private static Step WriteOrRefuse(IReadOnlyList<bool> writeAllowed)
+    {
+        for (int i = 0; i < writeAllowed.Count; i++)
+            if (writeAllowed[i]) return new Step(Next.WritePosition, i);
+        return new Step(Next.Refused, -1);
+    }
+
+    /// <summary>
+    /// The method token for the log: the game's helper (with <c> xN</c> when it ran on N candidates), then
+    /// <c> refused</c> when it never moved the character, and the write after it when that ran.
+    /// <c>TeleportUtilityServer.Teleport</c>, <c>TeleportUtilityServer.Teleport x2</c>,
+    /// <c>TeleportUtilityServer.Teleport x2 refused</c>,
+    /// <c>TeleportUtilityServer.Teleport refused; Translation+LastTranslation+PlayerLastValidPosition</c>. A helper that
+    /// threw at once (<paramref name="helperRuns"/> 0) gives the write alone.
+    /// </summary>
+    public static string MethodToken(string helper, int helperRuns, bool helperArrived, string write, bool wrote)
+    {
+        if (helperRuns <= 0) return wrote ? write : "";
+        string runs = helper + (helperRuns > 1 ? " x" + helperRuns.ToString(CultureInfo.InvariantCulture) : "");
+        if (helperArrived) return runs;
+        return wrote ? runs + " refused; " + write : runs + " refused";
+    }
+
+    /// <summary>The refusal reason when the game refused every candidate and none was a known floor to write.</summary>
+    public static string NoKnownFloorWhy(int candidates) =>
+        "the game refused " + (candidates > 1 ? "all " + candidates.ToString(CultureInfo.InvariantCulture) + " candidate floors" : "that floor")
+        + " and none is a known ground floor to place the player on; left where they were";
 
     // ---- the fallback write's guard ----------------------------------------------------------------
 

@@ -16,8 +16,11 @@ namespace Progenitor.Terrain;
 /// <para><b>Height</b> (<see cref="TryGetHeight"/>) is
 /// <c>TileWorldSingleton.GetTileWorld().TryGetGameplayHeight(in float3, out float, bilinear: true)</c>
 /// (<c>TileWorld</c>) — the call the Dev bridge's <c>teleport</c> op has snapped its
-/// destinations to the floor with since it shipped. The probe height picks the layer: the highest walkable
-/// floor at or below it. A miss (no tile data at that X/Z: off the world, an unloaded chunk) is
+/// destinations to the floor with since it shipped. The probe height only picks a 5 m height level, and the read
+/// answers the gameplay height of the tile cell's layer for that level, clamped to the layers the cell has
+/// (<see cref="GroundProbeLevels"/>): a probe above the top layer reads the top layer, and a probe 1 m under a floor
+/// can read that same floor again. It is not a search for the highest floor at or below the probe. A miss
+/// (no tile data at that X/Z: off the world, an unloaded chunk) is
 /// <c>false</c>; so is a NaN or a height below <see cref="MinHeight"/>, the same floor Dev applies.</para>
 ///
 /// <para><b>Walkable tile</b> (<see cref="TryIsWalkable"/>) is the game's own
@@ -97,8 +100,9 @@ public sealed class GroundProbe : IDisposable
     }
 
     /// <summary>
-    /// The gameplay floor at (<paramref name="x"/>, <paramref name="z"/>), at or below
-    /// <paramref name="probeY"/>. False for no tile data, NaN, or below <see cref="MinHeight"/>.
+    /// The gameplay floor at (<paramref name="x"/>, <paramref name="z"/>) on the height level of
+    /// <paramref name="probeY"/> (<see cref="GroundProbeLevels.LevelOf"/>; clamped to the cell's layers).
+    /// False for no tile data, NaN, or below <see cref="MinHeight"/>.
     /// </summary>
     public bool TryGetHeight(float x, float probeY, float z, out float height)
     {

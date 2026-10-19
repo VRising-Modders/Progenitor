@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Progenitor.Terrain;
 
 namespace Progenitor.Debugging;
 
@@ -203,58 +204,155 @@ internal static class DebugMapPolicy
     // ---- the floor -------------------------------------------------------------------------------
 
     /// <summary>
-    /// Meters below a found floor the next layer probe starts. The game's height read answers with the highest
-    /// walkable floor at or below the probe height, so probing this far under a floor finds the next layer down and
-    /// cannot return the same one or a slab a few centimeters under it.
+    /// Meters. A surface less than this under a floor already found is that floor (a slab, terrain just under it), not
+    /// another layer.
     /// </summary>
     internal const float FloorLayerGap = 1f;
 
-    /// <summary>Most layers the floor walk reads under one point (a roof, upper floors, the ground floor).</summary>
+    /// <summary>Most distinct floors the walk collects under one point (a roof, upper floors, the ground floor).</summary>
     internal const int MaxFloorLayers = 6;
 
     /// <summary>Meters. The floor walk never goes further than this below the top layer.</summary>
     internal const float MaxFloorDrop = 30f;
 
     /// <summary>
-    /// The floor chosen under one point. <see cref="Y"/> is the floor to stand on, <see cref="Top"/> the top layer
-    /// (what a single read from <see cref="ProbeHeight"/> gives), <see cref="Layers"/> how many layers were read.
+    /// A castle territory's ground band, <c>CastleTerritory.MinHeightLevel</c> to <c>MaxHeightLevel</c> (height levels,
+    /// <see cref="GroundProbeLevels"/>): the levels its ground floor sits on.
     /// </summary>
-    internal readonly record struct Floor(bool Found, float Y, float Top, int Layers);
+    internal readonly record struct GroundBand(int Min, int Max);
 
     /// <summary>
-    /// Pick the floor to stand on under one point. <paramref name="heightAt"/> answers the game's height read for a
-    /// probe height: the highest walkable floor at or below it, or null. Read once from <see cref="ProbeHeight"/>:
-    /// that is the top layer, and outside a castle it is the answer (the behavior that has worked live).
-    ///
-    /// <para><b>Inside castle territory</b> (<paramref name="preferGround"/>) the top layer can be a roof or an upper
-    /// level the game will not teleport onto (live 2026-10-19: y 15.5 over a castle floor at 5; the game's helper
-    /// returned and moved nobody). There the walk goes on down, <see cref="FloorLayerGap"/> under each floor found,
-    /// and takes the <b>lowest</b> layer: the castle's ground floor, or the ground. It stops at a miss, at an answer
-    /// that is not below the probe (a read that ignores the probe height), past <see cref="MaxFloorDrop"/> under the
-    /// top, or after <see cref="MaxFloorLayers"/> layers.</para>
+    /// Every distinct floor the walk found under one point, top first (<see cref="Floors"/>), and how many height
+    /// reads it made (<see cref="Reads"/>). Empty when even the top read missed.
     /// </summary>
-    internal static Floor PickFloor(Func<float, float?> heightAt, bool preferGround)
+    internal sealed record Walk(IReadOnlyList<float> Floors, int Reads)
+    {
+        internal bool Found => Floors.Count > 0;
+
+        internal float Top => Floors.Count > 0 ? Floors[0] : float.NaN;
+
+        internal float Lowest => Floors.Count > 0 ? Floors[Floors.Count - 1] : float.NaN;
+    }
+
+    /// <summary>
+    /// The floor chosen under one point. <see cref="Y"/> is the floor to stand on, <see cref="Top"/> the top layer
+    /// (what a single read from <see cref="ProbeHeight"/> gives), <see cref="Layers"/> how many distinct floors were
+    /// found, <see cref="Reads"/> how many height reads that took.
+    /// </summary>
+    internal readonly record struct Floor(bool Found, float Y, float Top, int Layers, int Reads = 0);
+
+    private static bool Usable(float? h) => h.HasValue && !float.IsNaN(h.Value) && !float.IsInfinity(h.Value);
+
+    private static float? Ask(Func<float, float?> heightAt, float probeY)
+    {
+        try { return heightAt(probeY); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Walk down the height levels under one point. <paramref name="heightAt"/> is the game's height read for a probe
+    /// height, or null for a miss. That read is quantized: it answers the gameplay height of the cell's layer for the
+    /// probe's height level, clamped to the layers the cell has (<see cref="GroundProbeLevels"/>). Probing 1 m under a
+    /// floor can ask the same level and get the same floor back (live 2026-10-19: 14.5 is level 13, the level of the
+    /// roof at 15.5). So after the top read from <see cref="ProbeHeight"/> the walk asks one whole level at a time, from
+    /// the top's own level down to the level <see cref="MaxFloorDrop"/> under the top, each at the middle of its band.
+    ///
+    /// <para>An answer is a new floor when it is a real height, its own level is at or below the level asked (a layer
+    /// that answers higher is the clamp, or a read that ignores the height), it is within <see cref="MaxFloorDrop"/> of
+    /// the top, and it is more than <see cref="FloorLayerGap"/> under the lowest floor found so far. A miss at one level
+    /// (an empty layer) does not end the walk. It stops after <see cref="MaxFloorLayers"/> floors and, with
+    /// <paramref name="stopAt"/>, on the first floor whose level is within or under that castle ground band.</para>
+    /// </summary>
+    internal static Walk WalkFloors(Func<float, float?> heightAt, GroundBand? stopAt = null)
     {
         if (heightAt == null) throw new ArgumentNullException(nameof(heightAt));
-        float? top = heightAt(ProbeHeight);
-        if (!top.HasValue || float.IsNaN(top.Value)) return new Floor(false, float.NaN, float.NaN, 0);
+        int reads = 1;
+        float? first = Ask(heightAt, ProbeHeight);
+        var floors = new List<float>();
+        if (!Usable(first)) return new Walk(floors, reads);
 
-        float chosen = top.Value;
-        int layers = 1;
-        if (!preferGround) return new Floor(true, chosen, top.Value, layers);
+        float top = first!.Value;
+        floors.Add(top);
+        int from = GroundProbeLevels.LevelOf(top);
+        if (stopAt is { } atTop && from <= atTop.Max) return new Walk(floors, reads);
 
-        while (layers < MaxFloorLayers)
+        int to = GroundProbeLevels.LevelOf(top - MaxFloorDrop);
+        for (int level = from; level >= to && floors.Count < MaxFloorLayers; level--)
         {
-            float probe = chosen - FloorLayerGap;
-            float? below = heightAt(probe);
-            if (!below.HasValue || float.IsNaN(below.Value)) break;
-            if (below.Value > probe + 0.01f) break; // not "at or below" the probe: the read ignored the height
-            if (top.Value - below.Value > MaxFloorDrop) break;
-            chosen = below.Value;
-            layers++;
+            reads++;
+            float? h = Ask(heightAt, GroundProbeLevels.ProbeYFor(level));
+            if (!Usable(h)) continue;
+            float y = h!.Value;
+            if (GroundProbeLevels.LevelOf(y) > level) continue; // answered from above the level asked
+            if (top - y > MaxFloorDrop) continue;
+            if (y >= floors[floors.Count - 1] - FloorLayerGap) continue; // the same floor, or a slab just under it
+            floors.Add(y);
+            if (stopAt is { } band && GroundProbeLevels.LevelOf(y) <= band.Max) break;
         }
 
-        return new Floor(true, chosen, top.Value, layers);
+        return new Walk(floors, reads);
+    }
+
+    /// <summary>
+    /// Pick the floor to stand on under one point. Outside a castle (<paramref name="preferGround"/> false) it is the
+    /// single read from <see cref="ProbeHeight"/>, the top layer (the behavior that has worked live).
+    ///
+    /// <para><b>Inside castle territory</b> the top layer can be a roof or an upper level the game will not teleport
+    /// onto (live 2026-10-19: y 15.5 over a castle floor at 5.07; the game's helper returned and moved nobody). There the
+    /// level walk (<see cref="WalkFloors"/>) goes down and takes the <b>lowest</b> floor it found: with
+    /// <paramref name="ground"/>, the first one within or under the castle's ground band (its ground floor), else the
+    /// lowest within <see cref="MaxFloorDrop"/>.</para>
+    /// </summary>
+    internal static Floor PickFloor(Func<float, float?> heightAt, bool preferGround, GroundBand? ground = null)
+    {
+        if (heightAt == null) throw new ArgumentNullException(nameof(heightAt));
+        if (!preferGround)
+        {
+            float? top = Ask(heightAt, ProbeHeight);
+            return Usable(top)
+                ? new Floor(true, top!.Value, top.Value, 1, 1)
+                : new Floor(false, float.NaN, float.NaN, 0, 1);
+        }
+
+        var walk = WalkFloors(heightAt, ground);
+        return walk.Found
+            ? new Floor(true, walk.Lowest, walk.Top, walk.Floors.Count, walk.Reads)
+            : new Floor(false, float.NaN, float.NaN, 0, walk.Reads);
+    }
+
+    /// <summary>One floor for the teleport to try, in order, and whether the position write may put a player there.</summary>
+    internal readonly record struct Candidate(float Y, bool WriteAllowed);
+
+    /// <summary>
+    /// The floors to try at the chosen spot, in order: <paramref name="chosenY"/> first, then every floor of
+    /// <paramref name="walk"/> (a full walk at that spot, top first) more than <see cref="FloorLayerGap"/> under it.
+    /// Each carries <see cref="WriteAllowed(float, Walk, bool, GroundBand?)"/>.
+    /// </summary>
+    internal static IReadOnlyList<Candidate> Candidates(float chosenY, Walk walk, bool castle, GroundBand? ground)
+    {
+        if (walk == null) throw new ArgumentNullException(nameof(walk));
+        var list = new List<Candidate> { new(chosenY, WriteAllowed(chosenY, walk, castle, ground)) };
+        foreach (float y in walk.Floors)
+            if (y < chosenY - FloorLayerGap) list.Add(new Candidate(y, WriteAllowed(y, walk, castle, ground)));
+        return list;
+    }
+
+    /// <summary>
+    /// Whether the direct position write may put a player on floor <paramref name="y"/> when the game's own teleport did
+    /// not move them. The game refusing a spot is a reason not to force the player there, so only a known walkable
+    /// floor qualifies, never an upper level or a roof:
+    /// <list type="bullet">
+    /// <item>In castle territory: the floor's level is within or under the castle's ground band (its ground floor).
+    /// Without the band, nothing qualifies.</item>
+    /// <item>Outside: the floor is the lowest the walk found at that spot (the ground, nothing under it within
+    /// <see cref="MaxFloorDrop"/>).</item>
+    /// </list>
+    /// </summary>
+    internal static bool WriteAllowed(float y, Walk walk, bool castle, GroundBand? ground)
+    {
+        if (float.IsNaN(y) || walk == null || !walk.Found) return false;
+        if (castle) return ground is { } band && GroundProbeLevels.LevelOf(y) <= band.Max;
+        return y <= walk.Lowest + FloorLayerGap;
     }
 
     /// <summary>One probe's answer.</summary>
@@ -391,6 +489,13 @@ internal static class DebugMapPolicy
 
     private static string M(float v) => Math.Round(v).ToString("0", CultureInfo.InvariantCulture);
 
+    private static string FloorList(IReadOnlyList<Candidate> floors)
+    {
+        var parts = new string[floors.Count];
+        for (int i = 0; i < floors.Count; i++) parts[i] = N(floors[i].Y) + (floors[i].WriteAllowed ? "*" : "");
+        return string.Join(">", parts);
+    }
+
     /// <summary>What the player is told (chat, and the client log).</summary>
     internal static string Notice(Result result, float moved, float radius) => result switch
     {
@@ -409,17 +514,24 @@ internal static class DebugMapPolicy
     /// <summary>
     /// The readback line <c>.debug tp</c> prints and the server logs for every request. <paramref name="castle"/>:
     /// the point is in castle territory, so the floor walk ran (<c>top=</c> names the top layer it went under).
-    /// <paramref name="verify"/>: what the read-back after the move found, empty before a move.
+    /// <paramref name="verify"/>: what the read-back after the move found, empty before a move. <paramref name="floors"/>:
+    /// the candidate floors tried in order (<c>floors=</c>, a <c>*</c> after each the position write may use), shown
+    /// when there is more than one or the point is in a castle. <paramref name="reads"/>: game height reads the request
+    /// made (<c>reads=</c>, shown when non-zero). <paramref name="landed"/>: the floor the character arrived on when it
+    /// was a lower candidate, not the chosen one (<c>landed=</c>).
     /// </summary>
     internal static string Readback(string who, Result result, float reqX, float reqZ, Spot spot, string method, bool walkCheck,
-        bool castle = false, string verify = "") =>
+        bool castle = false, string verify = "", IReadOnlyList<Candidate>? floors = null, int reads = 0, float landed = float.NaN) =>
         "teleport " + who + ": requested (" + N(reqX) + ", " + N(reqZ) + ")"
         + (spot.Found
             ? " chosen (" + N(spot.X) + ", " + N(spot.Y) + ", " + N(spot.Z) + ") moved " + N(spot.Distance) + " m"
             : " no spot")
         + (castle ? " castle=yes" : "")
         + (spot.Found && !float.IsNaN(spot.Top) && spot.Top > spot.Y + 0.05f ? " top=" + N(spot.Top) : "")
+        + (floors != null && (floors.Count > 1 || castle) ? " floors=" + FloorList(floors) : "")
+        + (!float.IsNaN(landed) ? " landed=" + N(landed) : "")
         + " probes=" + spot.Probes.ToString(CultureInfo.InvariantCulture)
+        + (reads > 0 ? " reads=" + reads.ToString(CultureInfo.InvariantCulture) : "")
         + (spot.Step > 0f ? " step=" + N(spot.Step) : "")
         + " walkCheck=" + (walkCheck ? "on" : "off")
         + " result=" + result

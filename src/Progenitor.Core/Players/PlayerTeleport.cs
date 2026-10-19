@@ -19,12 +19,14 @@ namespace Progenitor.Players;
 /// live. <c>SpawnTransform</c>, the AI leash home, is never touched.</para>
 ///
 /// <para><see cref="Teleport"/> is the one-shot form: helper, or the <see cref="UnitSpawnPlacement"/> writes if the
-/// helper throws, and no read-back. <see cref="TeleportVerified"/> is the checked form the debug-buff map teleport
-/// uses: the helper, a read-back <see cref="PlayerTeleportPolicy.ReadbackDelaySeconds"/> later, and when the
-/// character did not arrive the Dev op's guarded write of <c>Translation</c>, <c>LastTranslation</c> and
-/// <c>PlayerLastValidPosition</c> (<see cref="TryWritePosition"/>, shared with that op) and a second read-back. It
-/// reports arrival only from a read-back, never from the helper returning (live 2026-10-19: the helper returned
-/// normally for castle-roof targets and moved nobody).</para>
+/// helper throws, and no read-back. <c>TeleportVerified</c> is the checked form the debug-buff map teleport uses: the
+/// helper, a read-back <see cref="PlayerTeleportPolicy.ReadbackDelaySeconds"/> later, the helper again on each lower
+/// candidate floor the caller listed, and only then, and only onto a target the caller marked as a known walkable
+/// floor, the Dev op's guarded write of <c>Translation</c>, <c>LastTranslation</c> and <c>PlayerLastValidPosition</c>
+/// (<see cref="TryWritePosition"/>, shared with that op) and a last read-back. It reports arrival only from a
+/// read-back, never from the helper returning (live 2026-10-19: the helper returned normally for castle-roof targets
+/// and moved nobody), and it never forces a player onto a spot the game refused unless that spot is a known floor
+/// (live 2026-10-19 after #163: the write put a player on their castle roof).</para>
 ///
 /// <para>Mounted, shapeshifted or in combat makes no difference to the call; whether a mount follows its
 /// rider is the game helper's business and has not been checked live.</para>
@@ -76,87 +78,138 @@ public static class PlayerTeleport
         return null;
     }
 
-    /// <summary>What <see cref="TeleportVerified"/> found.</summary>
-    /// <param name="Arrived">The read-back put the character at the destination.</param>
-    /// <param name="Method">What ran: <see cref="GameMethod"/>, <see cref="PositionWriteMethod"/>, or the helper then the write.</param>
+    /// <summary>What <see cref="TeleportVerified(World, Entity, IReadOnlyList{TeleportTarget}, object?, Action{VerifiedTeleport})"/> found.</summary>
+    /// <param name="Arrived">The read-back put the character at a target.</param>
+    /// <param name="Method">What ran (<see cref="PlayerTeleportPolicy.MethodToken"/>): <see cref="GameMethod"/>, the
+    /// helper on several candidates, or the helper then <see cref="PositionWriteMethod"/>.</param>
     /// <param name="Why">Empty when arrived; otherwise the reason, for the log.</param>
     /// <param name="After">The last read position, or null when it could not be read.</param>
-    public readonly record struct VerifiedTeleport(bool Arrived, string Method, string Why, float3? After);
+    /// <param name="Target">Index of the target the character arrived at, or the last one tried; -1 when none ran.</param>
+    public readonly record struct VerifiedTeleport(bool Arrived, string Method, string Why, float3? After, int Target = 0);
 
     /// <summary>
-    /// Move <paramref name="character"/> to <paramref name="destination"/> and check it arrived. Calls
-    /// <paramref name="done"/> on the main thread, once: right away when nothing could run, else after one read-back
-    /// (two when the fallback write ran). The delayed steps are posted under <paramref name="owner"/>, so an unload
-    /// drops them and <paramref name="done"/> is then never called. Server, main thread.
+    /// One place a verified teleport may put the character. <paramref name="WriteAllowed"/>: when the game's helper does
+    /// not move the character, the direct position write may put them here. Set it only for a known walkable floor (the
+    /// ground, a castle's ground floor), never for an upper level or a roof the game has just refused.
     /// </summary>
-    public static void TeleportVerified(World world, Entity character, float3 destination, object? owner, Action<VerifiedTeleport> done)
+    public readonly record struct TeleportTarget(float3 Position, bool WriteAllowed);
+
+    /// <summary>
+    /// One target, with the direct position write allowed only when <paramref name="writeAllowed"/> says so (since
+    /// 2026-10-19 it is no longer the default: a refused spot is not forced).
+    /// </summary>
+    public static void TeleportVerified(World world, Entity character, float3 destination, object? owner, Action<VerifiedTeleport> done,
+        bool writeAllowed = false) =>
+        TeleportVerified(world, character, new[] { new TeleportTarget(destination, writeAllowed) }, owner, done);
+
+    /// <summary>
+    /// Move <paramref name="character"/> to the first of <paramref name="targets"/> and check it arrived. Server, main
+    /// thread. Calls <paramref name="done"/> on the main thread, once: right away when nothing could run, else after the
+    /// last read-back. The delayed steps are posted under <paramref name="owner"/>, so an unload drops them and
+    /// <paramref name="done"/> is then never called.
+    ///
+    /// <para>The game's helper on <c>targets[0]</c>, a read-back <see cref="PlayerTeleportPolicy.ReadbackDelaySeconds"/>
+    /// later; when the character is not there, the helper on each next target in order (the caller lists lower
+    /// candidate floors after the preferred one), each with its own read-back. When the game refused them all, the
+    /// guarded position write (<see cref="TryWritePosition"/>) on the first target whose
+    /// <see cref="TeleportTarget.WriteAllowed"/> is set, and a last read-back; with none, a refusal and the character
+    /// stays where the game left them (<see cref="PlayerTeleportPolicy.AfterHelperAt"/>). If the helper throws, the write
+    /// rule applies at once.</para>
+    /// </summary>
+    public static void TeleportVerified(World world, Entity character, IReadOnlyList<TeleportTarget> targets, object? owner,
+        Action<VerifiedTeleport> done)
     {
         if (done == null) throw new ArgumentNullException(nameof(done));
+        if (targets == null || targets.Count == 0)
+        {
+            done(new VerifiedTeleport(false, "", "no target", null, -1));
+            return;
+        }
+
         if (world == null || !world.IsCreated)
         {
-            done(new VerifiedTeleport(false, "", "no game world", null));
+            done(new VerifiedTeleport(false, "", "no game world", null, -1));
             return;
         }
 
         var em = world.EntityManager;
         if (character == Entity.Null || !em.Exists(character) || !UnitSpawnPlacement.TryReadTranslation(em, character, out var before))
         {
-            done(new VerifiedTeleport(false, "", "no live character with a position", null));
+            done(new VerifiedTeleport(false, "", "no live character with a position", null, -1));
             return;
         }
 
-        string helperError = "";
-        bool helperRan;
+        var allowed = new bool[targets.Count];
+        for (int i = 0; i < targets.Count; i++) allowed[i] = targets[i].WriteAllowed;
+        HelperAt(world, character, before, targets, allowed, 0, owner, done);
+    }
+
+    private static void HelperAt(World world, Entity character, float3 before, IReadOnlyList<TeleportTarget> targets,
+        bool[] allowed, int index, object? owner, Action<VerifiedTeleport> done)
+    {
+        var destination = targets[index].Position;
         try
         {
-            TeleportUtilityServer.Teleport(em, character, destination);
-            helperRan = true;
+            TeleportUtilityServer.Teleport(world.EntityManager, character, destination);
         }
         catch (Exception e)
         {
-            helperRan = false;
-            helperError = e.Message;
-        }
+            Plugin.Logger?.LogWarning("PlayerTeleport: the game helper threw (" + e.Message + ")");
+            var thrown = PlayerTeleportPolicy.AfterHelperThrew(allowed);
+            if (thrown.Next == PlayerTeleportPolicy.Next.WritePosition)
+            {
+                WriteThenCheck(world, character, before, targets[thrown.Index].Position, owner,
+                    PlayerTeleportPolicy.MethodToken(GameMethod, index, false, PositionWriteMethod, true), thrown.Index, done);
+                return;
+            }
 
-        if (!helperRan)
-        {
-            Plugin.Logger?.LogWarning("PlayerTeleport: the game helper threw (" + helperError + "); writing the position instead.");
-            WriteThenCheck(world, character, before, destination, owner, PositionWriteMethod, done);
+            done(new VerifiedTeleport(false, PlayerTeleportPolicy.MethodToken(GameMethod, index, false, PositionWriteMethod, false),
+                "the game helper threw (" + e.Message + ") and no target is a known floor to write", null, index));
             return;
         }
 
+        int runs = index + 1;
         Dev.MainThread.PostDelayed(PlayerTeleportPolicy.ReadbackDelaySeconds, () =>
         {
             try
             {
                 var after = Read(world, character);
-                var arrival = Check(before, destination, after);
-                var next = PlayerTeleportPolicy.AfterHelper(arrival, fallbackAllowed: arrival != PlayerTeleportPolicy.Arrival.Unknown);
-                if (next == PlayerTeleportPolicy.Next.Done)
+                var step = PlayerTeleportPolicy.AfterHelperAt(Check(before, destination, after), index, allowed);
+                switch (step.Next)
                 {
-                    done(new VerifiedTeleport(true, GameMethod, "", after));
-                    return;
+                    case PlayerTeleportPolicy.Next.Done:
+                        done(new VerifiedTeleport(true, PlayerTeleportPolicy.MethodToken(GameMethod, runs, true, PositionWriteMethod, false),
+                            "", after, index));
+                        return;
+                    case PlayerTeleportPolicy.Next.HelperOnNext:
+                        Plugin.Logger?.LogInfo("PlayerTeleport: " + GameMethod + " did not move the character; trying the next lower floor");
+                        HelperAt(world, character, before, targets, allowed, step.Index, owner, done);
+                        return;
+                    case PlayerTeleportPolicy.Next.WritePosition:
+                        Plugin.Logger?.LogInfo("PlayerTeleport: " + GameMethod + " did not move the character; writing " + PositionWriteMethod
+                            + " onto a known floor");
+                        WriteThenCheck(world, character, before, targets[step.Index].Position, owner,
+                            PlayerTeleportPolicy.MethodToken(GameMethod, runs, false, PositionWriteMethod, true), step.Index, done);
+                        return;
+                    default:
+                        done(new VerifiedTeleport(false, PlayerTeleportPolicy.MethodToken(GameMethod, runs, false, PositionWriteMethod, false),
+                            after == null
+                                ? "the character's position could not be read back"
+                                : PlayerTeleportPolicy.NoKnownFloorWhy(targets.Count),
+                            after, index));
+                        return;
                 }
-
-                if (next == PlayerTeleportPolicy.Next.Refused)
-                {
-                    done(new VerifiedTeleport(false, GameMethod, "the character's position could not be read back", after));
-                    return;
-                }
-
-                Plugin.Logger?.LogInfo("PlayerTeleport: " + GameMethod + " did not move the character; writing " + PositionWriteMethod);
-                WriteThenCheck(world, character, before, destination, owner,
-                    PlayerTeleportPolicy.HelperThenWrite(GameMethod, PositionWriteMethod), done);
             }
             catch (Exception e)
             {
-                done(new VerifiedTeleport(false, GameMethod, "read-back threw: " + e.Message, null));
+                done(new VerifiedTeleport(false, GameMethod, "read-back threw: " + e.Message, null, index));
             }
         }, owner);
     }
 
     private static void WriteThenCheck(
-        World world, Entity character, float3 before, float3 destination, object? owner, string method, Action<VerifiedTeleport> done)
+        World world, Entity character, float3 before, float3 destination, object? owner, string method, int target,
+        Action<VerifiedTeleport> done)
     {
         var refusals = new List<string>();
         bool wrote;
@@ -172,7 +225,7 @@ public static class PlayerTeleport
 
         if (!wrote)
         {
-            done(new VerifiedTeleport(false, method, refusals.Count > 0 ? string.Join("; ", refusals) : "no position component to write", null));
+            done(new VerifiedTeleport(false, method, refusals.Count > 0 ? string.Join("; ", refusals) : "no position component to write", null, target));
             return;
         }
 
@@ -183,12 +236,12 @@ public static class PlayerTeleport
                 var after = Read(world, character);
                 var next = PlayerTeleportPolicy.AfterWrite(Check(before, destination, after));
                 done(next == PlayerTeleportPolicy.Next.Done
-                    ? new VerifiedTeleport(true, method, "", after)
-                    : new VerifiedTeleport(false, method, "the character was not at the target after the position write", after));
+                    ? new VerifiedTeleport(true, method, "", after, target)
+                    : new VerifiedTeleport(false, method, "the character was not at the target after the position write", after, target));
             }
             catch (Exception e)
             {
-                done(new VerifiedTeleport(false, method, "read-back threw: " + e.Message, null));
+                done(new VerifiedTeleport(false, method, "read-back threw: " + e.Message, null, target));
             }
         }, owner);
     }

@@ -54,6 +54,12 @@ namespace Progenitor.Dev.Ops;
 /// the game helper moves — the case it exists for — while the write it performs is now no
 /// broader than the <c>set</c> op the same bridge already exposes on the same components.
 ///
+/// <b>Differs from the debug map teleport on purpose.</b> This op takes explicit coordinates, so a helper refusal still
+/// gets the guarded write onto the caller's point (snapped to the floor of the requested height's level), and
+/// <c>arrived</c> reports whether it stuck. The debug-buff map teleport (<c>PlayerTeleport.TeleportVerified</c> with
+/// candidate floors) instead tries lower floors with the game's helper and writes only onto a known walkable floor,
+/// never a roof the game refused (live 2026-10-19).
+///
 /// The response is deferred one Drain-second, like <c>spawn</c>, so <c>after</c> is the live
 /// position once the movement group has run and <c>arrived</c> says whether it stuck. A helper
 /// that returns without moving the character is not a success: the write runs and the read-back
@@ -111,8 +117,10 @@ public static unsafe class TeleportOps
     /// Drop a destination onto the gameplay floor under it. A boss pivot and a guessed
     /// height sit above the ground; <c>TileWorld.TryGetGameplayHeight</c> uses the
     /// requested point, including height, so a stacked floor (the throne room at 15)
-    /// stays on that floor instead of the outdoor ground below. A miss leaves the
-    /// requested height alone.
+    /// stays on that floor instead of the outdoor ground below. The height only picks a
+    /// 5 m height level (<c>GroundProbeLevels</c> in Core): any y on that level reads the
+    /// same floor, which can be above the requested y (then it is left alone). A miss
+    /// leaves the requested height alone.
     /// </summary>
     private static float3 SnapToFloor(World world, float3 destination)
     {
