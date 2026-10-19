@@ -65,6 +65,66 @@ public class ServerBrowserFilterTests
         Assert.True(ServerBrowserMarker.FitsSteam(null));
     }
 
+    // ---- the count line ----------------------------------------------------------------------------------------------
+
+    /// <summary>A stand-in for the font measurement: a fixed advance per character.</summary>
+    private static Func<string, float> PerChar(float advance) => s => s.Length * advance;
+
+    [Fact]
+    public void Count_line_suffix_is_short()
+    {
+        Assert.Equal(" · Progenitor", ServerBrowserCountLine.Suffix);
+        Assert.DoesNotContain("only", ServerBrowserCountLine.Suffix);
+    }
+
+    [Theory]
+    // Live 2026.10.143's numbers, and larger counts.
+    [InlineData("Servers: 0 (1,538 total)")]
+    [InlineData("Servers: 1,234 (12,345 total)")]
+    [InlineData("Servers: 12,345 (123,456 total)")]
+    public void Count_line_adds_the_suffix_when_the_whole_line_fits(string game)
+    {
+        string marked = game + " · Progenitor";
+        // Exactly as wide as the marked line: it fits.
+        Assert.Equal(marked, ServerBrowserCountLine.Fit(game, marked.Length * 10f, PerChar(10f)));
+        // Half a pixel of slack for rounding.
+        Assert.Equal(marked, ServerBrowserCountLine.Fit(game, marked.Length * 10f - 0.4f, PerChar(10f)));
+        // One character short: the game's own text, never a wrapped line.
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, (marked.Length - 1) * 10f, PerChar(10f)));
+    }
+
+    [Fact]
+    public void Count_line_never_marks_twice_and_replaces_the_old_suffix()
+    {
+        const string game = "Servers: 0 (1,538 total)";
+        var measure = PerChar(10f);
+        string once = ServerBrowserCountLine.Fit(game, 1000f, measure);
+        Assert.Equal(game + " · Progenitor", once);
+        Assert.Equal(once, ServerBrowserCountLine.Fit(once, 1000f, measure));
+        // A line an earlier Core marked with the long suffix.
+        Assert.Equal(once, ServerBrowserCountLine.Fit(game + " · Progenitor only", 1000f, measure));
+        // Too narrow now: the earlier suffix comes off too.
+        Assert.Equal(game, ServerBrowserCountLine.Fit(once, game.Length * 10f, measure));
+        Assert.Equal(game, ServerBrowserCountLine.Base(game + " · Progenitor only"));
+        Assert.Equal(game, ServerBrowserCountLine.Base(once));
+    }
+
+    [Fact]
+    public void Count_line_leaves_the_game_text_without_a_measurement_or_width()
+    {
+        const string game = "Servers: 1,234 (12,345 total)";
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, 1000f, null));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, -1f, PerChar(1f)));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, 0f, PerChar(1f)));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, float.NaN, PerChar(1f)));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, float.PositiveInfinity, PerChar(1f)));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, 1000f, _ => -1f));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, 1000f, _ => float.NaN));
+        Assert.Equal(game, ServerBrowserCountLine.Fit(game, 1000f, _ => throw new InvalidOperationException()));
+        Assert.Equal("", ServerBrowserCountLine.Fit("", 1000f, PerChar(1f)));
+        Assert.Equal("", ServerBrowserCountLine.Fit(null, 1000f, PerChar(1f)));
+    }
+
     // ---- the filter pass ---------------------------------------------------------------------------------------------
 
     private sealed class FakeRows : IServerBrowserRows

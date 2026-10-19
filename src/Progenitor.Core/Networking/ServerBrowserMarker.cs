@@ -74,6 +74,50 @@ internal static class ServerBrowserMarker
 }
 
 /// <summary>
+/// BROWSERFILTER1: the game's <c>Servers: N (M total)</c> count line while the filter is on. Game-free.
+///
+/// <para>Live 2026.10.143 (1920x1080): the earlier suffix <c> · Progenitor only</c> made the line
+/// <c>Servers: 0 (1,538 total) · Progenitor only</c>, which wrapped and drew its last word below the filter panel. The
+/// suffix is now <see cref="Suffix"/>, and it is added only when the whole line, measured with the line's own font,
+/// fits the line's width; otherwise the game's own text is left as it is. With no measurement or no width the game's
+/// text is left as well, so the suffix never makes the line wrap.</para>
+/// </summary>
+internal static class ServerBrowserCountLine
+{
+    /// <summary>Appended to the game's <c>Servers: N (M total)</c> line while the filter is on and the line fits.</summary>
+    public const string Suffix = " · Progenitor";
+
+    /// <summary>The suffix an earlier Core wrote; stripped before measuring so a line is never marked twice.</summary>
+    internal const string OldSuffix = " · Progenitor only";
+
+    /// <summary>The game's text without a suffix this filter (or an earlier Core) added.</summary>
+    public static string Base(string? text)
+    {
+        text ??= "";
+        if (text.EndsWith(OldSuffix, StringComparison.Ordinal)) return text.Substring(0, text.Length - OldSuffix.Length);
+        if (text.EndsWith(Suffix, StringComparison.Ordinal)) return text.Substring(0, text.Length - Suffix.Length);
+        return text;
+    }
+
+    /// <summary>
+    /// The line to draw: <paramref name="gameText"/> + <see cref="Suffix"/> when <paramref name="measure"/> says it fits
+    /// <paramref name="width"/> (half a pixel of slack), else the game's text. An empty text, a width that is not
+    /// positive, or a measurement that is missing, negative or not finite leaves the game's text.
+    /// </summary>
+    public static string Fit(string? gameText, float width, Func<string, float>? measure)
+    {
+        string text = Base(gameText);
+        if (text.Length == 0 || measure == null || !(width > 0f) || float.IsInfinity(width)) return text;
+        string marked = text + Suffix;
+        float w;
+        try { w = measure(marked); }
+        catch { return text; }
+        if (w < 0f || float.IsNaN(w) || float.IsInfinity(w)) return text;
+        return w <= width + 0.5f ? marked : text;
+    }
+}
+
+/// <summary>
 /// The rows the Join Game filter reads and trims: the game's shown list (<c>PlayJoinMenuView._CachedServerListEntries</c>,
 /// the same object as <c>ServerListSystem._CachedResult</c>). Indexes are the list's own.
 /// </summary>
