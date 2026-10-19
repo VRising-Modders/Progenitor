@@ -132,7 +132,7 @@ internal static class ProgenitorPage
             .SettingRef("Chat", "ReplyShortcut", label: "/r replies to the last whisper", control: SettingControl.Toggle,
                 help: "Typing /r at the start of a chat line becomes the game's /reply.")
             .SettingRef("Chat", "NameCompletion", label: "Tab completes names after /w", control: SettingControl.Toggle,
-                help: "After /w or /whisper, the completion key fills in an online player's name; press it again for the next "
+                help: "After /w or /whisper, the completion key fills in the name of a player online anywhere on the server; press it again for the next "
                     + "match. The key is under Keys.");
 
         page.Section(PrivateGamesTitle)

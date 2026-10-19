@@ -188,6 +188,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLogic.cs" Link="Linked\ChatLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatWindowLogic.cs" Link="Linked\ChatWindowLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandLogic.cs" Link="Linked\ChatCommandLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatRoster.cs" Link="Linked\ChatRoster.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandHints.cs" Link="Linked\ChatCommandHints.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandHintsWire.cs" Link="Linked\ChatCommandHintsWire.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatPolicy.cs" Link="Linked\ChatPolicy.cs" />
