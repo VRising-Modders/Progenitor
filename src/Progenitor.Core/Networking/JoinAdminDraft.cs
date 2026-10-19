@@ -1201,7 +1201,8 @@ internal sealed class JoinAdminApplyStep
 /// <summary>
 /// JOINDRAFT1: Apply. Sends the draft's <see cref="JoinAdminDraft.Steps"/> one at a time (the client allows only a few
 /// requests waiting), each after the previous answer. An accepted change leaves the draft; a refused one stays with the
-/// server's reason (<see cref="JoinAdminChange.Error"/>). No answer stops the run (the rest stay staged). Then one
+/// server's reason (<see cref="JoinAdminChange.Error"/>), and an answer's state becomes the draft's base
+/// (<see cref="JoinAdminDraft.Rebase"/>) right away. No answer stops the run (the rest stay staged). Then one
 /// <c>get</c> refreshes the state. Game-free: <paramref name="send"/> is the client channel (null when sent, else why not).
 /// </summary>
 internal sealed class JoinAdminApplyRun
@@ -1297,6 +1298,11 @@ internal sealed class JoinAdminApplyRun
             foreach (var c in step.Changes) Fail(c, response.Error.Length > 0 ? response.Error : "Refused.");
         }
 
+        // Live 2026-10-19 (2026.10.133): the answer's state is the draft's base before anything draws it. An accepted add
+        // leaves the draft here, and the panel redraws when the run finishes, inside this same answer and before the
+        // client's change event rebases the draft. Drawn from the old base, a newly recommended mod vanished from the
+        // list (and the in-place update that followed kept it out), although the server had stored and signed it.
+        if (response.State != null) _draft.Rebase(response.State);
         Next();
     }
 

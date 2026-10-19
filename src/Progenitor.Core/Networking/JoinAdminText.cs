@@ -35,6 +35,21 @@ internal static class JoinAdminRowLayout
     internal static CellRowSpec SectionHeading(string key, string title, string count) =>
         JoinFlowLayout.Heading(key, title, count, gapAbove: SectionGap);
 
+    /// <summary>The picker's subtitle row (<see cref="PickBody"/>).</summary>
+    internal const string RowPickBody = "ja-pick-body";
+
+    internal const float PickBodyFontSize = 15f;
+
+    /// <summary>
+    /// The Recommend, Require and Approve pickers' subtitle: a muted, centered, wrapping row above the search field, as
+    /// tall as its estimated lines. The estimate's average glyph is wider than the drawn font's, so the row is never
+    /// shorter than the text. It is a content row, not the dialog body: a dialog body only gets the frame height its
+    /// other rows leave, and the search field with ten pick rows left one line (live 2026-10-19, 2026.10.133: "Client
+    /// mods only: installed on this PC, or found on Thund…").
+    /// </summary>
+    internal static CellRowSpec PickBody(string text, float width) =>
+        JoinFlowLayout.Line(RowPickBody, text, CellTone.Muted, width, CellAlign.Center, PickBodyFontSize);
+
     internal const float RuleWidth = 130f;
     internal const float RemoveWidth = 48f;
     internal const float MarkWidth = 80f;

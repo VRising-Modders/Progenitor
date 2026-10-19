@@ -568,6 +568,86 @@ public sealed class JoinAdminTests : IDisposable
         Assert.Contains("longer than 64", Apply(new JoinAdminRequest { Op = JoinAdminOps.RecommendAdd, Id = "x.mod", Name = new string('n', 65) }).Error);
     }
 
+    /// <summary>
+    /// Live 2026-10-19 (2026.10.133): with a manifest row recommended, an admin's Recommend + Apply read "Applied 1 change"
+    /// and the server stored and signed the new row, but the popup then listed only the manifest row (`1 shown to players`).
+    /// The server's answer, the signed section and the players' join page carry both rows; the panel's draft, rebased by
+    /// the Apply run on the answer itself, draws both.
+    /// </summary>
+    [Fact]
+    public void A_recommendation_beside_a_manifest_row_shows_both_in_the_answer_the_section_the_join_page_and_the_popup()
+    {
+        File.WriteAllText(Path.Combine(_dir, ModManifest.ManifestFileName),
+            "{\"recommended\":[{\"package\":\"Nightbreak-PopupTotals\",\"version\":\"1.0.0\",\"reason\":\"Totals in popups.\"}]}");
+        var overlayRow = new RecommendedMod("", "Nightbreak-PopupTotals", "1.0.0", "Totals in popups.");
+        JoinServerSettings.TestContent = new JoinSection("Hi", null, new[] { overlayRow }, new JoinServerZone("UTC", 0));
+        var before = Apply(Req(JoinAdminOps.Get)).State!;
+        Assert.True(Assert.Single(before.Recommended).FromFile);
+
+        var draft = new JoinAdminDraft();
+        draft.Reset(before);
+        Assert.Null(draft.Recommend("", "Brainiac-NoBloodMooonTint", "4.0.0", "Keeps blood moons easy on the eyes.", "NoBloodMooonTint"));
+        Assert.Equal(2, draft.RecommendedRows().Count);
+
+        // The panel's channel: each request reaches the server and its answer comes back over the wire.
+        List<string>? drawnWhenDone = null;
+        JoinAdminState? last = null;
+        var run = new JoinAdminApplyRun(draft, (request, answer) =>
+        {
+            var response = Apply(request);
+            Assert.True(JoinAdminWire.TryDecodeResponse(JoinAdminWire.EncodeResponse(response), out var decoded));
+            decoded.Nonce = request.Nonce;
+            last = decoded.State;
+            answer(decoded);
+            return null;
+        }, r => drawnWhenDone = draft.RecommendedRows().Where(x => x.Mark != JoinAdminRowMark.Removed).Select(x => x.Row.Key).ToList());
+        run.Start();
+
+        Assert.Equal("Applied 1 change. Players see it on their next join.", run.Summary());
+        Assert.False(draft.HasChanges);
+        // What the popup draws when Apply finishes (inside the last answer, before any change event).
+        Assert.Equal(new[] { "Brainiac-NoBloodMooonTint", "Nightbreak-PopupTotals" }, drawnWhenDone);
+        Assert.Equal("2 shown to players", JoinAdminText.ShownCount(drawnWhenDone!.Count));
+        var rows = draft.RecommendedRows();
+        Assert.All(rows, x => Assert.Equal(JoinAdminRowMark.None, x.Mark));
+        Assert.False(rows[0].Row.FromFile);
+        Assert.Equal("Keeps blood moons easy on the eyes.", rows[0].Row.Reason);
+        Assert.True(rows[1].Row.FromFile);
+        Assert.Equal(2, last!.Recommended.Count);
+
+        // The popup's built signature names the state its rows are drawn from (the draft's base), so a base that lagged
+        // the client's last answer differs from the rebased one and the next change event rebuilds the page.
+        string panel = File.ReadAllText(Path.Combine(SourcePin.RepoRoot(), "src", "Progenitor.Core", "Networking", "JoinAdminPanel.cs"));
+        Assert.Contains("_builtSignature = MainSignature(Draft.Base ?? JoinAdminClient.State, Draft);", panel);
+
+        // The signed section and the players' join page ("Mods for <server>") list both.
+        var signed = ModManifest.LastEnvelope!.Join!;
+        Assert.Equal(new[] { "Brainiac-NoBloodMooonTint", "Nightbreak-PopupTotals" }, signed.Recommended.Select(m => m.Package));
+        Assert.NotNull(JoinSectionJson.Verified(ModManifest.LastEnvelope, out _));
+        var page = JoinPageModel.Build(new JoinFacts
+        {
+            ServerName = "S", Asked = Array.Empty<Handshake.ModRecord>(), Provided = Array.Empty<Handshake.ModRecord>(), Section = signed,
+        });
+        Assert.Equal(2, page.Recommended.Count);
+    }
+
+    [Fact]
+    public void The_merge_keeps_the_admin_rows_then_the_overlay_rows_and_matches_ids_and_packages_across_both()
+    {
+        var admin = new[] { new RecommendedMod("", "Brainiac-NoBloodMooonTint", "4.0.0", "Admin") };
+        var overlay = new[]
+        {
+            new RecommendedMod("", "Nightbreak-PopupTotals", "1.0.0", "File"),
+            new RecommendedMod("brainiac.nobloodmoontint", "brainiac-nobloodmooontint", "4.0.0", "Same mod, other case"),
+        };
+        var merged = JoinAdminPolicy.Merge(admin, overlay);
+        Assert.Equal(new[] { "Brainiac-NoBloodMooonTint", "Nightbreak-PopupTotals" }, merged.Select(m => m.Package));
+        Assert.Equal("Admin", merged[0].Reason);
+        Assert.Equal(2, JoinAdminPolicy.Merge(overlay.Take(1).ToList(), admin).Count);
+        Assert.Single(JoinAdminPolicy.Merge(null, overlay.Take(1).ToList()));
+        Assert.Single(JoinAdminPolicy.Merge(admin, null));
+    }
+
     // ---- the wire --------------------------------------------------------------------------------
 
     [Fact]
