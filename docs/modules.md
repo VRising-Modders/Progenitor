@@ -52,6 +52,8 @@ Without any of these, the page shows the description passed to `ctx.Menu.Registe
 
 **Plugin text is drawn as text.** Markdown is converted to plain text blocks and every `<` reaches the label escaped, so a README cannot inject TextMeshPro tags (`<size>`, `<sprite>`, `<color>`), including inside code spans and fenced blocks.
 
+**What the About section draws.** Headings are larger lines (a first `# Title` that only repeats the mod's name is left out, since the page already shows it); lines of one paragraph join into one; bullet and numbered lists keep their bullet or number and are indented by nesting; a blockquote is an indented, muted note without its `>` (a GitHub alert's `[!NOTE]` marker line is dropped); a GitHub pipe table is drawn as aligned columns under a muted header row when its columns fit the text width, otherwise one line per row labeled by the header (`Display / Show notices — Default: On · Who decides: Each player · …`). Bold, italic, strikethrough and code-span markers are dropped and their text kept; links show their text only; images and badges, HTML tags, HTML comments and horizontal rules are dropped; an autolink keeps its address. The store listing's README in Install mods uses the same conversion (a quote is a muted note there; a table row is its labeled line). Source-checked and game-free tested (`AboutMarkdownTests`), not live-verified.
+
 **A store listing is shown only for the package it came from.** Before the plugin's own text, the page can show a Thunderstore listing's facts. The rule has two steps:
 
 | Evidence | Shown |

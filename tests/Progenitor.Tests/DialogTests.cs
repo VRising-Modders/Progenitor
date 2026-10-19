@@ -1196,15 +1196,26 @@ public sealed class DialogTests : IDisposable
         Assert.Equal(new[] { "toggle", "slider", "input", "choice", "numeric" }, _runtime.GridAdds.ToArray());
 
         // MENUKIT2: the settings grid is the game's Options row (ModSettingsRowGrid).
-        var grid = ModSettingsRowGrid.For(paneRowWidth).Columns(hasControl: true);
+        var rowGrid = ModSettingsRowGrid.For(paneRowWidth);
+        var grid = rowGrid.Columns(hasControl: true);
         foreach (string kind in new[] { "toggle", "slider", "input", "choice", "numeric" })
         {
             var c = RowColumnRules.For(kind, grid: true, hasControl: true, searchField: false, menuPane: true, paneRowWidth);
             Assert.Equal(grid.ControlX, c.ControlX, 2);
             Assert.Equal(grid.ControlWidth, c.ControlWidth, 2);
+            // Every name starts at the same x.
+            Assert.Equal(grid.LabelX - grid.LabelWidth * 0.5f, c.LabelX - c.LabelWidth * 0.5f, 2);
+            Assert.True(RowColumnRules.CaptionLeft(kind, grid: true) == true, kind + ": the name is left-aligned");
+            if (kind == "toggle")
+            {
+                // TOGGLEFIT1: a checkbox row's name runs up to one gap before the checkbox, not only to the column's start.
+                float checkbox = rowGrid.FromCenter(rowGrid.ControlSlot(SettingsControlShape.Checkbox).Left);
+                Assert.Equal(checkbox - ModSettingsRowGrid.Gap, c.LabelRight, 2);
+                continue;
+            }
+
             Assert.Equal(grid.LabelX, c.LabelX, 2);
             Assert.True(c.LabelRight <= c.ControlLeft, kind + ": the name ends before the control column");
-            Assert.True(RowColumnRules.CaptionLeft(kind, grid: true) == true, kind + ": the name is left-aligned");
         }
 
         var label = RowColumnRules.For("label", grid: false, hasControl: false, searchField: false, menuPane: true, paneRowWidth);

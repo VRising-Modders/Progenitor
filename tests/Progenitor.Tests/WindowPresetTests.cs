@@ -518,6 +518,51 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal(500f, UiWindowLayout.StableHeight(800f, 200f, 500f)); // a smaller cap (a cascade layer) wins
     }
 
+    /// <summary>
+    /// TOGGLEFIT1 (live 2026.10.136): in a Basic window drawn in the game's look, <c>panel.Toggle("Show the greeting on
+    /// join", true)</c> drew "Show the greeti…" with about 340 px of empty control column before its checkbox, while
+    /// "Greeting style" and "Notice time (s)" fit. Every grid row's name stopped at the control column's start (147 px
+    /// here); the dropdown and slider names were only short enough. A compact control (the checkbox, a key cap) now
+    /// lets the name run up to one gap before the control; a bar, a slider and a text field keep the column.
+    /// What this would catch: the row rules dropping the row kind, or a checkbox row's name still capped at the column.
+    /// </summary>
+    [Fact]
+    public void A_checkbox_rows_name_runs_up_to_its_checkbox_and_a_bar_rows_name_keeps_the_column()
+    {
+        float row = UiWindowLayout.ContentRowWidth(UiWindowLayout.BasicFrameWidth);
+        var grid = ModSettingsRowGrid.ForWindow(row);
+        const string name = "Show the greeting on join";
+        float drawn = CellLayout.EstimateTextWidth(name, ModSettingsRowGrid.NameFontSize);
+        Assert.True(grid.NameWidth < drawn, "the old column cut the name");
+
+        var toggle = RowColumnRules.For("toggle", grid: true, hasControl: true, searchField: false, menuPane: false, row, sizedToRow: true);
+        float checkboxLeft = grid.ControlSlot(SettingsControlShape.Checkbox).Left;
+        Assert.True(toggle.LabelWidth >= drawn, "the toggle's name gets " + toggle.LabelWidth + " px for " + drawn + " px of text");
+        Assert.Equal(checkboxLeft - ModSettingsRowGrid.Gap, ModSettingsRowGrid.NameInset + toggle.LabelWidth, 1);
+        // The name's left edge and the control column do not move.
+        Assert.Equal(grid.FromCenter(ModSettingsRowGrid.NameInset), toggle.LabelX - toggle.LabelWidth * 0.5f, 1);
+        Assert.Equal(grid.Columns(true).ControlX, toggle.ControlX, 1);
+        Assert.Equal(grid.Columns(true).ControlWidth, toggle.ControlWidth, 1);
+
+        // A key cap is compact too; a bar (dropdown, text field), a slider and a button keep the column.
+        Assert.True(RowColumnRules.For("keybind", true, true, false, false, row, sizedToRow: true).LabelWidth > grid.NameWidth);
+        foreach (var kind in new[] { "dropdown", "slider", "slider-entry", "input", "numeric", "button", "multiselect" })
+            Assert.Equal(grid.NameWidth, RowColumnRules.For(kind, true, true, false, false, row, sizedToRow: true).LabelWidth, 1);
+
+        // The Options page's grid (with its reset gutter) follows the same rule.
+        var page = ModSettingsRowGrid.For(900f);
+        Assert.Equal(page.ControlSlot(SettingsControlShape.Checkbox).Left - ModSettingsRowGrid.Gap - ModSettingsRowGrid.NameInset,
+            RowColumnRules.For("toggle", true, true, false, false, 900f).LabelWidth, 1);
+
+        // A shown chip (Restart, Server) sits left of the checkbox: the name stops one gap before it, never below the floor.
+        float left = toggle.LabelX - toggle.LabelWidth * 0.5f;
+        Assert.Equal(toggle.LabelWidth, ModSettingsRowGrid.NameWidthBeforeChip(toggle.LabelWidth, left, float.NaN));
+        Assert.Equal(200f, ModSettingsRowGrid.NameWidthBeforeChip(toggle.LabelWidth, left, left + 200f), 1);
+        Assert.Equal(ModSettingsRowGrid.MinNameWidth, ModSettingsRowGrid.NameWidthBeforeChip(toggle.LabelWidth, left, left + 20f), 1);
+        Assert.Contains("float w = ModSettingsRowGrid.NameWidthBeforeChip(columns.LabelWidth, labelLeft, nameRight);",
+            SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.SettingsLook.cs"));
+    }
+
     [Fact]
     public void A_windows_checkbox_and_bars_end_at_the_rows_right_edge()
     {

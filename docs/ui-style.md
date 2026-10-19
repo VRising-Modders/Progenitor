@@ -22,7 +22,7 @@ Prefer the first row that fits. A settings value belongs on the settings page ev
 
 ## 2. Lay out a page or a window
 
-On a Mods page and a `GameWindow` the framework places every control: the name in the name column, the control in a fixed control column at the same x on every row, compact controls (toggle, number, color) at that column's right edge. Do not position controls yourself and do not pad captions with spaces.
+On a Mods page and a `GameWindow` the framework places every control: the name in the name column, the control in a fixed control column at the same x on every row, compact controls (toggle, number, color) at that column's right edge. A row whose control is a checkbox or a key cap lets its name run up to one gap before that control (or before a shown chip such as Restart), since the column is empty to its left; every other row's name stops at the control column and is cut with an ellipsis past it (TOGGLEFIT1, live 2026.10.136: a toggle's "Show the greeting on join" drew as "Show the greeti…"; source-checked and game-free tested, not live-verified). Do not position controls yourself and do not pad captions with spaces.
 
 1. Start each topic with `Heading`. Keep a page to a few headings; a long page is better split into two pages.
 2. Put one short `Note` under a heading when the topic needs explaining. Put an explanation of one option into that option (a dropdown or radio description), not into a note.

@@ -15463,6 +15463,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             public TMP_InputField? Field;
             public float LastWidth;
 
+            /// <summary>KEYSHEAD1: a <see cref="CellSpec.FitCaption"/> cell's estimated width, kept for when measuring fails.</summary>
+            public float CaptionEstimate = -1f;
+
             /// <summary>INSTALLSIDES1: a scroll block's parts and its laid-out lines.</summary>
             public ScrollRect? Scroll;
             public RectTransform? Viewport;
@@ -16799,6 +16802,33 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             float ask = overlay.Width.Mode == CellWidthMode.Px ? overlay.Width.Value : CellLayout.AutoWidth(overlay);
             ask = Math.Max(1f, ask);
             return targetWidth > 0f ? Math.Min(ask, targetWidth) : ask;
+        }
+
+        /// <summary>
+        /// KEYSHEAD1: each <see cref="CellSpec.FitCaption"/> cell's width from its caption as drawn (TMP's preferred width
+        /// for the cell's own font and size), never more than the row less its right inset; the estimate it was built with
+        /// when the font cannot measure. Live 2026.10.136: the Keybinds tab's "My Mod" heading drew as "My M…".
+        /// </summary>
+        private void FitCaptions(float rowWidth)
+        {
+            for (int i = 0; i < _spec.Cells.Count; i++)
+            {
+                var spec = _spec.Cells[i];
+                if (!spec.FitCaption || spec.Width.Mode != CellWidthMode.Px) continue;
+                if (!_cells.TryGetValue(spec.Key, out var cell) || cell.Tmp == null) continue;
+                if (cell.CaptionEstimate < 0f) cell.CaptionEstimate = spec.Width.Value;
+                float measured = -1f;
+                try
+                {
+                    var tmp = cell.Tmp;
+                    measured = tmp.GetPreferredValues(tmp.text, float.PositiveInfinity, float.PositiveInfinity).x;
+                }
+                catch { measured = -1f; }
+                float max = Math.Max(1f, rowWidth - _spec.RightInset);
+                float w = CellLayout.FitCaptionWidth(cell.CaptionEstimate, measured, max);
+                spec.Width = CellWidth.Px(w);
+                spec.MinWidth = w;
+            }
         }
 
         /// <summary>
@@ -18441,6 +18471,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // The row, not only its cells: HEAD2's right inset is a property of the row
             // (CellRowSpec.RightInset), and resolving the cells alone would place a head block's
             // right column flush against the viewport's clip again.
+            // KEYSHEAD1: a caption-sized cell asks for its caption measured with the drawn font, not the estimate.
+            FitCaptions(rowWidth);
             var placements = MenuPanelLayout.CellColumns(rowWidth, _spec);
             for (int i = 0; i < placements.Length; i++)
             {

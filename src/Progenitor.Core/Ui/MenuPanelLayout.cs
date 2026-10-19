@@ -2134,6 +2134,13 @@ internal sealed class CellSpec
     internal float MinWidth { get; set; }
 
     /// <summary>
+    /// KEYSHEAD1: a one-line <see cref="CellWidthMode.Px"/> text cell as wide as its caption. The runtime measures the caption
+    /// with the drawn font each time it places the row and asks for that width (<see cref="CellLayout.FitCaptionWidth"/>);
+    /// the cell's own Px width is the estimate used when it cannot measure. A cell after it in the row follows the caption.
+    /// </summary>
+    internal bool FitCaption { get; set; }
+
+    /// <summary>
     /// P7b: the most a <see cref="CellWidthMode.Fraction"/> or <see cref="CellWidthMode.Auto"/> cell asks for (0: no cap);
     /// never below the cell's floor. The master-detail widget's master column is a clamped fraction of the row.
     /// </summary>
@@ -3060,6 +3067,22 @@ internal static class CellLayout
 
     /// <summary>The runtime's caption inset inside a text cell (its TMP margin).</summary>
     internal const float TextInset = 2f;
+
+    /// <summary>KEYSHEAD1: what a <see cref="CellSpec.FitCaption"/> cell adds to its measured caption (both insets and a little air).</summary>
+    internal const float CaptionFitPad = 2f * TextInset + 4f;
+
+    /// <summary>
+    /// KEYSHEAD1: the width a <see cref="CellSpec.FitCaption"/> cell asks for: the caption measured with the drawn font plus
+    /// <see cref="CaptionFitPad"/>, at most <paramref name="max"/> (when positive); <paramref name="estimate"/> when the
+    /// measurement is unusable (negative, zero, NaN). Live 2026.10.136: a mod heading on the Keybinds tab was given its
+    /// caption's estimate, and "My Mod" (two wide capitals) drew as "My M…".
+    /// </summary>
+    internal static float FitCaptionWidth(float estimate, float measured, float max = 0f)
+    {
+        float w = float.IsNaN(measured) || float.IsInfinity(measured) || measured <= 0.5f ? estimate : measured + CaptionFitPad;
+        if (max > 0f && !float.IsNaN(max) && w > max) w = max;
+        return Math.Max(1f, w);
+    }
 
     /// <summary>The width a two-line cell placed <paramref name="width"/> wide clips its second line to (the runtime's rule).</summary>
     internal static float TwoLineNoteWidth(CellSpec spec, float width) =>
