@@ -1791,7 +1791,7 @@ public static partial class ModsMenu
                 name = identity.Name;
                 address = identity.Address;
             }
-            catch { /* the line falls back to "the connected server" */ }
+            catch { /* the lines say "this server" */ }
         }
 #endif
         return new SettingsScopeContext
@@ -1799,7 +1799,10 @@ public static partial class ModsMenu
             Connection = SettingsScopeContext.ConnectionOf(connected, handshakeOk, requestSeen),
             ServerPart = part,
             CanEditServerWide = Networking.ScopedSettings.ClientReady ? Networking.ScopedSettings.ClientCanEditServerWide : canEdit,
-            ServerName = Networking.ScopedSettings.ClientReady ? Networking.ScopedSettings.ClientServerName : name,
+            // An empty name in the settings catalog (an older server's first catalog after its start) does not hide the
+            // name this client knows from the signed catalog or the server's folder.
+            ServerName = SettingsScopeContext.PickServerName(
+                Networking.ScopedSettings.ClientReady, Networking.ScopedSettings.ClientServerName, name),
             ServerAddress = address,
         };
     }

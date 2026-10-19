@@ -275,7 +275,7 @@ internal static partial class JoinFlowClient
             t.HostedByThisClient |= _joinDialed.HostedByThisClient;
         }
 
-        if (t.ServerName.Length == 0) t.ServerName = JoinText.ServerLabel(ServerNameLocked(), _host);
+        if (t.ServerName.Length == 0) t.ServerName = ServerNameLocked() ?? "";
         if (t.Fingerprint.Length == 0) t.Fingerprint = _fp;
         CapturePasswordLocked();
         t.NeedsPassword |= _passwordUsed;

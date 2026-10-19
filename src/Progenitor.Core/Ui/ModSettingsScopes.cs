@@ -28,19 +28,40 @@ internal sealed class SettingsScopeContext
     /// <summary>The joined server's name when known.</summary>
     public string ServerName { get; init; } = "";
 
-    /// <summary>The joined server's <c>address:port</c> when known.</summary>
+    /// <summary>
+    /// The joined server's <c>address:port</c> when known: for the readback and diagnostics only. The lines players read
+    /// name the server, else say <c>this server</c>.
+    /// </summary>
     public string ServerAddress { get; init; } = "";
 
     /// <summary><c>Applies to everyone on …</c> under Server settings.</summary>
     public const string DevicePersonalLine = "Only affects you. Saved on this device.";
 
-    public string PersonalServerLine => "Only affects you on "
-        + Progenitor.Install.ServerIdentity.Connected(ServerName, ServerAddress).ShortName + ". Saved by this server.";
+    public string PersonalServerLine => string.IsNullOrWhiteSpace(ServerName)
+        ? "Only affects you on " + SettingScopeSections.ThisServer + ". Saved by the server."
+        : "Only affects you on " + ServerName.Trim() + ". Saved by this server.";
 
     public string LineFor(SettingScope scope, SettingOwner owner) => scope == SettingScope.ServerWide
         ? ServerLine : owner == SettingOwner.Server ? PersonalServerLine : DevicePersonalLine;
 
-    public string ServerLine => SettingScopeSections.ServerLine(Connection != SettingConnection.NotConnected, ServerName, ServerAddress);
+    public string ServerLine => SettingScopeSections.ServerLine(Connection != SettingConnection.NotConnected, ServerName);
+
+    /// <summary>
+    /// The joined server's name for the page: the name its settings catalog carried (<paramref name="catalogReady"/>),
+    /// unless that is empty, else the name this client knows for it (<paramref name="knownName"/>: its signed catalog, or
+    /// its folder when it runs on this PC), else empty (the lines say <c>this server</c>). The stock
+    /// <c>V Rising Server</c> is no name.
+    /// </summary>
+    public static string PickServerName(bool catalogReady, string? catalogName, string? knownName)
+    {
+        string c = catalogReady ? (catalogName ?? "").Trim() : "";
+        if (c.Length > 0 && !IsStockName(c)) return c;
+        string k = (knownName ?? "").Trim();
+        return IsStockName(k) ? "" : k;
+    }
+
+    private static bool IsStockName(string name) =>
+        string.Equals(name, Progenitor.Networking.ServerHostSettingsFiles.StockServerName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>What changes the control a row is drawn with (admin or not): a change rebuilds the page.</summary>
     public string BuildKey => (Connection == SettingConnection.Progenitor ? "p" : "-") + (CanEditServerWide ? "a" : "-");

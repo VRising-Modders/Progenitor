@@ -286,14 +286,15 @@ public class SettingScopesModelTests
     }
 
     [Fact]
-    public void The_server_line_names_the_server_or_its_address_and_says_so_when_not_connected()
+    public void The_server_line_names_the_server_else_this_server_and_says_so_when_not_connected()
     {
-        Assert.Equal("Applies to everyone on My Castle", SettingScopeSections.ServerLine(true, "My Castle", "1.2.3.4:9876"));
-        Assert.Equal("Applies to everyone on 1.2.3.4:9876", SettingScopeSections.ServerLine(true, "", "1.2.3.4:9876"));
-        Assert.Equal("Applies to everyone on the connected server", SettingScopeSections.ServerLine(true, null, null));
-        Assert.Equal("Applies to everyone on the server you join", SettingScopeSections.ServerLine(false, "My Castle", "1.2.3.4:9876"));
+        Assert.Equal("Applies to everyone on My Castle", SettingScopeSections.ServerLine(true, "My Castle"));
+        // 2026-10-19: a page players read never shows the address.
+        Assert.Equal("Applies to everyone on this server", SettingScopeSections.ServerLine(true, ""));
+        Assert.Equal("Applies to everyone on this server", SettingScopeSections.ServerLine(true, null));
+        Assert.Equal("Applies to everyone on the server you join", SettingScopeSections.ServerLine(false, "My Castle"));
         string longName = new string('n', 80);
-        string line = SettingScopeSections.ServerLine(true, longName, "");
+        string line = SettingScopeSections.ServerLine(true, longName);
         Assert.Equal("Applies to everyone on " + longName, line);
     }
 }

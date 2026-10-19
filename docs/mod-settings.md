@@ -149,7 +149,7 @@ ctx.Menu.Register("HeaderDemo", "A header demo.")
   - A section holding both scopes is split, keeping the row order. A divider goes with the row before it.
   - A title that only restates the scope (`Personal`, `Server`, `Your settings`, `Server settings`, `Client`, `Local`, `Server-wide`) draws no subheading. Its rows keep their order, and their readback `section` keeps the author's title. Search still matches that title.
 - **The Server settings line.** One muted row under the heading:
-  - `Applies to everyone on <server>`: the server's name as the Install tab's picker names it, else its `address:port`, cut in the middle past 32 characters.
+  - `Applies to everyone on <server>`: the name the server's settings catalog carries (its own `-serverName`, else the `Name` in its `ServerHostSettings.json`, the same name its signed catalog gives), else the name the Install tab's picker knows for it, else `Applies to everyone on this server`. The line never shows the server's `address:port`; the stock `V Rising Server` counts as no name. The personal-server line follows the same rule (`Only affects you on <server>. Saved by this server.`, else `Only affects you on this server. Saved by the server.`).
   - `Applies to everyone on the server you join` when not connected.
 - **Admin only.** The Server settings rows an admin could edit (opted into administrator edits) are read-only for a player the server did not authorize. The control column shows `Admin only · <value>` and the help line says `Only server admins can change this.` The player's authorization is the server's remote-install status (admin list or adminauth; [Settings rows](mods-menu.md#settings-rows)). With no status, as from an older Core, the **Apply** control is drawn and the server decides. A synced row that is not opted in stays `Locked · <value>` with `Set by the server.` for everyone, admins included.
 - **Framework reasons** (`SettingAvailability`, worst first), drawn grayed on the help line:
@@ -175,7 +175,7 @@ ctx.Menu.Register("HeaderDemo", "A header demo.")
 **Live check list (not run).** Use the isolated test server only, with a Core containing this change on both sides. Read each state once with `mods_ui widget_read pane=content`, not by polling. Restore the admin list afterward and leave the client at the title screen.
 
 1. **The Sample, as admin** (SteamID in the test server's `adminlist.txt`, joined).
-   - `page-scope-section` rows: `Your settings` then `Server settings`, the latter with `line: Applies to everyone on Progenitor Forms Test` (or the address) and `canEdit: true`.
+   - `page-scope-section` rows: `Your settings` then `Server settings`, the latter with `line: Applies to everyone on Progenitor Forms Test` (or `this server`) and `canEdit: true`.
    - The `Demo` subheading is drawn; no `Personal` or `Server` subheading.
    - `Menu/ExampleLimit`: `scopeSection: server-wide`, `control: server-request`. Applying a value is answered `Saved by the server.`
    - **Reset all** counts only Your settings rows.

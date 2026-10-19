@@ -1212,16 +1212,27 @@ internal static class JoinText
 
     /// <summary>
     /// The server a page title names: the name known now (<paramref name="liveName"/>), else the page model's name, else
-    /// the address (reported 2026-10-06: a title read "Mods for 127.0.0.1:9976" while the server's name was known).
+    /// "this server" (reported 2026-10-06: a title read "Mods for 127.0.0.1:9976" while the server's name was known).
     /// </summary>
     public static string PageLabel(string? modelName, string? liveName, string? host) =>
         ServerLabel(!string.IsNullOrWhiteSpace(liveName) ? liveName : modelName, host);
 
     /// <summary>
-    /// The server's name, else its address when it reads as one (<c>1.2.3.4:9876</c>, <c>host.example:9876</c>),
-    /// else "this server". A relay id (a Steam networking identity) is not shown as a name.
+    /// The server's name for the pages players read, else "this server": never its <c>address:port</c> (2026-10-19) nor a
+    /// relay id (a Steam networking identity). <paramref name="host"/> is kept for callers; the trust page's Server fact
+    /// (<c>JoinFlowPanel.ServerFact</c>) and the Server tab's Last server row show the address on purpose.
     /// </summary>
     public static string ServerLabel(string? name, string? host)
+    {
+        if (!string.IsNullOrWhiteSpace(name)) return name!.Trim();
+        return "this server";
+    }
+
+    /// <summary>
+    /// The server's name, else its address when it reads as one (<c>1.2.3.4:9876</c>, <c>host.example:9876</c>), else
+    /// "this server": where the address is what tells two servers apart (the Last server row, logs).
+    /// </summary>
+    public static string NameOrAddress(string? name, string? host)
     {
         if (!string.IsNullOrWhiteSpace(name)) return name!.Trim();
         string h = (host ?? "").Trim();

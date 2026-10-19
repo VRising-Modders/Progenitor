@@ -190,14 +190,12 @@ internal sealed class ServerTabPane
         _ => "",
     };
 
-    /// <summary>The tab's title: the joined server's name (else its address), or <b>Server</b> when there is none.</summary>
+    /// <summary>The tab's title: the joined server's name, or <b>Server</b> when it has none (never its address).</summary>
     internal static string TitleOf(SettingsScopeContext? context)
     {
         if (context == null || context.Connection == SettingConnection.NotConnected) return Title;
-        string name;
-        try { name = Progenitor.Install.ServerIdentity.Connected(context.ServerName, context.ServerAddress).ShortName; }
-        catch { name = ""; }
-        return string.IsNullOrWhiteSpace(name) ? Title : name;
+        string name = (context.ServerName ?? "").Trim();
+        return name.Length == 0 ? Title : name;
     }
 
     /// <summary>The groups the left list jumps to: the Server tab's groups when it draws them, else none.</summary>

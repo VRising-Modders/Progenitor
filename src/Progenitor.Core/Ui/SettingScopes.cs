@@ -356,14 +356,25 @@ internal static class SettingScopeSections
         "Personal", "Your settings", "Client", "Local", "Server", "Server settings", "Server-wide", "Server wide",
     };
 
+    /// <summary>The connected server when its name is unknown, in the lines players read (never its <c>address:port</c>).</summary>
+    public const string ThisServer = "this server";
+
     /// <summary>
-    /// <c>Applies to everyone on &lt;server&gt;</c>: the server's full name when known, else its address; when not
-    /// connected, <see cref="AppliesNotConnected"/>.
+    /// <c>Applies to everyone on &lt;server&gt;</c>: the server's full name when known, else
+    /// <c>Applies to everyone on this server</c>; when not connected, <see cref="AppliesNotConnected"/>. A line players
+    /// read never shows the server's address.
     /// </summary>
-    public static string ServerLine(bool connected, string? serverName, string? address)
+    public static string ServerLine(bool connected, string? serverName)
     {
         if (!connected) return AppliesNotConnected;
-        return AppliesPrefix + ServerIdentity.Connected(serverName, address).ShortName;
+        return AppliesPrefix + NameOrThisServer(serverName);
+    }
+
+    /// <summary>The server's name, trimmed, else <see cref="ThisServer"/>.</summary>
+    public static string NameOrThisServer(string? serverName)
+    {
+        string name = (serverName ?? "").Trim();
+        return name.Length > 0 ? name : ThisServer;
     }
 
     public static IReadOnlyList<ScopedSection> Group(IEnumerable<ScopedRow> rows, string serverLine)
