@@ -1081,3 +1081,12 @@ offset ClientRootPrefabPlayerDeathContainerAnyoneOffset   = 0x58 : RootPrefabCol
 offset ClientRootPrefabPlayerDeathContainerClanMembersOffset = 0x5C : RootPrefabCollection.PlayerDeathContainerClanMembersPrefabGUID
 offset ClientRootPrefabPlayerDeathContainerOnlySelfOffset = 0x60 : RootPrefabCollection.PlayerDeathContainerOnlySelfPrefabGUID
 offset ClientRootPrefabPlayerInventoryDropContainerOffset = 0x68 : RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID
+
+# ---- Chat: name completion roster (src/Progenitor.Core/Chat/ChatRoster.cs) ----------------------
+# Client only. The game's own player list: one UserInfoElement per account the server has told this
+# client about, on the UserInfoBufferSingleton entity of the client world (the list the game's /w
+# looks a name up in). Read raw through GetBufferLength / GetBufferRawRO, never written.
+dump client
+size   UserInfoElementStride                       = 96   : UserInfoElement                     # widest extent 0x60, 8-byte alignment
+offset UserInfoElementNameOffset                   = 0x0  : UserInfoElement.Name                # FixedString64Bytes: ushort length, then UTF-8
+offset UserInfoElementIsConnectedOffset            = 0x5C : UserInfoElement.IsConnected         # bool

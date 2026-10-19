@@ -1039,9 +1039,10 @@ internal static class ChatWindow
         {
             var world = Worlds.Client;
             if (world == null || !world.IsCreated) return null;
-            var names = ChatCommandLogic.Matches(name, OnlineNames(world, out _), self: null);
+            var online = OnlineRoster(world);
+            var names = ChatCommandLogic.Matches(name, online.Names, self: null);
             if (names.Count == 0)
-                return "<color=" + ChatFormat.MutedHex + ">No player online named \"" + UiRichText.Literal(name) + "\".</color>";
+                return "<color=" + ChatFormat.MutedHex + ">" + ChatRoster.NoMatchText(UiRichText.Literal(name), online.Complete) + "</color>";
             for (int i = 0; i < names.Count && i < MaxHints; i++)
             {
                 if (i > 0) sb.Append('\n');
@@ -1339,16 +1340,98 @@ internal static class ChatWindow
         field.MoveTextEnd(false);
     }
 
-    /// <summary>
-    /// Connected players' character names from the client world's <c>User</c> entities (the read Core already
-    /// uses elsewhere). This player's own name is not filtered out: finding the local user would need a new generic
-    /// instantiation over a game type, and whispering yourself only shows the game's own answer.
-    /// </summary>
+    /// <summary>The online names as a list (see <see cref="OnlineRoster"/>).</summary>
     private static List<string> OnlineNames(World world, out string? self)
     {
+        // This player's own name is not filtered out: the game whispers yourself too ("Note to Self").
         self = null;
-        var names = new List<string>();
+        return OnlineRoster(world).Names;
+    }
+
+    private const double RosterCacheSeconds = 0.25;
+    private static ChatOnlineNames? _roster;
+    private static World? _rosterWorld;
+    private static double _rosterAt = double.NegativeInfinity;
+    private static Entity _rosterHolder = Entity.Null;
+    private static bool _rosterFallbackLogged;
+
+    /// <summary>
+    /// The names completion offers (<see cref="ChatRoster"/>): the connected names in the game's own player list, or,
+    /// when it cannot be read, the local user and the visible player characters. Read at most every
+    /// <see cref="RosterCacheSeconds"/>, since the hint line asks every frame while a name is typed.
+    /// </summary>
+    private static ChatOnlineNames OnlineRoster(World world)
+    {
+        double now = System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
+        if (_roster != null && ReferenceEquals(world, _rosterWorld) && now - _rosterAt >= 0 && now - _rosterAt < RosterCacheSeconds)
+            return _roster;
+        if (!ReferenceEquals(world, _rosterWorld)) _rosterHolder = Entity.Null;
+        _rosterWorld = world;
+        _rosterAt = now;
+
         var em = world.EntityManager;
+        List<string>? roster = ReadGameRoster(em);
+        List<string>? local = null, nearby = null;
+        if (roster == null)
+        {
+            if (!_rosterFallbackLogged)
+            {
+                _rosterFallbackLogged = true;
+                Plugin.Logger?.LogInfo("Chat: the game's player list could not be read; name completion offers the players this client can see.");
+            }
+
+            local = LocalUserNames(em);
+            nearby = NearbyCharacterNames(em);
+        }
+
+        // [Chat] TestNames: names for testing the suggestions with no other players online.
+        _roster = ChatRoster.Merge(roster, local, nearby, ChatRoster.ParseTestNames(_testNames?.Value));
+        return _roster;
+    }
+
+    /// <summary>
+    /// The connected names in the client world's <c>UserInfoElement</c> buffer (the game's own player list), or null when
+    /// it cannot be read. The buffer is read raw through the non-generic <c>GetBufferLength</c> / <c>GetBufferRawRO</c>
+    /// pair with the metadata's stride and offsets (layout.txt); <c>GetBuffer&lt;T&gt;</c> is never called.
+    /// </summary>
+    private static unsafe List<string>? ReadGameRoster(EntityManager em)
+    {
+        try
+        {
+            var type = ComponentIndex.Of<UserInfoElement>(ComponentType.AccessMode.ReadOnly);
+            var holder = _rosterHolder;
+            if (holder == Entity.Null || !em.Exists(holder) || !em.HasComponent(holder, type))
+            {
+                holder = Entity.Null;
+                foreach (var e in Query.Entities(em, true, true, type))
+                {
+                    holder = e;
+                    break;
+                }
+
+                _rosterHolder = holder;
+                if (holder == Entity.Null) return null;
+            }
+
+            var index = ComponentIndex.IndexOf<UserInfoElement>();
+            int length = em.GetBufferLength(holder, index);
+            if (!ChatRoster.LengthOk(length)) return null;
+            if (length == 0) return new List<string>();
+            byte* raw = (byte*)em.GetBufferRawRO(holder, index);
+            if (raw == null) return null;
+            return ChatRoster.DecodeConnectedNames(new ReadOnlySpan<byte>(raw, length * ChatRoster.Stride), length);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogDiag("Chat: reading the game's player list threw: " + e.Message);
+            return null;
+        }
+    }
+
+    /// <summary>The connected local <c>User</c>'s character name (a client world holds only its own <c>User</c>).</summary>
+    private static List<string> LocalUserNames(EntityManager em)
+    {
+        var names = new List<string>();
         foreach (var e in Query.Entities(em, false, false, ComponentType.ReadOnly<User>()))
         {
             User user;
@@ -1356,15 +1439,30 @@ internal static class ChatWindow
             catch { continue; }
             if (!user.IsConnected) continue;
             string name = user.CharacterName.ToString();
-            if (name.Length == 0) continue;
-            names.Add(name);
+            if (name.Length > 0) names.Add(name);
         }
 
-        // [Chat] TestNames: names for testing the suggestions with no other players online.
-        string extra = _testNames?.Value ?? "";
-        if (extra.Length > 0)
-            foreach (var n in extra.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries))
-                if (n.Trim().Length > 0 && !names.Contains(n.Trim())) names.Add(n.Trim());
+        return names;
+    }
+
+    /// <summary>
+    /// The names of the player characters this client can see (enabled ones: an offline player's character is
+    /// disabled). Only those within relevance range reach a client, so this list may be incomplete.
+    /// </summary>
+    private static List<string> NearbyCharacterNames(EntityManager em)
+    {
+        var names = new List<string>();
+        try
+        {
+            foreach (var e in Query.Entities(em, false, false, ComponentIndex.Of<PlayerCharacter>(ComponentType.AccessMode.ReadOnly)))
+            {
+                string name;
+                try { name = em.GetComponentData<PlayerCharacter>(e).Name.ToString(); }
+                catch { continue; }
+                if (name.Length > 0) names.Add(name);
+            }
+        }
+        catch { /* the local user's name stands */ }
 
         return names;
     }
