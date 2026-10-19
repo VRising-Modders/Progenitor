@@ -45,7 +45,7 @@ namespace Progenitor.Debugging;
 /// <item><b>The server</b> re-checks admin (the admin list, <c>adminauth</c> or the private-game host), character and buff, finds the nearest valid spot within
 /// <c>[DebugMap] SearchRadius</c> (100 m) — ground under the point, on the world grid, and with
 /// <c>[DebugMap] WalkableCheck</c> (default off, not live-verified) a standable pathfinding tile. Inside castle
-/// territory the ground read walks down the stacked layers to the lowest one, the castle's ground floor, instead of
+/// territory the ground read selects the base gameplay layer, the castle's ground floor, instead of
 /// taking the top one, which can be a roof (<see cref="DebugMapPolicy.PickFloor"/>). It teleports with
 /// <see cref="PlayerTeleport.TeleportVerified"/>: the game's helper, a read-back a second later and, when the
 /// character did not arrive, the Dev bridge op's guarded position write and a second read-back. Then it answers with
@@ -347,8 +347,8 @@ internal static unsafe class DebugMap
             walkRan = WalkCheck;
             spot = FindNearestValid(x, z, Radius, Step, (px, pz) =>
             {
-                // Inside castle territory the top layer can be a roof the game will not teleport onto: walk down to
-                // the ground floor (PickFloor). Outside, the single read from ProbeHeight, as before.
+                // Inside castle territory the top layer can be a roof the game will not teleport onto: select
+                // the base gameplay layer (PickFloor). Outside, the single read from ProbeHeight, as before.
                 var floor = PickFloor(probeY => ground.TryGetHeight(px, probeY, pz, out float h) ? h : null, castle);
                 if (!floor.Found) return Probe.No("no ground");
                 if (!walkRan) return Probe.Ok(floor.Y, floor.Top);
