@@ -19,13 +19,15 @@ internal static partial class ScopedSettings
         internal Func<ulong, string> Read = _ => "";
         internal Func<ulong, string, string, ServerSettingResult> Write = (_, _, _) => new(false, "", "Unavailable.");
         internal Action? Release;
+        /// <summary>Presentation the author gave a PerPlayer setting off the page (<c>PlayerSetting.Present</c>).</summary>
+        internal SettingPresentation? Catalog;
         internal bool Disposed;
         public void Dispose()
         {
             if (Disposed) return;
             Disposed = true;
             if (Entries.TryGetValue(Schema.Id, out var current) && ReferenceEquals(current, this)) Entries.Remove(Schema.Id);
-            Release?.Invoke(); Release = null;
+            Release?.Invoke(); Release = null; Catalog = null;
             Read = _ => ""; Write = (_, _, _) => new(false, "", "This setting was unloaded.");
             Entry = null;
             if (Schema.Personal)
@@ -60,6 +62,15 @@ internal static partial class ScopedSettings
         if (Entries.ContainsKey(row.Schema.Id)) throw new ArgumentException("This setting is already published: " + row.Schema.Id);
         // Reject impossible schema before registering, rather than breaking every peer's snapshot later.
         ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = row.Schema });
+        if (ItemListSettings.Has(row.Schema.Id))
+        {
+            // An item list's value can reach its full size: the row must still fit one packet with the hints of a list.
+            var full = ScopedSettingsSnapshot.Clone(row.Schema);
+            full.Value = new string('0', ItemLimitList.MaxEncodedBytes);
+            full.Presentation = new ScopedSettingPresentation { Widget = ScopedWidget.ItemList, Label = new string('x', ScopedSettingPresentation.MaxLabelBytes) };
+            try { ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = full }, ScopedSettingsWire.PresentationVersion); }
+            catch (ArgumentException) { throw new ArgumentException("This item list's help or default is too long to send with a full list."); }
+        }
         Entries.Add(row.Schema.Id, row); _schemaRevision++;
     }
 
@@ -125,6 +136,12 @@ internal static partial class ScopedSettings
         {
             string current = row.Read(player);
             if (!SettingsEditors.TryParse(value, typeof(T), out var parsed, out string error)) return new(false, current, error);
+            if (parsed is string listText && ItemListSettings.TryGet(id, out var listRules))
+            {
+                // An item list: the server's own rules decide it, and the canonical text is stored.
+                if (!ItemListSettings.TryCanonical(listRules, listText, out var canonical, out var listError)) return new(false, current, listError);
+                parsed = canonical;
+            }
             if (bounds != null && !bounds.IsValid(parsed)) return new(false, current, "Outside the values this setting accepts.");
             if (!IsFinite(parsed)) return new(false, current, "A finite number is required.");
             if (validate?.Invoke((T)parsed!) is string refusal) return new(false, current, refusal);
@@ -157,7 +174,8 @@ internal static partial class ScopedSettings
         {
             Id = RowId(pluginId, section, key), PluginId = pluginId, ModName = name, Version = version,
             Section = section, Key = key, Help = help ?? "", Type = type.FullName ?? "", Personal = personal,
-            Default = SettingsEditors.Format(defaultValue), Value = SettingsEditors.Format(defaultValue), Editable = true, MaxLength = 1024,
+            Default = SettingsEditors.Format(defaultValue), Value = SettingsEditors.Format(defaultValue), Editable = true,
+            MaxLength = ItemListSettings.Has(RowId(pluginId, section, key)) ? ItemLimitList.MaxEncodedBytes : 1024,
         };
         if (type.IsEnum) row.Choices = Enum.GetNames(type);
         if (bounds != null)

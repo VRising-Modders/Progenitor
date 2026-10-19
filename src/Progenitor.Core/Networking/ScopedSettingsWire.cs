@@ -23,6 +23,8 @@ internal sealed class ScopedSettingRecord
     public string? Min { get; set; }
     public string? Max { get; set; }
     public int MaxLength { get; set; } = 1024;
+    /// <summary>Version 2 presentation hints, or null (a version 1 row, or none derived). Never sent at version 1.</summary>
+    public ScopedSettingPresentation? Presentation { get; set; }
 }
 
 internal sealed class ScopedSettingsPacket
@@ -41,6 +43,8 @@ internal sealed class ScopedSettingsPacket
     public string Error { get; set; } = "";
     public bool Personal { get; set; }
     public bool Success { get; set; }
+    /// <summary>The version byte a decoded packet carried (encode takes its version as an argument).</summary>
+    public byte WireVersion { get; set; } = ScopedSettingsWire.Version;
 }
 
 /// <summary>
@@ -51,18 +55,29 @@ internal sealed class ScopedSettingsPacket
 /// Write: requestId, id, type, expected, value, personal. Result: requestId, id, value, error, personal, success.
 /// Record order follows its properties above. Unused packet fields must retain their defaults.
 /// Snapshot lifecycle, authorization, supported type tokens and value semantics belong to the caller.
+///
+/// <para>Version 2 (<see cref="PresentationVersion"/>) is version 1 with one addition: a row (kind 2) ends with a
+/// presence byte and, when 1, the presentation block (<see cref="ScopedSettingPresentation.Write"/>). Every other kind
+/// is laid out as in version 1. The server sends version 2 only to a client that declared
+/// <c>Capability.ScopedSettingsPresentation</c>; a version 1 client is sent version 1, without hints. Both versions
+/// decode here; clients always send version 1 writes.</para>
 /// </summary>
 internal static class ScopedSettingsWire
 {
     internal const byte Version = 1;
+    internal const byte PresentationVersion = 2;
     internal const int MaxPacketBytes = 15 * 1024;
     internal const int MaxFieldBytes = 4096;
     internal const int MaxRows = 512;
     internal const int MaxChoices = 128;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
-    internal static byte[] Encode(ScopedSettingsPacket packet)
+    internal static byte[] Encode(ScopedSettingsPacket packet) => Encode(packet, Version);
+
+    /// <summary>Encode at <paramref name="version"/> (1, or 2 with a row's presentation hints).</summary>
+    internal static byte[] Encode(ScopedSettingsPacket packet, byte version)
     {
+        if (version != Version && version != PresentationVersion) throw new ArgumentOutOfRangeException(nameof(version));
         Validate(packet);
         // Fixed backing buffer prevents even an invalid combination of bounded fields growing the packet.
         var buffer = new byte[MaxPacketBytes];
@@ -70,7 +85,7 @@ internal static class ScopedSettingsWire
         using var writer = new BinaryWriter(stream, Utf8, leaveOpen: true);
         try
         {
-            writer.Write(Version);
+            writer.Write(version);
             writer.Write(packet.Kind);
             writer.Write(packet.Generation.ToByteArray());
             switch (packet.Kind)
@@ -78,7 +93,14 @@ internal static class ScopedSettingsWire
                 case 1:
                     writer.Write(packet.Count); writer.Write(packet.CanEdit); Write(writer, packet.ServerName); break;
                 case 2:
-                    WriteRow(writer, packet.Row!); break;
+                    WriteRow(writer, packet.Row!);
+                    if (version == PresentationVersion)
+                    {
+                        var hints = packet.Row!.Presentation;
+                        writer.Write(hints != null);
+                        hints?.Write(writer, packet.Row.Choices.Length);
+                    }
+                    break;
                 case 3:
                     writer.Write(packet.Count); break;
                 case 4:
@@ -101,20 +123,23 @@ internal static class ScopedSettingsWire
     internal static bool TryDecode(ReadOnlySpan<byte> bytes, bool fromServer, out ScopedSettingsPacket packet)
     {
         packet = null!;
-        if (bytes.Length < 18 || bytes.Length > MaxPacketBytes || bytes[0] != Version ||
+        if (bytes.Length < 18 || bytes.Length > MaxPacketBytes || (bytes[0] != Version && bytes[0] != PresentationVersion) ||
             bytes[1] < 1 || bytes[1] > 6 || fromServer == (bytes[1] == 5)) return false;
         try
         {
             using var stream = new MemoryStream(bytes.ToArray(), writable: false);
             using var reader = new BinaryReader(stream, Utf8);
-            reader.ReadByte();
-            var result = new ScopedSettingsPacket { Kind = reader.ReadByte(), Generation = ReadGuid(reader) };
+            byte version = reader.ReadByte();
+            var result = new ScopedSettingsPacket { WireVersion = version, Kind = reader.ReadByte(), Generation = ReadGuid(reader) };
             switch (result.Kind)
             {
                 case 1:
                     result.Count = reader.ReadInt32(); result.CanEdit = ReadBool(reader); result.ServerName = Read(reader); break;
                 case 2:
-                    result.Row = ReadRow(reader); break;
+                    result.Row = ReadRow(reader);
+                    if (version == PresentationVersion && ReadBool(reader))
+                        result.Row.Presentation = ScopedSettingPresentation.Read(reader, result.Row.Choices.Length);
+                    break;
                 case 3:
                     result.Count = reader.ReadInt32(); break;
                 case 4:

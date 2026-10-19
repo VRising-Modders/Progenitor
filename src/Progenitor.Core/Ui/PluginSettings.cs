@@ -51,4 +51,30 @@ public sealed class PluginSettings
         _ctx.Track(setting);
         return setting;
     }
+
+    /// <summary>
+    /// A server-wide item list: lines of an item (or, with <see cref="ItemListRules.AllowCategories"/>, a category) and a
+    /// count, one list for everyone. Bind it on both sides like a <c>SettingScope.ServerWide</c> entry; admins edit it in
+    /// the Mods menu with the item picker, also on clients without the mod. Stored in the cfg as text
+    /// (<see cref="ItemLimitList"/>). <paramref name="rules"/> null: items only, at most 256 lines, counts 0 to 100,000.
+    /// </summary>
+    public ItemListSetting ItemList(string section, string key, string description = "", ItemListRules? rules = null,
+        ItemLimitList? defaultValue = null)
+    {
+        var setting = new ItemListSetting(_ctx, section, key, description ?? "", rules ?? new ItemListRules(), defaultValue);
+        _ctx.Track(setting);
+        return setting;
+    }
+
+    /// <summary>
+    /// An item list the server keeps for each player (as <see cref="PerPlayer{T}"/>): each player edits their own in the
+    /// Mods menu with the item picker, also without the mod's DLL. Stored in the players store as text.
+    /// </summary>
+    public PlayerItemListSetting PerPlayerItemList(string section, string key, string description = "", ItemListRules? rules = null,
+        ItemLimitList? defaultValue = null)
+    {
+        var setting = new PlayerItemListSetting(_ctx, section, key, description ?? "", rules ?? new ItemListRules(), defaultValue);
+        _ctx.Track(setting);
+        return setting;
+    }
 }

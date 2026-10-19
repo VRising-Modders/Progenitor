@@ -20,6 +20,12 @@ internal enum AdminSettingKind
 
     /// <summary>WIPECONFIRM1: a day, picked with the date-time picker (ISO UTC of 00:00 in the server's zone); Done sends it.</summary>
     Date = 4,
+
+    /// <summary>Scoped settings: a slider with an exact number box over <see cref="AdminSettingSpec.SliderMin"/>..<see cref="AdminSettingSpec.SliderMax"/>; a settled drag is sent.</summary>
+    Slider = 5,
+
+    /// <summary>Scoped settings: an item list (<see cref="ItemLimitList"/>): a summary and <b>Edit</b>, which opens the list editor with the item picker.</summary>
+    ItemList = 6,
 }
 
 /// <summary>A question asked before an admin row's change is sent (<see cref="AdminSettingSpec.Confirm"/>).</summary>
@@ -96,6 +102,18 @@ internal sealed class AdminSettingSpec
     internal int Max { get; init; }
 
     internal string Units { get; init; } = "";
+
+    /// <summary>A slider row's bounds and step, and whether its value is a whole number.</summary>
+    internal double SliderMin { get; init; }
+
+    internal double SliderMax { get; init; }
+
+    internal double Step { get; init; } = 1;
+
+    internal bool Integer { get; init; } = true;
+
+    /// <summary>An item-list row's hints from the server (bounds, categories, count label), or null.</summary>
+    internal Networking.ScopedSettingPresentation? ListHints { get; init; }
 
     /// <summary>A text row's longest value.</summary>
     internal int MaxLength { get; init; } = 256;

@@ -72,6 +72,17 @@ internal sealed class ModSettingOptions
 
     internal Func<bool>? EnableIf { get; set; }
 
+    /// <summary>
+    /// The declarative rules the author gave (<c>ShowWhen</c> / <c>EnableWhen</c>): sent with a published setting's
+    /// definition. Locally they are already folded into <see cref="ShowIf"/> / <see cref="EnableIf"/>.
+    /// </summary>
+    internal SettingCondition? ShowWhen { get; set; }
+
+    internal SettingCondition? EnableWhen { get; set; }
+
+    /// <summary>A published setting placed on the page by id (a <c>PerPlayer</c> setting): its row id.</summary>
+    internal string? ScopedRowId { get; set; }
+
     internal bool NeedsRestart { get; set; }
 
     internal bool NeedsServerPart { get; set; }
@@ -159,6 +170,8 @@ internal sealed class ModSettingOptions
     {
         ShowIf = null;
         EnableIf = null;
+        ShowWhen = null;
+        EnableWhen = null;
         DateTimeSeconds = null;
         DateTimeZone = null;
         CounterLimit = null;
@@ -1734,6 +1747,9 @@ internal static class ModSettingsLayout
                     var item = section.Items[j];
                     if (item == null) continue;
                     if (item.Kind == ModSettingsItemKind.Setting && (item.Row == null || !claimed.Add(item.Row.RowId))) continue;
+                    // A published setting the page placed by id (an item list, a PerPlayer setting): its cfg row, if
+                    // this side has one, is not drawn again in the automatic sections.
+                    if (item.Kind == ModSettingsItemKind.Admin && item.Admin is { Manifest: true } && !claimed.Add(item.Id)) continue;
                     items.Add(item);
                 }
 

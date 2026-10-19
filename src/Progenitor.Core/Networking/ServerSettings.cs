@@ -105,7 +105,8 @@ public static partial class ServerSettings
             throw new ArgumentException("Server-editable plugin ids, sections and keys cannot contain '/'.");
         var id = pluginId + "/" + entry.Definition.Section + "/" + entry.Definition.Key;
         ServerSettingsWire.CheckText(id);
-        ServerSettingsWire.CheckText(SettingsEditors.Format(entry.BoxedValue));
+        // An item list may hold up to ItemLimitList.MaxEncodedBytes; its edits travel over PrSt, not this channel.
+        if (!ItemListSettings.Has(id)) ServerSettingsWire.CheckText(SettingsEditors.Format(entry.BoxedValue));
         if (Entries.TryGetValue(id, out var previous)) previous.Dispose();
         var registration = new Registration(id, pluginId, entry);
         Entries.Add(id, registration);
@@ -383,6 +384,15 @@ public static partial class ServerSettings
         // TEXTUNDO1 polish: trimmed before the length check, as the client does (a client that does not
         // trim cannot store a value the next cfg read would shorten).
         if (parsed is string untrimmed) parsed = UiCommitText.Trim(untrimmed);
+        // An item-list setting: the server's own rules decide it, and the canonical text is stored. Its size limit is
+        // the list's (ItemLimitList.MaxEncodedBytes), not a text row's.
+        if (parsed is string listText && ItemListSettings.TryGet(request.RowId, out var listRules))
+        {
+            if (!ItemListSettings.TryCanonical(listRules, listText, out var canonical, out var listError))
+                return new(false, current, listError);
+            parsed = canonical;
+        }
+        else
         // TEXTLIMIT1: the setting's own limit from the server's declaration (never one the client
         // sends), then the packet and ConfigSync byte limits (ServerSettingsLimits.Check).
         if (parsed is string sized && CheckText(request.RowId, sized) is { } tooLong)

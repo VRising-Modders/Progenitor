@@ -16,6 +16,12 @@ public static partial class SettingsCatalog
     private static readonly Dictionary<string, int> Generations = new(StringComparer.OrdinalIgnoreCase);
     private static int _generation;
 
+    /// <summary>Changes whenever a setting binding is registered (the server re-derives published presentation).</summary>
+    internal static int BindingGeneration
+    {
+        get { lock (Gate) return _generation; }
+    }
+
     /// <summary>
     /// Wrap an existing config entry as the source of truth. Replacing a live registration of
     /// the same id starts a new generation: the previous pending completion is not delivered.

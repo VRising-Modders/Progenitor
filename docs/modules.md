@@ -1481,8 +1481,11 @@ bool on = receive.For(userEntity);   // server; the client reads receive.Mine on
 - Values are stored in `BepInEx/config/progenitor-players/<modGuid>.json` (non-default overrides only, coalesced atomic writes) and survive plugin and Core reloads and world wipes. Edits to the file while the server runs are merged; an invalid file is kept as `<modGuid>.json.bad` and does not stop the plugin from loading.
 - Unload releases the registration, callbacks and pending requests; the saved values stay.
 - Examples: `samples/Progenitor.ReloadExample` (server only) and `samples/Progenitor.SampleServerLed` (both sides).
+- A server-only mod is drawn as its page lays it out: the server sends each published setting's control, label, help, section and order, units and choice labels from the `ctx.Settings.Page` row that places it (PrSt version 2, capability `ScopedSettingsPresentation`; an older peer gets the default editors). Place `PerPlayer` settings with `page.Toggle(playerSetting)` and the other typed overloads.
+- Show/enable rules that travel: `page.Toggle(hint).ShowIf(enabled, true)`, `.ShowWhen(SettingCondition.ServerHasMod("Satisvampory"))`, `.EnableWhen(SettingCondition.AtLeast(radius, 5) & …)`. `showIf` / `enableIf` delegates stay local.
+- Item lists: `ctx.Settings.ItemList(...)` (server-wide) and `ctx.Settings.PerPlayerItemList(...)`, edited with the item picker; at most 256 lines and 4,096 bytes of text, refused beyond. [Item lists](settings-scopes.md#item-lists).
 
-Status: game-free tested on current main. Live-verified on the isolated client/server pair on the 2026-10-15 build before the port; the port has not been run live.
+Status: game-free tested on current main. Live-verified on the isolated client/server pair on the 2026-10-15 build before the port; the port has not been run live. Presentation hints, rules and item lists are game-free tested only, not live-verified ([qualification](settings-scopes.md#qualification)).
 
 ## Localization
 

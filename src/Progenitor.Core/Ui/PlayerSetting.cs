@@ -24,11 +24,38 @@ public sealed class PlayerSetting<T> : IDisposable
     {
         ConfigSync.ThrowIfNotSyncable(typeof(T));
         _id = ScopedSettings.RowId(ctx.Guid, section, key); _server = ctx.IsServer; _defaultValue = defaultValue;
+        Section = section; Key = key;
         if (_server)
             _registration = ScopedSettings.Personal(ctx.Guid, ctx.Name, ctx.Version, section, key, defaultValue, description, bounds, validate,
                 (player, value) => Changed?.Invoke(new PlayerAccountId(player), value));
         else ScopedSettings.ClientValueChanged += OnClientValue;
     }
+
+    /// <summary>The setting's section and key (its id is <c>plugin/section/key</c>).</summary>
+    public string Section { get; }
+
+    public string Key { get; }
+
+    internal string RowId => _id;
+
+    /// <summary>
+    /// How clients draw this setting when it is not placed on the mod's settings page: label, help, control, choice
+    /// labels, units, step, section (<see cref="SettingPresentation.Group"/>) and order. Read by the server when it sends
+    /// the definition; a page row that places the setting wins. Returns this setting.
+    /// </summary>
+    public PlayerSetting<T> Present(SettingPresentation presentation)
+    {
+        Check();
+        if (presentation == null) throw new ArgumentNullException(nameof(presentation));
+        if (_registration != null) _registration.Catalog = presentation;
+        return this;
+    }
+
+    /// <summary>A rule for another row's <c>ShowWhen</c> / <c>EnableWhen</c>: true while this setting equals <paramref name="value"/>.</summary>
+    public SettingCondition Is(T value) => SettingCondition.Is(Section, Key, value!);
+
+    /// <summary>A rule: true while this setting differs from <paramref name="value"/>.</summary>
+    public SettingCondition IsNot(T value) => SettingCondition.IsNot(Section, Key, value!);
 
     /// <summary>Fires on the game thread when an accepted value changes. Client events use an empty account id (the local player)
     /// and also fire once when the server first provides the value; a re-sent catalog with the same value does not fire.</summary>

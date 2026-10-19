@@ -26,6 +26,10 @@
     <Compile Include="..\..\src\Progenitor.Core\Config\PlayerSettingsStores.cs" Link="Linked\PlayerSettingsStores.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsClient.cs" Link="Linked\ScopedSettingsClient.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ScopedSettingsRows.cs" Link="Linked\ScopedSettingsRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsPresentation.cs" Link="Linked\ScopedSettingsPresentation.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingCondition.cs" Link="Linked\SettingCondition.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ItemLimitList.cs" Link="Linked\ItemLimitList.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.ItemList.cs" Link="Linked\ModSettingsView.ItemList.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.Scoped.cs" Link="Linked\ModSettingsView.Scoped.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ScopedSettings.cs" Link="Linked\ModsMenu.ScopedSettings.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\CharacterStatPresentation.cs" Link="Linked\CharacterStatPresentation.cs" />
