@@ -867,8 +867,30 @@ public static class ConfigSync
             if (ApplyOne(rec)) applied++;
         }
         if (applied > 0)
+        {
             LogInfo("ConfigSync: applied " + applied.ToString() + " synced setting(s); locked until disconnect");
+            RaiseRecordsApplied();
+        }
         return applied;
+    }
+
+    /// <summary>
+    /// APPLYONCE1: raised on the client after a packet changed at least one synced value (a join snapshot or a later
+    /// push: another admin's edit, a bridge request, a cfg edit on the server, or this client's own accepted edit). An
+    /// open settings page re-reads its server-wide Apply rows here, so the value an Apply is checked against is the one
+    /// the server holds now. Handlers run on the caller's thread; one that throws is logged and the rest still run.
+    /// </summary>
+    internal static event Action? RecordsApplied;
+
+    private static void RaiseRecordsApplied()
+    {
+        var handlers = RecordsApplied;
+        if (handlers == null) return;
+        foreach (var d in handlers.GetInvocationList())
+        {
+            try { ((Action)d)(); }
+            catch (Exception e) { LogWarning("ConfigSync: a synced-value listener threw: " + e.Message); }
+        }
     }
 
     /// <summary>

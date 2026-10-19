@@ -189,4 +189,114 @@ public sealed class JoinChangeNoticeTests : IDisposable
         Catalog("", Maps());
         Assert.Equal(2, _shown.Count);
     }
+
+    // ---- JOINNOTICE2: the admin's own server-message Apply (live 2026-10-19, release 2026.10.133) ------------------
+
+    private const string MessageRow = TextTokens.MessageRowId;
+    private byte[]? _sentSetting;
+
+    /// <summary>The client side of the server message as an admin's page has it: synced, locked to the server's value, editable.</summary>
+    private IDisposable MessageSetting(string serverValue)
+    {
+        var file = new BepInEx.Configuration.ConfigFile(Path.Combine(_dir, "servermessage-" + Guid.NewGuid().ToString("N") + ".cfg"), saveOnInit: true);
+        var entry = file.Bind(JoinServerSettings.Section, JoinServerSettings.MessageKey, "", "");
+        ConfigSync.ResetForTests();
+        ServerSettings.Uninstall();
+        ServerSettings.Install();
+        ServerSettings.TestSend = bytes => { _sentSetting = bytes; return true; };
+        var sync = ConfigSync.Register(ConfigSync.FrameworkSettingsId, entry);
+        var edit = ServerSettings.Register(ConfigSync.FrameworkSettingsId, entry);
+        ConfigSync.ApplyRecords(new[] { new ConfigSyncRecord(ConfigSync.FrameworkSettingsId, JoinServerSettings.Section, JoinServerSettings.MessageKey, serverValue) }, true);
+        Assert.True(ServerSettings.CanRequest(MessageRow));
+        return new ActionLease(() =>
+        {
+            edit.Dispose();
+            sync.Dispose();
+            ServerSettings.Uninstall();
+            ConfigSync.ResetForTests();
+        });
+    }
+
+    private ServerSettingsMessage Sent()
+    {
+        Assert.NotNull(_sentSetting);
+        Assert.True(ServerSettingsWire.TryDecode(_sentSetting!, false, out var request));
+        _sentSetting = null;
+        return request;
+    }
+
+    /// <summary>
+    /// The admin who clicks Apply gets no notice about their own message change, whichever arrives first (the server's
+    /// answer or the catalog it re-signed); the match is that request's value, not a time window, so a later change by
+    /// anyone else to another text still shows. Catches the live notice "The server message changed." on the admin's own Apply.
+    /// </summary>
+    [Fact]
+    public void The_admins_own_message_apply_shows_them_no_notice_in_either_order()
+    {
+        // The join's catalog has no message yet (one would open the in-world message page, which holds notices back).
+        using var setting = MessageSetting("");
+        Catalog("");
+
+        // The answer first, then the re-signed catalog.
+        ServerSettings.Request(MessageRow, "Welcome. Next wipe in {reset}", "", _ => { });
+        var request = Sent();
+        ServerSettings.AcceptResponse(request.WithResult(new(true, "Welcome. Next wipe in {reset}", "")));
+        Catalog("Welcome. Next wipe in {reset}");
+        Assert.Empty(_shown);
+        Assert.Contains(((TestLogSource)Plugin.Logger!).Infos, l => l.Contains("no notice (your own server message edit)", StringComparison.Ordinal));
+
+        // The catalog first (the server re-signs before its answer reaches the client), then the answer.
+        ServerSettings.Request(MessageRow, "Welcome back.", "Welcome. Next wipe in {reset}", _ => { });
+        request = Sent();
+        Catalog("Welcome back.");
+        Assert.Empty(_shown);
+        ServerSettings.AcceptResponse(request.WithResult(new(true, "Welcome back.", "")));
+        Assert.Equal(0, ServerSettings.OwnEditCount);
+
+        // Hours later, no time window involved: a change nobody here asked for shows.
+        _now += 3600;
+        Catalog("Server closed for maintenance.");
+        var n = Assert.Single(_shown);
+        Assert.Equal("message", n.Kind);
+    }
+
+    /// <summary>
+    /// A change from outside this player's UI notifies everyone viewing, the admin on the page included: a bridge setting
+    /// request (sent from this very client, but not through the page), another admin's Apply or a cfg edit (no request
+    /// here at all), and the text an own request asked for when that request was refused.
+    /// </summary>
+    [Fact]
+    public void A_change_this_player_did_not_ask_for_still_shows_the_notice()
+    {
+        using var setting = MessageSetting("");
+        Catalog("");
+
+        // The dev bridge's request path (ServerSettingsTestBridge.Request -> RequestCore) is not the player's own.
+        ServerSettings.RequestCore(MessageRow, "Bridge text.", "", _ => { }, clientCheck: true);
+        var bridge = Sent();
+        ServerSettings.AcceptResponse(bridge.WithResult(new(true, "Bridge text.", "")));
+        Catalog("Bridge text.");
+        Assert.Single(_shown);
+        Assert.Equal("message", _shown[0].Kind);
+        JoinFlowClient.CloseChangeNotice();
+
+        // Another admin (or a cfg edit): nothing was sent from here.
+        Catalog("Another admin's text.");
+        Assert.Equal(2, _shown.Count);
+
+        // A refused own request expects nothing; the same text arriving later is someone else's change.
+        ServerSettings.Request(MessageRow, "My text.", "Another admin's text.", _ => { });
+        var refused = Sent();
+        ServerSettings.AcceptResponse(refused.WithResult(new(false, "", "This setting changed on the server.")));
+        Catalog("My text.");
+        Assert.Equal(3, _shown.Count);
+
+        // Both changed with the message being the admin's own: the notice names only the mods.
+        ServerSettings.Request(MessageRow, "Mine again.", "My text.", _ => { });
+        var mine = Sent();
+        ServerSettings.AcceptResponse(mine.WithResult(new(true, "Mine again.", "")));
+        Catalog("Mine again.", Maps());
+        Assert.Equal(4, _shown.Count);
+        Assert.Equal("mods", _shown[3].Kind);
+    }
 }

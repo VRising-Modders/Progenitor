@@ -245,7 +245,7 @@ A commit that repeats the stored value writes and logs nothing. The slider commi
 
 ### Administrator date and choice rows
 
-JOINFLOW1. **Status: source-checked and game-free tested (`DateTimePickerTests`), not live-verified.** On the admin request path a row that is not free text is drawn with the control its value needs, and each change is one request (`ServerSettings.Request`, with the current server value as the expected value), with the same help-line status as **Apply**: `Waiting for the server…`, then `Saved by the server.` or the refusal. A refused or failed request puts the control back to the server's value; a change made while a request is on its way, or on a grayed row, is put back and sends nothing.
+JOINFLOW1. **Status: source-checked and game-free tested (`DateTimePickerTests`), not live-verified.** On the admin request path a row that is not free text is drawn with the control its value needs, and each change is one request (`ServerSettings.Request`, with the current server value as the expected value), with the same help-line status as **Apply**: `Waiting for the server…`, then `Saved by the server.` or the refusal. A refused or failed request puts the control back to the server's value; a change made while a request is on its way, or on a grayed row, is put back and sends nothing. While the page is open, every synced value re-reads these rows (APPLYONCE1, game-free tested, not live-verified): a change by another admin, the dev bridge or a cfg edit shows at once, and the next request is checked against it ([mods-menu.md](mods-menu.md), Apply rows).
 
 | Admin row | Control | Sent on | Readback |
 |---|---|---|---|

@@ -401,8 +401,9 @@ public static class SettingsPanel
         if (row.IsSynced && ServerSettings.CanRequest(row.RowId))
         {
             panel.Label(label);
-            string displayedValue = row.Read();
-            var input = panel.Input(row.Key, displayedValue);
+            // APPLYONCE1: the server value the field is based on follows every synced value (ServerTextBaseline).
+            var baseline = new ServerTextBaseline(row.Read());
+            var input = panel.Input(row.Key, baseline.Shown);
             var note = panel.Label("Server setting — changes require administrator permission.");
             // REMOTEINST1: an admin-list member who has not run adminauth can authenticate here.
             AdminAuthUi.Draw(panel, null, featureGated: true);
@@ -412,15 +413,26 @@ public static class SettingsPanel
                 if (pending) return;
                 pending = true;
                 note.Text = "Waiting for the server…";
-                Requests.Add(ServerSettings.Request(row.RowId, input.Value, displayedValue, result =>
+                Requests.Add(ServerSettings.Request(row.RowId, input.Value, baseline.Shown, result =>
                 {
                     pending = false;
                     if (input.IsDisposed || note.IsDisposed) return;
-                    displayedValue = result.Success ? result.Value : row.Read();
-                    input.Value = displayedValue;
+                    baseline.Answered(result.Success ? result.Value : row.Read());
+                    input.Value = baseline.Shown;
                     note.Text = result.Success ? "Saved by the server." : result.Error;
                 }));
             });
+            void OnApplied()
+            {
+                if (input.IsDisposed) return;
+                string? show;
+                try { show = baseline.OnServerValue(row.Read(), input.Value, pending); }
+                catch { return; }
+                if (show != null) input.Value = show;
+            }
+
+            ConfigSync.RecordsApplied += OnApplied;
+            Requests.Add(new ActionLease(() => ConfigSync.RecordsApplied -= OnApplied));
             // Global settings panels also need to know which mod owns this row so an
             // owner sweep closes it and releases pending requests and widget callbacks.
             Record(row, null, input);
