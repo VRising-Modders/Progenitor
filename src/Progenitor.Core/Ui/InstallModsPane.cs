@@ -2373,16 +2373,29 @@ internal sealed partial class InstallModsPane
         if (refresher == null) throw new ArgumentNullException(nameof(refresher));
         _indexLoadAttempted = true;
         _indexRefreshing = true;
-        _refreshOverCache = _catalog.Search(null).Count > 0;
+        _refreshOverCache = _catalog.Search(null).Count > 0 && !ShownFromOtherSource();
         _lastError = null;
+        _pendingSource = refresher.SourceUrl;
         return refresher.RefreshAsync(cancellationToken, force);
     }
 
     /// <summary>True while an index load or refresh started here has not reported back.</summary>
     public bool IndexRefreshing => _indexRefreshing;
 
-    public void NoteLoadResult(CatalogLoadResult result)
+    // INSTALLERR1: the source URL of the refresh in flight (its result's list belongs to it).
+    private string? _pendingSource;
+
+    public void NoteLoadResult(CatalogLoadResult result) => NoteLoadResult(result, _pendingSource, fromCache: false);
+
+    /// <summary>
+    /// INSTALLERR1: <paramref name="sourceUrl"/> is the index URL the result's list came from (a list from another
+    /// source than the current one is never shown); <paramref name="fromCache"/> marks a list served from the disk cache.
+    /// </summary>
+    public void NoteLoadResult(CatalogLoadResult result, string? sourceUrl, bool fromCache)
     {
+        _pendingSource = null;
+        // INSTALLERR1: a second report of the same check (each joined caller's continuation) is not another failure.
+        bool outstanding = _indexRefreshing;
         _indexLoadAttempted = true;
         _indexRefreshing = false;
         // A failed refresh over a list already on show keeps that list (the error is logged, not
@@ -2390,11 +2403,7 @@ internal sealed partial class InstallModsPane
         bool keepCached = !result.Ok && _refreshOverCache && _catalog.Search(null).Count > 0;
         _refreshOverCache = false;
         _lastError = result.Ok || keepCached ? null : (result.Error ?? "the package index could not be loaded");
-        if (keepCached)
-        {
-            try { Plugin.Logger?.LogInfo("Install: index refresh failed (" + (result.Error ?? "unknown") + "); the cached index stays on show."); }
-            catch { /* */ }
-        }
+        NoteIndexState(result, sourceUrl, fromCache, keepCached, outstanding);
     }
 
     // ---- Filters, sort and search ---------------------------------------------------
@@ -8100,6 +8109,10 @@ internal sealed partial class InstallModsPane
         // A cached index on show stays the list while a refresh runs (LIST3 item 10).
         if ((status.Kind == InstallStatusKind.LoadingIndex || _indexRefreshing) && entries == 0)
             return InstallPaneSurface.Loading;
+        // INSTALLERR1: a list from another source than the current one (the dev URL was set or cleared) is never shown;
+        // the Mods menu rebuilds the catalog for the new source.
+        if (entries > 0 && !FlowActive && ShownFromOtherSource())
+            return InstallPaneSurface.Loading;
         // An entry-scoped failure (a refused download, inspection or plan: EntryKey set) belongs
         // to that row's action, never to the index surface.
         if ((status.Kind == InstallStatusKind.Failed && string.IsNullOrEmpty(status.EntryKey)) || !string.IsNullOrEmpty(_lastError))
@@ -9174,13 +9187,15 @@ internal sealed partial class InstallModsPane
             // LIST3 item 9: no footer (Escape and the native tabs close the workspace; the index
             // refreshes itself on open). closeMods stays on the signature for the menu's wiring.
             _ = closeMods;
-            var surface = Surface(thunderstoreEnabled, nexusEnabled);
+            // INSTALLERR1: the mod list's state in the game's look (a centered block for a failure, a notice band over a list).
+            _refreshIndex = refreshIndex;
+            var indexView = IndexView(thunderstoreEnabled, nexusEnabled, utcNow);
+            _lastIndexView = indexView;
+            var surface = indexView.Surface;
             if (surface != InstallPaneSurface.Ready)
             {
                 Ui.PinMenuRows(panel, MenuRowPin.Content);
-                panel.Label(SurfaceMessage(surface, _lastError));
-                if (surface == InstallPaneSurface.Error)
-                    panel.Button(InstallModsCopy.ErrorRetry).OnClick(refreshIndex);
+                BuildIndexSurface(panel, indexView);
                 return;
             }
 
@@ -9232,6 +9247,8 @@ internal sealed partial class InstallModsPane
                 OnFilterClick(CellCurrent, ToggleCurrentUpdateOnly);
                 OnFilterClick(CellClear, ClearFilters);
             }
+            // INSTALLERR1: the small muted source and age line (the local stand-in, the fallback, "Updated 2 hours ago").
+            BuildIndexStatus(panel, indexView);
             // INSTALLRESTART1: the pending-restart bar, above the column header (Simple and Advanced).
             BuildRestartBand(panel);
             // AUTOUPDATE1: the update list (band plus up to four rows), under the restart bar.
@@ -9514,6 +9531,8 @@ internal sealed partial class InstallModsPane
         _pendingBar.Clear();
         _pendingItems.Clear();
         _restartBand = null;
+        _indexStatus = null;
+        _indexBlock.Clear();
         _readmeBlockCount = 0;
     }
 
@@ -11370,6 +11389,8 @@ internal sealed partial class InstallModsPane
             return true;
         }
 
+        if (TryDescribeIndexRow(handle, out extra)) return true;
+
         if (_updatesBand != null && ReferenceEquals(handle, _updatesBand))
         {
             extra = UpdatesBandWidget();
@@ -11559,6 +11580,9 @@ internal sealed class InstallIndexRefresher
     /// <summary>TSTRAFFIC1: the conditional check behind this refresher, or null (delegate wiring).</summary>
     public ConditionalIndexFetch? Conditional => _conditional;
 
+    /// <summary>INSTALLERR1: the index URL this refresher reads (its disk copy's), or null (delegate wiring: not known).</summary>
+    public string? SourceUrl => _conditional?.Cache.Url;
+
     // LOCALTS1 (live 2026-10-09): the cache served is the one the conditional check writes, which is per index URL
     // (index.json for thunderstore.io, its own file for the dev stand-in). Before, a dev URL served thunderstore.io's copy.
     public string? IndexPath => _conditional?.Cache.IndexPath ?? (_dir == null ? null : Path.Combine(_dir, IndexFileName));
@@ -11706,11 +11730,17 @@ internal sealed class InstallIndexRefresher
         }
         catch (Exception e)
         {
-            return new CatalogLoadResult(false, e.Message, 0, null);
+            return new CatalogLoadResult(false, e.Message, 0, null) { FailureCause = RecordingCatalogTransport.Classify(e, false) };
         }
 
+        // INSTALLERR1: the cause, the HTTP status and the backoff flag travel with the failure.
         if (fetched == null || !fetched.Ok || fetched.Text == null)
-            return new CatalogLoadResult(false, fetched?.Error ?? InstallReasons.FetchTransport, 0, null);
+            return new CatalogLoadResult(false, fetched?.Error ?? InstallReasons.FetchTransport, 0, null)
+            {
+                FailureCause = fetched?.FailureCause ?? FetchFailureCause.None,
+                StatusCode = fetched?.StatusCode ?? 0,
+                Paused = fetched?.Paused ?? false,
+            };
 
         DateTime now = _clock.UtcNow;
         string stamp = CatalogFetcher.FormatStamp(now);

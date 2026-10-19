@@ -2302,6 +2302,8 @@ public static partial class ModsMenu
                 BuildStrip();
                 BuildInstallPanes();
                 NoteNavigation();
+                // INSTALLERR1: opening the tab after a failed check retries at once (the ladder runs only while it is shown).
+                _installPane?.RetryNowIfFailing();
                 return;
             case ModsTab.Preferences:
                 RestoreConfigurationMemory();
@@ -2729,6 +2731,15 @@ public static partial class ModsMenu
 
     private static void BuildInstallPanes()
     {
+#if !PROGENITOR_TESTS
+        // INSTALLERR1: a changed index source (the dev URL set or cleared) is followed on every Install-tab build, in a
+        // world as well as at the title screen, so a list from the old source is never drawn.
+        if (!_followingSource)
+        {
+            try { FollowIndexSource(force: true, rebuildPanes: false); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Install: index source check threw: " + e.Message); }
+        }
+#endif
         ParkSidebar(Sidebar.Take());
         // REMOTEINST1: ask the connected server again what it allows. An admin who ran adminauth
         // after joining is only seen as one once the server re-reads User.IsAdmin; a server that
@@ -3160,6 +3171,12 @@ public static partial class ModsMenu
             // INSTALLRESTART1: the pending-restart bar.
             _installPane.RestartOfferProbe = JoinFlowClient.CurrentRestartOffer;
             _installPane.RestartPress = () => JoinFlowClient.PressRestartButton();
+#if !PROGENITOR_TESTS
+            // INSTALLERR1: automatic retries run only while the tab is on screen; a session fallback from a refusing
+            // local test mod list is followed on the next main-thread turn (never inside the result's own call).
+            _installPane.TabShownProbe = () => InstallTabShown;
+            _installPane.SourceChangedHook = () => MainThread.Post(() => FollowIndexSource(force: true, rebuildPanes: true), Owner);
+#endif
             // DL1: a phase change (download started/landed, review, confirm) recomposes the
             // detail for the same selected entry on the next Drain; the sidebar is untouched.
             _installPane.SetDetailRebuild(() => MainThread.Post(RebuildInstallDetailAfterAction, Owner));
@@ -3813,7 +3830,7 @@ public static partial class ModsMenu
         var pane = EnsureInstallPane();
         if (!refresher.CacheServed && refresher.TryServeCache(out var cached))
         {
-            pane.NoteLoadResult(cached);
+            pane.NoteLoadResult(cached, refresher.SourceUrl, fromCache: true);
             NoteIndexContent("index-cache-served");
             try { Plugin.Logger?.LogInfo("Install: cached index served (" + cached.Count + " listings, fetched " + (refresher.CacheStampUtc?.ToString("u") ?? "?") + ")."); }
             catch { /* */ }
@@ -3833,7 +3850,7 @@ public static partial class ModsMenu
         var pane = EnsureInstallPane();
         if (refresher.TryServeCache(out var cached))
         {
-            pane.NoteLoadResult(cached);
+            pane.NoteLoadResult(cached, refresher.SourceUrl, fromCache: true);
             NoteIndexContent("index-cache-served");
             try { Plugin.Logger?.LogInfo("Install: cached index served ahead of the open (" + cached.Count + " listings)."); }
             catch { /* */ }
@@ -3966,7 +3983,8 @@ public static partial class ModsMenu
         if (task.IsCanceled)
             return new CatalogLoadResult(false, InstallReasons.FetchCancelled, 0, null);
         string error = task.Exception?.GetBaseException().Message ?? "the package index could not be loaded";
-        return new CatalogLoadResult(false, error, 0, null);
+        var cause = task.Exception == null ? FetchFailureCause.None : RecordingCatalogTransport.Classify(task.Exception, false);
+        return new CatalogLoadResult(false, error, 0, null) { FailureCause = cause };
     }
 
     private static CatalogLoadResult CompletedIndexValue(Task<CatalogLoadResult> completed) =>

@@ -1039,6 +1039,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.cs" Link="Linked\InstallModsPane.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.Simple.cs" Link="Linked\InstallModsPane.Simple.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.Restart.cs" Link="Linked\InstallModsPane.Restart.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.IndexState.cs" Link="Linked\InstallModsPane.IndexState.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallSimpleView.cs" Link="Linked\InstallSimpleView.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallColumns.cs" Link="Linked\InstallColumns.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\InstallDrawerLayout.cs" Link="Linked\InstallDrawerLayout.cs" />
