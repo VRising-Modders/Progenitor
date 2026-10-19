@@ -500,6 +500,8 @@ public sealed class ModsProvenanceTests : IDisposable
         string corePage = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
         ContainsText(corePage, ModMenuInventory.RequiredNote);
         Assert.DoesNotContain("\"label\":\"" + InstallModsCopy.Remove, corePage, StringComparison.Ordinal);
+        // Progenitor's own About is the curated player text from Core.
+        ContainsText(corePage, ProgenitorAbout.Markdown);
 
         // The loader's page is the one sentence, and nothing else.
         ModsMenu.OpenMod(ModMenuInventory.LoaderId);

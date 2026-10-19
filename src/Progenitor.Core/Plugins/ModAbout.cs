@@ -29,6 +29,10 @@ namespace Progenitor.Plugins;
 /// <c>[assembly: AssemblyDescription]</c>;</item>
 /// <item><c>No description available.</c></item>
 /// </list>
+/// <para>A description (registered, assembly or package manifest) is plain text: runs of spaces, tabs and line breaks
+/// become one space and only a blank line starts a new paragraph, so a multi-line <c>&lt;Description&gt;</c> in a
+/// project file reads cleanly. README and <c>[ModAbout]</c> text is Markdown and is drawn as written. Progenitor's own
+/// page always shows its own curated text.</para>
 /// <para>A listing found any other way (the plugin's GUID or name spelling a package name) is never shown for an
 /// installed mod: it may be another project with the same name.</para>
 /// </remarks>
@@ -61,6 +65,28 @@ internal enum ModAboutSource
     Beside = 3,
     Declared = 4,
     Description = 5,
+
+    /// <summary>Progenitor's own page: the text in <see cref="ProgenitorAbout"/>, written for players.</summary>
+    Curated = 6,
+}
+
+/// <summary>
+/// The About text of Progenitor's own mod page (Mods › Progenitor). It lives in Core, so a Core update changes it
+/// without a restart, and it wins over every other source: the Bootstrap assembly description and the package
+/// README are written for other readers.
+/// </summary>
+internal static class ProgenitorAbout
+{
+    internal const string Markdown =
+        "Progenitor is a mod manager and mod framework for V Rising. "
+        + "Install, update and configure your mods here, and join modded servers with the right mods.";
+
+    /// <summary>True for Progenitor's own plugin id (<c>progenitor</c>, or its pre-rename spelling).</summary>
+    internal static bool IsSelf(string? pluginId)
+    {
+        if (string.IsNullOrWhiteSpace(pluginId)) return false;
+        return string.Equals(LegacyIds.Normalize(pluginId!.Trim()), LegacyIds.Root, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>What one plugin says about itself, as plain strings (no assembly or type is kept).</summary>
@@ -118,6 +144,7 @@ internal readonly struct ModAboutText
         ModAboutSource.Beside => "beside",
         ModAboutSource.Declared => "declared",
         ModAboutSource.Description => "description",
+        ModAboutSource.Curated => "curated",
         _ => "none",
     };
 
@@ -133,9 +160,19 @@ internal readonly struct ModAboutText
         if (HasText(plugin.Embedded)) return new ModAboutText(plugin.Embedded, ModAboutSource.Embedded);
         if (HasText(plugin.Beside)) return new ModAboutText(plugin.Beside, ModAboutSource.Beside);
         if (HasText(plugin.Declared)) return new ModAboutText(plugin.Declared, ModAboutSource.Declared);
-        if (HasText(plugin.Description)) return new ModAboutText(plugin.Description, ModAboutSource.Description);
+        if (HasText(plugin.Description))
+            return new ModAboutText(PluginAboutReader.NormalizePlainText(plugin.Description), ModAboutSource.Description);
         return default;
     }
+
+    /// <summary>
+    /// The About text for the page of <paramref name="pluginId"/>: <see cref="ProgenitorAbout"/> on Progenitor's own
+    /// page, else <see cref="Choose"/>.
+    /// </summary>
+    internal static ModAboutText ForPage(string? pluginId, bool listingReadmeApplies, string? listingReadme, PluginAboutFacts? plugin) =>
+        ProgenitorAbout.IsSelf(pluginId)
+            ? new ModAboutText(ProgenitorAbout.Markdown, ModAboutSource.Curated)
+            : Choose(listingReadmeApplies, listingReadme, plugin);
 
     private static bool HasText(string? s) => !string.IsNullOrWhiteSpace(s);
 }
@@ -243,11 +280,43 @@ internal static class PluginAboutReader
             foreach (var a in CustomAttributeData.GetCustomAttributes(assembly))
             {
                 if (a.AttributeType.FullName != typeof(AssemblyDescriptionAttribute).FullName || a.ConstructorArguments.Count == 0) continue;
-                return Cap(a.ConstructorArguments[0].Value as string).Trim();
+                return NormalizePlainText(Cap(a.ConstructorArguments[0].Value as string));
             }
         }
         catch { /* none */ }
         return "";
+    }
+
+    /// <summary>
+    /// A plain-text description (an assembly description, one registered with <c>ctx.Menu</c>, a package manifest's)
+    /// as clean paragraphs: inside a paragraph every run of spaces, tabs and line breaks becomes one space; a blank
+    /// line (only whitespace on it) between text is a paragraph break, written as one empty line. A multi-line
+    /// <c>&lt;Description&gt;</c> in a project file then reads as clean text. README files are Markdown and are never
+    /// passed through this.
+    /// </summary>
+    internal static string NormalizePlainText(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        var paragraphs = new List<string>();
+        var current = new StringBuilder();
+        foreach (var line in text!.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
+        {
+            if (line.Trim().Length == 0)
+            {
+                if (current.Length > 0) paragraphs.Add(current.ToString());
+                current.Clear();
+                continue;
+            }
+
+            foreach (var word in line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (current.Length > 0) current.Append(' ');
+                current.Append(word);
+            }
+        }
+
+        if (current.Length > 0) paragraphs.Add(current.ToString());
+        return string.Join("\n\n", paragraphs);
     }
 
     /// <summary>
@@ -282,7 +351,7 @@ internal static class PluginAboutReader
                 if (packageReadme.Trim().Length > 0) return packageReadme;
             }
 
-            return package.Description;
+            return NormalizePlainText(package.Description);
         }
         catch { return ""; }
     }

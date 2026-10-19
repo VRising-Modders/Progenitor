@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.UpdateProbe</AssemblyName>
     <RootNamespace>Progenitor.UpdateProbe</RootNamespace>
-    <Description>Client-side test plugin for the auto-update live tests (AUTOUPDATE2): one build per version.</Description>
+    <Description>Client-side test plugin for the auto-update checks: one build per version.</Description>
     <BepInExPluginGuid>progenitor.updateprobe</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Update Probe</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

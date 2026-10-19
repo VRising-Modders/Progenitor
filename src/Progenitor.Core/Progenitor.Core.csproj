@@ -3,7 +3,12 @@
     <AssemblyName>Progenitor</AssemblyName>
     <RootNamespace>Progenitor</RootNamespace>
     <Product>Progenitor</Product>
-    <Description>V Rising modding framework. One runtime dependency (BepInEx), original LGPL-2.1-only code, hot reload, debug bridge, prefab registry with client sync, hosted-game launcher. Not a chainloader plugin: Bootstrap loads this DLL from BepInEx/progenitor-core into a collectible ALC.</Description>
+    <!--
+      Not a chainloader plugin: Bootstrap loads this DLL from BepInEx/progenitor-core into a collectible
+      AssemblyLoadContext. The Description below is also the NuGet package description and can be shown
+      to players: keep it short and free of implementation detail.
+    -->
+    <Description>Progenitor, the mod manager and mod framework for V Rising. Mods built on it can load, update and unload while the game runs.</Description>
     <BepInExPluginGuid>progenitor</BepInExPluginGuid>
     <BepInExPluginName>Progenitor</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

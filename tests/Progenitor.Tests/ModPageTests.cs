@@ -1700,6 +1700,64 @@ public sealed class ModPageTests : IDisposable
     }
 
     /// <summary>
+    /// A plain-text description keeps no source layout: a multi-line project-file <c>&lt;Description&gt;</c> (indented,
+    /// one sentence broken over lines) reads as one paragraph, and only a blank line starts another. Applied to the
+    /// description source of every mod and to a package manifest's description; Markdown sources are untouched.
+    /// What this would catch: the live 2026.10.133 About on Progenitor's page, drawn with large indents and blank
+    /// lines between fragments because the XML whitespace and newlines were kept.
+    /// </summary>
+    [Fact]
+    public void A_description_is_normalized_to_clean_paragraphs()
+    {
+        Assert.Equal("", PluginAboutReader.NormalizePlainText(null));
+        Assert.Equal("", PluginAboutReader.NormalizePlainText(" \r\n\t \n"));
+        Assert.Equal("One line.", PluginAboutReader.NormalizePlainText("  One   line.  "));
+        Assert.Equal(
+            "First sentence goes on here. Second sentence.",
+            PluginAboutReader.NormalizePlainText("\n      First sentence goes on\n\t  here. Second\r\n      sentence.\n    "));
+        Assert.Equal(
+            "Paragraph one.\n\nParagraph two.",
+            PluginAboutReader.NormalizePlainText("  Paragraph\n  one.\n\n   \n  Paragraph   two.\n"));
+
+        var about = ModAboutText.Choose(false, null, new PluginAboutFacts { Description = "\n    A long\n    description.\n  " });
+        Assert.Equal(ModAboutSource.Description, about.Source);
+        Assert.Equal("A long description.", about.Markdown);
+
+        // Markdown sources are drawn as written: a list or a heading needs its line breaks.
+        const string markdown = "# Title\n\n- one\n- two";
+        Assert.Equal(markdown, ModAboutText.Choose(false, null, new PluginAboutFacts { Declared = markdown }).Markdown);
+        Assert.Equal(markdown, ModAboutText.Choose(false, null, new PluginAboutFacts { Embedded = markdown }).Markdown);
+    }
+
+    /// <summary>
+    /// Progenitor's own page shows the curated text from Core, ahead of every other source: the Bootstrap assembly
+    /// description, a registered description and even a verified listing README. Another mod's page is unchanged.
+    /// What this would catch: developer notes from the Bootstrap project file reaching every player's Mods › Progenitor.
+    /// </summary>
+    [Fact]
+    public void Progenitors_own_page_shows_the_curated_About()
+    {
+        var all = new PluginAboutFacts { Embedded = "e", Beside = "b", Declared = "d", Description = "Process-lifetime shell." };
+        foreach (var id in new[] { "progenitor", "Progenitor", " progenitor ", "vendor.progenitor" })
+        {
+            var about = ModAboutText.ForPage(id, true, "Listing README", all);
+            Assert.Equal(ModAboutSource.Curated, about.Source);
+            Assert.Equal("curated", about.SourceName);
+            Assert.Equal(ProgenitorAbout.Markdown, about.Markdown);
+        }
+
+        Assert.Equal(ModAboutSource.Listing, ModAboutText.ForPage("example.mod", true, "Listing README", all).Source);
+        Assert.Equal(ModAboutSource.Embedded, ModAboutText.ForPage("progenitor.sample", false, null, all).Source);
+        Assert.Equal(ModAboutSource.None, ModAboutText.ForPage(null, false, null, null).Source);
+        Assert.False(ProgenitorAbout.IsSelf("progenitor.dev"));
+
+        // Player-facing: short, and none of the developer words the Bootstrap description used to carry.
+        Assert.True(ProgenitorAbout.Markdown.Length <= 200, ProgenitorAbout.Markdown);
+        foreach (var word in new[] { "Bootstrap", "Core", "FrameTicker", "chainloader", "LoadFromStream", "detour", "\n" })
+            Assert.DoesNotContain(word, ProgenitorAbout.Markdown, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// ABOUTSRC1: the package manifest in the layouts mod managers write. Beside the DLL; one folder up
     /// (<c>Owner-Name/Sub/X.dll</c>); under the mod's own subfolder named <c>plugins</c>; in an extracted
     /// <c>Owner-Name-1.2.3</c> folder. Not in the shared <c>BepInEx/plugins</c> folder, not above it, not in a folder

@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.Sample</AssemblyName>
     <RootNamespace>Progenitor.Sample</RootNamespace>
-    <Description>Reloadable sample plugin that exercises the M1 public API: custom item, chat commands, events, persistence, handshake.</Description>
+    <Description>Reloadable sample plugin: a custom item, chat commands, events, saved data and the handshake.</Description>
     <BepInExPluginGuid>progenitor.sample</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Sample</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

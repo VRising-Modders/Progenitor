@@ -3,12 +3,14 @@
     <AssemblyName>Progenitor.Bootstrap</AssemblyName>
     <RootNamespace>Progenitor.Bootstrap</RootNamespace>
     <Product>Progenitor Bootstrap</Product>
-    <Description>
+    <!--
       Process-lifetime shell for Progenitor: injected FrameTicker, log buffer, main-thread queue,
       plugin reloader, self-update, native receive detours, and collectible LoadFromStream
       of Core from BepInEx/progenitor-core. Chainloader guid is progenitor so consumer
       [BepInDependency] is unchanged. Not a mod-author reference. Must not compile-reference Core.
-    </Description>
+      The Description below is shown to players (assembly properties, mod lists): keep it short and player-facing.
+    -->
+    <Description>Starts Progenitor, the mod manager and mod framework for V Rising.</Description>
     <BepInExPluginGuid>progenitor</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Bootstrap</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

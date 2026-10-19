@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.CompatTest</AssemblyName>
     <RootNamespace>Progenitor.CompatTest</RootNamespace>
-    <Description>TEST PLUGIN for the mod compatibility C1/C2 live tests: feature negotiation and versioned messages. One build per version.</Description>
+    <Description>Test plugin for the mod compatibility checks: feature negotiation and versioned messages. One build per version.</Description>
     <BepInExPluginGuid>progenitor.compattest</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Compat Test</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

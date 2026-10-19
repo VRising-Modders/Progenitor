@@ -44,6 +44,10 @@ A mod's page in the Mods menu shows its **About** text, rendered as Markdown by 
 
 Without any of these, the page shows the description passed to `ctx.Menu.Register(name, description)`, then `[assembly: AssemblyDescription]` (an SDK project's `<Description>`), then `No description available.` (`[BepInPlugin]` has no description field.)
 
+**A description is plain text.** The registered description, the assembly description and a package manifest's `description` are not Markdown: every run of spaces, tabs and line breaks becomes one space, and only a blank line starts a new paragraph. A `<Description>` written over several indented lines in the project file therefore reads as clean text. The README sources and `[ModAbout]` are Markdown and are drawn as written. Players read the assembly description, so keep it short and player-facing; put notes for developers in an XML comment beside it.
+
+**Progenitor's own page** (Mods › Progenitor) always shows its own short player text, kept in Core (`ProgenitorAbout`), ahead of every source above; `page-readme.source` reads `curated`.
+
 **Only a loaded assembly is read.** The embedded README, `[ModAbout]` and the assembly description come from the plugin's assembly as this process loaded it: Progenitor records them when it loads the plugin (also when the player turned it off and its `OnLoad` was skipped), and for another loader's plugin it reads them once from the loaded instance. A plugin whose assembly is not loaded in this process (a pending install, a reload-folder file that did not load, a disabled file the loader skipped, a server-only row) shows only the text beside its DLL, then the registered description if any, then `No description available.`
 
 **Plugin text is drawn as text.** Markdown is converted to plain text blocks and every `<` reaches the label escaped, so a README cannot inject TextMeshPro tags (`<size>`, `<sprite>`, `<color>`), including inside code spans and fenced blocks.

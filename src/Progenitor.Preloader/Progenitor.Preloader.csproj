@@ -3,12 +3,14 @@
     <AssemblyName>Progenitor.Preloader</AssemblyName>
     <RootNamespace>Progenitor.Preloader</RootNamespace>
     <Product>Progenitor Preloader</Product>
-    <Description>
+    <!--
       BepInEx preloader patcher (BepInEx/patchers). Runs before the chainloader opens any plugin
       file and carries out the Mods menu's next-start requests for ordinary BepInEx plugins:
       turn off (rename *.dll to *.dll.old), turn on (rename back) and uninstall (move the folder to
       BepInEx/progenitor-removed). No Core reference, no game types, patches no assembly.
-    </Description>
+      The Description below is shown to players: keep it short and player-facing.
+    -->
+    <Description>Part of Progenitor: turns mods on or off and removes them when the game starts, as you chose in the Mods menu.</Description>
     <IsPackable>false</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
