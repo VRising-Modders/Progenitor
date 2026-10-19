@@ -215,7 +215,7 @@ public static partial class Handshake
         /// <summary>
         /// JOINADMIN1 (join flow stage 3): this client handles the admin "Players joining" channel
         /// (<c>'PrJa'</c>). The server sends its hello on that id after an ok handshake only to a client that
-        /// declared this. (Bit 32 is still free; 8 is <see cref="MaterialViews"/>, 16 <see cref="ScopedSettingsPresentation"/>.)
+        /// declared this. (8 is <see cref="MaterialViews"/>, 16 <see cref="ScopedSettingsPresentation"/>, 32 <see cref="ScopedSettingsListFilters"/>.)
         /// </summary>
         JoinAdmin = 64,
 
@@ -367,9 +367,17 @@ public static partial class Handshake
         /// Client only, in its answer, together with <see cref="ScopedSettings"/>: this client reads PrSt version 2 rows,
         /// which carry presentation hints (control, label, section and order, units, choice labels, show/enable rules,
         /// item lists). The server sends version 2 rows only to a client that declared it; any other client is sent
-        /// version 1 rows and draws its default editors. Bit 16 was free (8 is <see cref="MaterialViews"/>, 32 stays free).
+        /// version 1 rows and draws its default editors. Bit 16 was free (8 is <see cref="MaterialViews"/>).
         /// </summary>
         ScopedSettingsPresentation = 16,
+
+        /// <summary>
+        /// PICKFRONT1 (client only, in its answer, with <see cref="ScopedSettingsPresentation"/>): this client reads PrSt
+        /// version 3 rows, whose hints end with the item-list filter flags (<c>ItemListRules.StackableOnly</c>). The server
+        /// sends version 3 only to a client that declared it; any other presentation client is sent version 2 (without the
+        /// flags). Bit 32 was free: no Core assigned it.
+        /// </summary>
+        ScopedSettingsListFilters = 32,
     }
 
     /// <summary>This Core's version for a refusal's text, or empty when it cannot be read.</summary>
@@ -415,7 +423,8 @@ public static partial class Handshake
         | Capability.CommandHints | Capability.PolicyRuleUpdates | Capability.ModFeatures | Capability.ModMessages
         | Capability.ItemStatSync | Capability.ItemLedgerChunks | Capability.ItemDefinitionPriority
         | Capability.VersionRanges | Capability.ProgenitorExact | Capability.ModExchange | Capability.MaterialCharacterCraft
-        | Capability.MaterialRefineView | Capability.ScopedSettings | Capability.ScopedSettingsPresentation;
+        | Capability.MaterialRefineView | Capability.ScopedSettings | Capability.ScopedSettingsPresentation
+        | Capability.ScopedSettingsListFilters;
 
     /// <summary>
     /// Reserved row carrying <see cref="Capability"/>. Reserved like

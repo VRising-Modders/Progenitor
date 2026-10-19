@@ -290,6 +290,38 @@ public sealed class ItemListRules
     /// <summary>The word for the count column (default <c>Most</c>).</summary>
     public string CountLabel { get; init; } = "Most";
 
+    /// <summary>
+    /// True when the list takes only items that stack (a stack size above 1 in the item catalog,
+    /// <see cref="Progenitor.Items.ItemCatalogEntry.MaxAmount"/>): the item picker offers only those, and the server refuses
+    /// an edit that adds any other item (or one its catalog does not know). Lines already stored are kept. Categories are
+    /// not affected. The server checks edits only; a default list is not checked against the catalog.
+    /// </summary>
+    public bool StackableOnly { get; init; }
+
+    /// <summary>
+    /// PICKFRONT1: null when every item line of <paramref name="list"/> that is not already in <paramref name="kept"/>
+    /// stacks by <paramref name="stackSize"/> (a prefab's stack size, null when unknown), else the reason. Always null
+    /// without <see cref="StackableOnly"/>.
+    /// </summary>
+    internal string? CheckStackable(ItemLimitList list, ItemLimitList? kept, Func<int, int?> stackSize)
+    {
+        if (!StackableOnly || list == null) return null;
+        foreach (var line in list)
+        {
+            if (line.IsCategory || kept?.MaxForItem(line.Item) != null) continue;
+            int? size = null;
+            try { size = stackSize?.Invoke(line.Item); }
+            catch { size = null; }
+            string item = "The item " + line.Item.ToString(CultureInfo.InvariantCulture);
+            if (size == null) return item + " could not be checked; this list takes stackable items only.";
+            if (size.Value <= 1) return item + " does not stack; this list takes stackable items only.";
+        }
+        return null;
+    }
+
+    /// <summary>PICKFRONT1: whether the picker offers an item of stack size <paramref name="stackSize"/>.</summary>
+    internal static bool Offers(bool stackableOnly, int stackSize) => !stackableOnly || stackSize > 1;
+
     internal void Validate()
     {
         if (MaxEntries < 1 || MaxEntries > ItemLimitList.MaxEntries)
@@ -326,15 +358,66 @@ internal static class ItemListSettings
     internal static bool Has(string? rowId) => rowId != null && Rules.ContainsKey(rowId);
 
     /// <summary>The canonical text of a write, or the reason it is refused.</summary>
-    internal static bool TryCanonical(ItemListRules rules, string? value, out string canonical, out string error)
+    internal static bool TryCanonical(ItemListRules rules, string? value, out string canonical, out string error) =>
+        TryCanonical(rules, value, null, out canonical, out error);
+
+    /// <summary>
+    /// As above, replacing <paramref name="current"/> (the stored text): with <see cref="ItemListRules.StackableOnly"/>,
+    /// an item line that is not already stored must stack in this side's item catalog (<see cref="StackSize"/>).
+    /// </summary>
+    internal static bool TryCanonical(ItemListRules rules, string? value, string? current, out string canonical, out string error)
     {
         canonical = "";
         if (!ItemLimitList.TryParse(value, rules, out var list, out error)) return false;
+        if (rules.StackableOnly)
+        {
+            var kept = ItemLimitList.TryParse(current, out var stored, out _) ? stored : null;
+            if (rules.CheckStackable(list, kept, StackSize) is { } problem)
+            {
+                error = problem;
+                return false;
+            }
+        }
         canonical = list.ToString();
         return true;
     }
 
-    internal static void ResetForTests() => Rules.Clear();
+    /// <summary>
+    /// PICKFRONT1: a prefab's stack size from this side's item catalog, null when the catalog does not know it. A seam:
+    /// tests supply their own.
+    /// </summary>
+    internal static Func<int, int?> StackSize = DefaultStackSize;
+
+#if !PROGENITOR_TESTS
+    private static IReadOnlyList<Progenitor.Items.ItemCatalogEntry>? _stackSource;
+    private static Dictionary<int, int>? _stackByGuid;
+#endif
+
+    private static int? DefaultStackSize(int prefabGuid)
+    {
+#if PROGENITOR_TESTS
+        return null;
+#else
+        IReadOnlyList<Progenitor.Items.ItemCatalogEntry> entries;
+        try { entries = Progenitor.Items.ItemCatalogBridge.Entries(); }
+        catch { return null; }
+        // The catalog hands out the same list until it is rebuilt, so the index is rebuilt with it.
+        if (!ReferenceEquals(entries, _stackSource) || _stackByGuid == null)
+        {
+            var index = new Dictionary<int, int>(entries.Count);
+            foreach (var e in entries) index[e.PrefabGuid] = e.MaxAmount;
+            _stackByGuid = index;
+            _stackSource = entries;
+        }
+        return _stackByGuid.TryGetValue(prefabGuid, out int size) ? size : null;
+#endif
+    }
+
+    internal static void ResetForTests()
+    {
+        Rules.Clear();
+        StackSize = DefaultStackSize;
+    }
 
     private sealed class Lease : IDisposable
     {

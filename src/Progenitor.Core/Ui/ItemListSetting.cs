@@ -74,6 +74,7 @@ public sealed class ItemListSetting : IDisposable
         if (_disposed) throw new ObjectDisposedException(nameof(ItemListSetting));
         if (list == null) throw new ArgumentNullException(nameof(list));
         if (list.Check(Rules) is { } problem) return problem;
+        if (Rules.CheckStackable(list, Value, ItemListSettings.StackSize) is { } unstackable) return unstackable;
         Entry.Value = list.ToString();
         return null;
     }

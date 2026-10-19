@@ -451,6 +451,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// <summary>HUB1: <see cref="UiLook.GameWindow(IUiPanel)"/> was called on this panel (its tabs are the game's window tabs).</summary>
     internal bool IsGameWindow { get; set; }
 
+    /// <summary>PICKFRONT1: <see cref="Ui.DialogChrome"/> made this panel a modal dialog (its canvas order is in the dialog band).</summary>
+    internal bool IsDialog { get; set; }
+
     /// <summary>DIALOGS1: called once when this shown panel is hidden or disposed (the kit dialog's liveness hook).</summary>
     internal Action? LeftScreen { get; set; }
 

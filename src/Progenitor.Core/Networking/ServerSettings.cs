@@ -389,7 +389,7 @@ public static partial class ServerSettings
         // the list's (ItemLimitList.MaxEncodedBytes), not a text row's.
         if (parsed is string listText && ItemListSettings.TryGet(request.RowId, out var listRules))
         {
-            if (!ItemListSettings.TryCanonical(listRules, listText, out var canonical, out var listError))
+            if (!ItemListSettings.TryCanonical(listRules, listText, current, out var canonical, out var listError))
                 return new(false, current, listError);
             parsed = canonical;
         }

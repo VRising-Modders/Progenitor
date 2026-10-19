@@ -88,6 +88,7 @@ internal static partial class ScopedSettings
         p.AllowCategories = rules.AllowCategories;
         p.MaxEntries = rules.MaxEntries;
         p.MaxCount = rules.MaxCount;
+        p.StackableOnly = rules.StackableOnly;
         p.CountLabel = ScopedSettingPresentation.Clip(rules.CountLabel, ScopedSettingPresentation.MaxUnitsBytes);
         if (!rules.AllowCategories || rules.Categories == null) return;
         var ids = new List<string>();
@@ -163,9 +164,9 @@ internal static partial class ScopedSettings
     /// A row packet for a peer: version 2 with hints, reduced until they fit (<see cref="ScopedSettingsWire.EncodeRowFitted"/>).
     /// A reduction is logged once per row and step, not per peer or snapshot.
     /// </summary>
-    private static byte[] RowPacket(Guid generation, ScopedSettingRecord row, bool hints)
+    private static byte[] RowPacket(Guid generation, ScopedSettingRecord row, bool hints, bool listFilters = false)
     {
-        byte version = hints ? ScopedSettingsWire.PresentationVersion : ScopedSettingsWire.Version;
+        byte version = ScopedSettingsWire.RowVersion(hints, listFilters);
         var bytes = ScopedSettingsWire.EncodeRowFitted(new ScopedSettingsPacket { Kind = 2, Generation = generation, Row = row }, version, out int reduced);
         if (reduced > 0 && WarnedConditions.Add(row.Id + "|reduced" + reduced))
             Plugin.Logger?.LogWarning("Settings: the hints of " + row.Id + " do not fit one packet; sent without its "

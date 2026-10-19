@@ -66,8 +66,14 @@ internal static partial class ScopedSettings
         {
             // An item list's value, help and kept hints can all reach their limits: the row must still fit one packet.
             var full = ScopedSettingPresentation.WorstCaseListRow(row.Schema);
+            // Measured at version 2, as before version 3 existed, so a list that registered then still registers.
             try { ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = full }, ScopedSettingsWire.PresentationVersion); }
             catch (ArgumentException) { throw new ArgumentException("This item list's default or names are too long to send with a full list."); }
+            // Version 3 is one byte longer. A row that fits version 2 only is not refused: a version 3 client is sent it with
+            // fewer hints at its limit (ScopedSettingsWire.EncodeRowFitted), and the server still checks every write.
+            if (!ScopedSettingsWire.FitsWorstCaseListRow(full, ScopedSettingsWire.ListFilterVersion))
+                Plugin.Logger?.LogWarning("Settings: item list " + row.Schema.Id + " is one byte from the packet limit with a full list; "
+                    + "clients that read item-list filters may be sent it with fewer hints.");
         }
         Entries.Add(row.Schema.Id, row); _schemaRevision++;
     }
@@ -137,7 +143,7 @@ internal static partial class ScopedSettings
             if (parsed is string listText && ItemListSettings.TryGet(id, out var listRules))
             {
                 // An item list: the server's own rules decide it, and the canonical text is stored.
-                if (!ItemListSettings.TryCanonical(listRules, listText, out var canonical, out var listError)) return new(false, current, listError);
+                if (!ItemListSettings.TryCanonical(listRules, listText, current, out var canonical, out var listError)) return new(false, current, listError);
                 parsed = canonical;
             }
             if (bounds != null && !bounds.IsValid(parsed)) return new(false, current, "Outside the values this setting accepts.");

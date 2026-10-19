@@ -922,4 +922,104 @@ public sealed class ScopedSettingsPresentationTests : IDisposable
         Assert.Equal("Nothing listed", ModSettingsView.ItemListSummary(""));
         Assert.Equal("Not readable", ModSettingsView.ItemListSummary("garbage"));
     }
+
+    // ---- PICKFRONT1: stackable-only lists ---------------------------------------------------------------------
+
+    private static ItemCatalogEntry[] StackCatalog() => new[]
+    {
+        new ItemCatalogEntry(11, "Item_Ingredient_Stone", "Stone", 500, 0, 0, false),
+        new ItemCatalogEntry(12, "Item_Ingredient_Wood", "Lumber", 500, 0, 0, false),
+        new ItemCatalogEntry(14, "Item_Weapon_Sword_T01", "Bone Sword", 1, 0, 0, false),
+    };
+
+    [Fact]
+    public void The_stackable_only_flag_rides_version_3_and_older_clients_get_version_2_without_it()
+    {
+        var row = Record("Filter", "System.String", "");
+        row.Presentation = new ScopedSettingPresentation { Widget = ScopedWidget.ItemList, MaxEntries = 10, MaxCount = 99, StackableOnly = true };
+        Assert.True(RoundTrip(row, ScopedSettingsWire.ListFilterVersion).Presentation!.StackableOnly);
+        var older = RoundTrip(row, ScopedSettingsWire.PresentationVersion).Presentation!;
+        Assert.False(older.StackableOnly);
+        Assert.Equal(10, older.MaxEntries);
+
+        // One byte more than version 2, and an unknown flag bit is refused.
+        int v2 = ScopedSettingsWire.Encode(RowPacket(row), ScopedSettingsWire.PresentationVersion).Length;
+        var v3 = ScopedSettingsWire.Encode(RowPacket(row), ScopedSettingsWire.ListFilterVersion);
+        Assert.Equal(v2 + 1, v3.Length);
+        Assert.Equal(ScopedSettingPresentation.StackableOnlyFlag, v3[^1]);
+        v3[^1] = 3;
+        Assert.False(ScopedSettingsWire.TryDecode(v3, true, out _));
+        Assert.False(new ScopedSettingPresentation { StackableOnly = true }.IsEmpty);
+
+        // The worst-case list row (registration's check) still fits at version 3.
+        var worst = ScopedSettingPresentation.WorstCaseListRow(ListRecord(""));
+        ScopedSettingsWire.Encode(RowPacket(worst), ScopedSettingsWire.ListFilterVersion);
+
+        // Who is sent which version: the capability decides.
+        Assert.Equal(ScopedSettingsWire.ListFilterVersion, ScopedSettingsWire.RowVersion(true, true));
+        Assert.Equal(ScopedSettingsWire.PresentationVersion, ScopedSettingsWire.RowVersion(true, false));
+        Assert.Equal(ScopedSettingsWire.Version, ScopedSettingsWire.RowVersion(false, true));
+        Assert.True((Handshake.SelfCapabilities & Handshake.Capability.ScopedSettingsListFilters) != 0);
+        foreach (Handshake.Capability other in Enum.GetValues(typeof(Handshake.Capability)))
+            if (other != Handshake.Capability.ScopedSettingsListFilters && other != Handshake.Capability.None)
+                Assert.True((other & Handshake.Capability.ScopedSettingsListFilters) == 0, other + " shares the bit");
+    }
+
+    [Fact]
+    public void The_server_refuses_an_item_that_does_not_stack_when_the_list_takes_stackables_only()
+    {
+        var catalog = StackCatalog().ToDictionary(e => e.PrefabGuid, e => e.MaxAmount);
+        ItemListSettings.StackSize = guid => catalog.TryGetValue(guid, out int size) ? size : null;
+        var rules = new ItemListRules { MaxCount = 100, StackableOnly = true };
+
+        Assert.True(ItemListSettings.TryCanonical(rules, "11=5;12=0", "", out var canonical, out _));
+        Assert.Equal("11=5;12=0", canonical);
+        Assert.False(ItemListSettings.TryCanonical(rules, "11=5;14=0", "11=5", out _, out var error));
+        Assert.Equal("The item 14 does not stack; this list takes stackable items only.", error);
+        Assert.False(ItemListSettings.TryCanonical(rules, "99=0", "", out _, out error));
+        Assert.Contains("could not be checked", error);
+        // A line already stored is kept (an edit of another line is not refused for it).
+        Assert.True(ItemListSettings.TryCanonical(rules, "14=3;11=0", "14=0", out _, out _));
+        // Without the flag nothing is checked against the catalog.
+        Assert.True(ItemListSettings.TryCanonical(new ItemListRules { MaxCount = 100 }, "14=0;99=0", "", out _, out _));
+        // Reading a stored list never consults the catalog.
+        Assert.True(ItemLimitList.TryParse("14=0;99=0", rules, out _, out _));
+    }
+
+    [Fact]
+    public void A_stackable_only_picker_lists_only_items_that_stack()
+    {
+        ModSettingsView.ItemCatalog = StackCatalog;
+        var record = ListRecord("");
+        record.Presentation!.StackableOnly = true;
+        var view = DrawList(record);
+        var editor = view.ItemListFor(record.Id)!;
+        editor.Open();
+        Assert.Equal(new[] { "Gems", "Lumber", "Stone" }, editor.PickerEntries().Select(e => e.Label));
+        // A key from elsewhere (the bridge) is refused before it is sent.
+        Assert.False(editor.Add(new[] { "i:14" }));
+        Assert.Empty(ScopedSettings.Requests);
+        Assert.True(editor.Add(new[] { "i:11" }));
+        Assert.Equal("11=0", record.Value);
+
+        record.Presentation.StackableOnly = false;
+        Assert.Contains("Bone Sword", editor.PickerEntries().Select(e => e.Label));
+    }
+
+    [Fact]
+    public void The_list_window_picker_draws_over_the_list_window()
+    {
+        ModSettingsView.ItemCatalog = StackCatalog;
+        var record = ListRecord("");
+        var view = DrawList(record);
+        var editor = view.ItemListFor(record.Id)!;
+        editor.Open();
+        editor.OpenPicker();
+        Assert.True(editor.PickerOpen);
+        int list = _runtime.SpotFor("Pickup filter").Sorting;
+        int picker = _runtime.SpotFor("Add to Pickup filter").Sorting;
+        Assert.True(picker > list, "picker " + picker + " over list " + list);
+        editor.Open(); // Edit pressed again while the picker is open: the list is not raised over it
+        Assert.True(_runtime.SpotFor("Add to Pickup filter").Sorting > _runtime.SpotFor("Pickup filter").Sorting);
+    }
 }

@@ -165,7 +165,24 @@ internal sealed partial class UnityUiRuntime
         /// </summary>
         internal void ApplyRowLayer()
         {
-            if (Released || _menuPane || _dialog) return;
+            if (Released || _menuPane) return;
+            // PICKFRONT1: the shown set's order by show order (UiWindowLayout.DrawOrders): a picker or popup a window
+            // opened draws over that window, a dialog over a dialog. Only an open or a close changes it, never focus.
+            if (Spot.Sorting > 0)
+            {
+                SetOverlaySorting(Spot.Sorting);
+                _rowLayered = true;
+                return;
+            }
+            if (_dialog) return;
+            // A panel that left the ranking (mounted in a game window's tab) gives up its raised order: the overlay's own
+            // order and override flag, exactly as the overlay was created (CreateOverlay), and no layer is kept.
+            if (_rowLayered && !InWindowRow && !IsStandardWindow)
+            {
+                SetOverlaySorting(UiOwnership.OverlaySorting);
+                _rowLayered = false;
+                return;
+            }
             if (InWindowRow)
             {
                 // Past 14 row panels the layers share the top order (LayerSorting clamps at WindowSortingMax); the ones

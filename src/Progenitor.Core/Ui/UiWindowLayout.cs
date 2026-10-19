@@ -3,6 +3,25 @@ using System.Collections.Generic;
 
 namespace Progenitor.Ui;
 
+/// <summary>PICKFRONT1: which stack a shown panel's canvas order is counted in (<see cref="UiWindowLayout.DrawOrders"/>).</summary>
+internal enum UiDrawBand
+{
+    /// <summary>Keeps its own order: a Mods workspace pane, a panel mounted in a game window's tab.</summary>
+    None = 0,
+
+    /// <summary>An ordinary floating panel that takes input (not a game or standard window).</summary>
+    Floating = 1,
+
+    /// <summary>A standard window or game window (docked or not), or a panel in the standard window row.</summary>
+    Window = 2,
+
+    /// <summary>A modal dialog: above every window.</summary>
+    Dialog = 3,
+
+    /// <summary>A panel that takes no input (a HUD, tracker or preview): not ranked; it stays under every window.</summary>
+    Passive = 4,
+}
+
 /// <summary>
 /// WINDOWS1: the three standard windows a mod opens with <c>ctx.Windows.Create</c> (or <see cref="Ui.Window"/>). Each
 /// preset fixes the frame art, the title style and spacing, the version stamp, how the window takes input (and so whether
@@ -508,7 +527,7 @@ internal static class UiWindowLayout
     /// </summary>
     internal static List<(T Panel, PanelSpot Spot)> Spots<T>(
         IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace, Func<T, bool>? flows = null,
-        Func<T, long>? shownSequence = null, Func<T, UiDockSpec?>? dock = null)
+        Func<T, long>? shownSequence = null, Func<T, UiDockSpec?>? dock = null, Func<T, UiDrawBand>? band = null)
     {
         var result = new List<(T, PanelSpot)>(shown.Count);
         bool workspaceOpen = false;
@@ -557,12 +576,27 @@ internal static class UiWindowLayout
             });
         var layer = new int[row.Count];
         for (int l = 0; l < byShow.Count; l++) layer[byShow[l]] = l;
-        for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen, layer[w]).WithDocks(docks)));
+        // PICKFRONT1: canvas orders over the whole shown set by show order, so a panel opened from another (a picker from
+        // a list window, a popup from a window, a dialog from a dialog) draws over it whichever band either is in.
+        var bands = new UiDrawBand[shown.Count];
+        var sequence = new long[shown.Count];
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var b = workspace(shown[i]) ? UiDrawBand.None : band?.Invoke(shown[i]) ?? UiDrawBand.Floating;
+            // A standard window is in the window band whether it is in the row or docked (the dim it turns on stays under it).
+            if (b == UiDrawBand.Floating && (row.Contains(i) || windowWidth(shown[i]) > 0f)) b = UiDrawBand.Window;
+            bands[i] = b;
+            sequence[i] = shownSequence?.Invoke(shown[i]) ?? i;
+        }
+        int[] orders = DrawOrders(bands, sequence);
+
+        for (int w = 0; w < row.Count; w++)
+            result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen, layer[w]).WithDocks(docks).WithSorting(orders[row[w]])));
         // Workspace panes draw from their own geometry and never see the docks.
         for (int o = 0; o < others.Count; o++)
-            result.Add((shown[others[o]], workspace(shown[others[o]]) ? new PanelSpot(o, others.Count) : new PanelSpot(o, others.Count).WithDocks(docks)));
+            result.Add((shown[others[o]], workspace(shown[others[o]]) ? new PanelSpot(o, others.Count) : new PanelSpot(o, others.Count).WithDocks(docks).WithSorting(orders[others[o]])));
         for (int k = 0; k < docked.Count; k++)
-            result.Add((shown[docked[k]], new PanelSpot(k, docked.Count).WithDocks(docks, k, workspaceOpen)));
+            result.Add((shown[docked[k]], new PanelSpot(k, docked.Count).WithDocks(docks, k, workspaceOpen).WithSorting(orders[docked[k]])));
         return result;
     }
 
@@ -735,6 +769,81 @@ internal static class UiWindowLayout
 
     /// <inheritdoc cref="ShadeSorting"/>
     internal static int DialogSorting => UiOwnership.OverlaySorting + 16;
+
+    /// <summary>PICKFRONT1: the highest order a dialog takes (<see cref="DrawOrders"/>); kept under the notice band.</summary>
+    internal static int DialogSortingMax => UiOwnership.OverlaySorting + 19;
+
+    /// <summary>
+    /// PICKFRONT1: the canvas order of each shown panel (index-aligned with <paramref name="bands"/> and
+    /// <paramref name="shownSequence"/>; 0 for <see cref="UiDrawBand.None"/>). Walked in show order (ties by index):
+    /// <list type="bullet">
+    /// <item>a <see cref="UiDrawBand.Passive"/> panel (a HUD that takes no input) is not ranked: it stays at
+    /// <see cref="UiOwnership.OverlaySorting"/>, under every window and the dim, however late it was shown;</item>
+    /// <item>input-taking floating panels and windows share one stack: each is raised above every earlier one (an
+    /// ordinary panel starts at <see cref="UiOwnership.OverlaySorting"/>, a window at <see cref="WindowSorting"/>, a raised
+    /// one never lands on the dim's <see cref="ShadeSorting"/>), at most <see cref="WindowSortingMax"/>;</item>
+    /// <item>dialogs stack from <see cref="DialogSorting"/> to <see cref="DialogSortingMax"/>.</item>
+    /// </list>
+    /// When a stack has more panels than its band has orders, the newest keeps the top order and the older ones are
+    /// pressed down under it (the oldest share the band's floor), so the panel shown last always draws on top. The order
+    /// depends only on when each panel was shown, never on focus or hover, so a picker or popup opened from a window
+    /// comes to the front and stays there while it is open.
+    /// </summary>
+    /// <remarks>
+    /// The live bug: the item-list window and its "Add to" picker are wide game windows (outside the window row), so both
+    /// kept the overlay's default order; two canvases at one order have no defined winner and the picker drew under.
+    /// </remarks>
+    internal static int[] DrawOrders(IReadOnlyList<UiDrawBand> bands, IReadOnlyList<long> shownSequence)
+    {
+        int n = bands.Count;
+        var orders = new int[n];
+        var byShow = new List<int>(n);
+        for (int i = 0; i < n; i++)
+        {
+            if (bands[i] == UiDrawBand.Passive) orders[i] = UiOwnership.OverlaySorting;
+            else if (bands[i] != UiDrawBand.None) byShow.Add(i);
+        }
+        byShow.Sort((a, b) =>
+        {
+            int c = (a < shownSequence.Count ? shownSequence[a] : 0).CompareTo(b < shownSequence.Count ? shownSequence[b] : 0);
+            return c != 0 ? c : a.CompareTo(b);
+        });
+        var floating = new List<int>(byShow.Count);
+        var dialogs = new List<int>();
+        foreach (int i in byShow) (bands[i] == UiDrawBand.Dialog ? dialogs : floating).Add(i);
+        Stack(floating, orders, i => bands[i] == UiDrawBand.Window ? WindowSorting : UiOwnership.OverlaySorting, WindowSortingMax);
+        Stack(dialogs, orders, _ => DialogSorting, DialogSortingMax);
+        return orders;
+    }
+
+    /// <summary>
+    /// One stack of <see cref="DrawOrders"/>: <paramref name="inShowOrder"/> each above the one before (from its own
+    /// floor), then, from the newest down, capped at <paramref name="top"/> and kept below the next newer one, never under
+    /// its own floor and never on the dim's order.
+    /// </summary>
+    private static void Stack(List<int> inShowOrder, int[] orders, Func<int, int> floorOf, int top)
+    {
+        int wanted = int.MinValue;
+        foreach (int i in inShowOrder)
+        {
+            int floor = floorOf(i);
+            int o = wanted >= floor ? Math.Max(wanted + 1, WindowSorting) : floor;
+            if (floor >= DialogSorting) o = wanted >= floor ? wanted + 1 : floor;
+            orders[i] = o;
+            wanted = Math.Max(wanted, o);
+        }
+        int limit = top;
+        for (int k = inShowOrder.Count - 1; k >= 0; k--)
+        {
+            int i = inShowOrder[k];
+            int floor = floorOf(i);
+            int o = Math.Max(floor, Math.Min(orders[i], limit));
+            if (o == ShadeSorting) o = UiOwnership.OverlaySorting;
+            orders[i] = o;
+            limit = o - 1;
+            if (limit == ShadeSorting) limit = UiOwnership.OverlaySorting;
+        }
+    }
 
     /// <summary>
     /// WINDOWS1 live fix: the canvas order of a row panel on draw layer <paramref name="layer"/> (0: shown longest ago).
