@@ -84,8 +84,9 @@ public readonly struct GroundPile
 {
     /// <summary>Make one. Public so tests and samples can describe one.</summary>
     public GroundPile(GroundPileId id, int item, int amount, float x, float y, float z, float distanceSquared,
-        bool disabled, int maxStack, int itemEntityIndex = 0, int itemEntityVersion = 0)
+        bool disabled, int maxStack, int itemEntityIndex = 0, int itemEntityVersion = 0, bool inFlight = false)
     {
+        InFlight = inFlight;
         Id = id;
         Item = item;
         Amount = amount;
@@ -141,6 +142,13 @@ public readonly struct GroundPile
     /// </summary>
     public bool HasItemEntity => ItemEntityIndex != 0 || ItemEntityVersion != 0;
 
+    /// <summary>
+    /// The game's throw is still running on this pile: it carries the throw component
+    /// (<c>DropItemThrowSystem.DropItem</c>, which holds its own amount) or <c>SpellMovement</c>.
+    /// <c>TakeInto</c> refuses it until it has landed.
+    /// </summary>
+    public bool InFlight { get; }
+
     /// <summary>The item stacks (stack size above 1 in the server item table).</summary>
     public bool IsStackable => MaxStack > 1;
 
@@ -150,8 +158,8 @@ public readonly struct GroundPile
     /// </summary>
     public bool IsUnique => HasItemEntity || !IsStackable;
 
-    /// <summary>What <c>TakeInto</c> accepts: a stackable item with no item entity of its own and units left.</summary>
-    public bool CanTake => !IsUnique && Amount > 0;
+    /// <summary>What <c>TakeInto</c> accepts: a landed pile of a stackable item with no item entity of its own and units left.</summary>
+    public bool CanTake => !IsUnique && !InFlight && Amount > 0;
 
 #if !PROGENITOR_TESTS
     /// <summary>The pile entity (only meaningful in the epoch of <see cref="Id"/>).</summary>
@@ -169,6 +177,7 @@ public readonly struct GroundPile
             + " at " + X.ToString("0.0", c) + "," + Y.ToString("0.0", c) + "," + Z.ToString("0.0", c)
             + " d=" + Distance.ToString("0.0", c)
             + (Disabled ? " asleep" : "")
+            + (InFlight ? " in-flight" : "")
             + (HasItemEntity ? " item-entity" : "")
             + (IsStackable ? "" : " not-stackable");
     }
@@ -563,7 +572,7 @@ public sealed class PlayerDropAll
     /// <summary>True when a container was found.</summary>
     public bool HasContainer => ContainerIndex != 0 || ContainerVersion != 0;
 
-    /// <summary>The container held, per item type, at least what left the bag when it was found.</summary>
+    /// <summary>The container held, per item type, at least what left the bag. A container is only handed out when it does, so this is true whenever <see cref="HasContainer"/> is.</summary>
     public bool ContentsMatch { get; }
 
     /// <summary>

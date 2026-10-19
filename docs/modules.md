@@ -2694,8 +2694,14 @@ A pile is an entity with the game's `ItemPickup` component (both sides' metadata
 - **`GroundPile`**: `Id`, `Item`, `Amount`, `X`/`Y`/`Z`, `Distance` and `DistanceSquared` from the
   asked point, `Disabled`, `MaxStack` (the stack size in the server item table, 0 when the table
   does not know the item), `HasItemEntity` with `ItemEntity` (`ItemEntityIndex`/`Version`),
-  `IsStackable` (stack size above 1), `IsUnique` (`HasItemEntity` or not stackable) and `CanTake`
-  (not unique and units left).
+  `InFlight`, `IsStackable` (stack size above 1), `IsUnique` (`HasItemEntity` or not stackable)
+  and `CanTake` (not unique, not in flight, units left).
+- **In flight.** A pile that still carries the game's throw component
+  (`DropItemThrowSystem.DropItem`) or `SpellMovement` is `InFlight`. The throw component holds its
+  own `Amount`, which a take would not update, and the game's throw systems read it when the throw
+  ends; a take then could be undone or doubled. `TakeInto` refuses such a pile ("in flight") until
+  it has landed. When the throw component leaves a pile is not observed: if live piles keep it after
+  landing, every such pile reads as in flight, which the live acceptance below checks first.
 - **The pile's own item entity.** When a pile carries the game's throw component
   `DropItemThrowSystem.DropItem` (`ItemEntity` at 0x0, `ItemType` 0x8, `Amount` 0xC) and its
   `ItemEntity` names a live entity, the pile reports it. The game's drop handlers pass a dropped
@@ -2718,8 +2724,8 @@ steps:
 
 1. **Refusals** (nothing touched, `Outcome = Refused`), in this order: `GroundPileId.None`, no
    target inventory, `amount` below 1, a stale handle, a pile that is gone, being removed
-   (`DestroyTag`) or empty, a pile with its own item entity, an item the server item table does not
-   know, an item that does not stack (stack size 1).
+   (`DestroyTag`) or empty, a pile in flight (above), a pile with its own item entity, an item the
+   server item table does not know, an item that does not stack (stack size 1).
 2. **The add.** `ctx.Inventory.TryAdd(into, item, min(amount, pile))`: the game's server add,
    read back. A refused add is `Refused` with its reason; `Inconsistent` (the inventory could not be
    read back) leaves the pile untouched. The caller should then leave that pile alone, because the
@@ -2815,22 +2821,38 @@ fills a container from the prefab `RootPrefabCollection.PlayerInventoryDropConta
 | `Items` (`DroppedStack`: `Item`, `Amount`, `WithItemEntity`) | What left the bag, per item type. Worn equipment the setting let go was never in the bag and is not listed. |
 | `HasPosition`, `X`, `Y`, `Z` | The character's `Translation` right after the update. |
 | `Container`, `ContainerInventory`, `ContainerIndex`/`ContainerVersion`, `Epoch`, `HasContainer` | The dropped-inventory container, when found. |
-| `ContentsMatch` | The container held, per item type, at least what left the bag when it was found. |
+| `ContentsMatch` | True whenever `HasContainer` is: a container is only handed out when it holds, per item type, at least what left the bag. |
 | `Ambiguous` | The same update also carried a drop-key request of this player, or a second new container was within 0.5 m of the chosen distance. |
 | `Reason` | Why there is no container, or a note on the match. |
 
-**How the container is found.** The Before of an update with a `DropEntireInventoryEvent` notes the
-containers of that prefab that already exist (every live entity with `InventoryBuffer` or
-`InventoryInstanceElement` and that `PrefabGUID`). From the next frame tick, every 5 frames for up to
-60 frames, a container of that prefab that was not there before and lies within 8 m of where the
-player stood is that drop's. Requests are paired with containers nearest first, each container once.
-After 60 frames the event is raised anyway with `HasContainer` false and the reason.
+**How the container is found.** While an `OnDropAll` subscriber exists, a book knows which
+containers of that prefab (live entities with `InventoryBuffer` or `InventoryInstanceElement` and that
+`PrefabGUID`) are already accounted for. Its baseline is taken when the first subscriber arrives and
+again after each world load, from the subscribing call or the frame tick, never inside the game's
+update. After a drop, from the next frame tick and then every 10 frames for up to 60 frames, one
+shared scan per pass serves every waiting drop and offers only containers the book does not know.
+
+1. A container is a drop's only when it lies within 8 m of where the player stood **and** holds, per
+   item type, at least what left that player's bag. Pairs are tried nearest first, each container
+   once, so a neighbor's container that is nearer is skipped when its contents do not match.
+2. A drop with no such container keeps waiting. After 60 frames it is raised with `HasContainer`
+   false and the reason ("did not hold what left the bag" when a near container was offered and
+   refused, "no new … container appeared" otherwise).
+3. A matched container joins the book at once. Containers no waiting drop took join it when nothing
+   waits any more, so a later drop is never offered them.
+4. A drop that happens while the book has no baseline (the prefab table was not readable yet) is
+   raised at once without a container. Drops still waiting at a world load are raised without one.
 
 Proven and assumed: the handler and the prefab field are in the metadata (source-checked). That the
-container appears within 60 frames and within 8 m of the player, and that it carries one of the two
-inventory components, is **assumed**; a bag that did not change (a refused request) raises nothing.
-**Cost**: the container scan reads the prefab of every inventory-bearing entity, once in the Before
-and every 5 frames while a drop waits. It runs only on frames after a whole-inventory drop.
+container appears within 60 frames and within 8 m of the player, holds the bag's items, and carries one
+of the two inventory components, is **assumed**; a bag that did not change (a refused request) raises
+nothing. A drop-all request in an update always takes its player's bag out of the ground-drop report,
+whether or not anything listens to `OnDropAll`.
+**Cost**: no metadata component marks the drop container alone (prefab components are game data, not
+metadata), so a scan reads the prefab of each inventory-bearing entity, at most 50,000 per scan (a
+capped scan says so in the reason). Scans run once for the baseline per world load and then only
+while a drop waits: at most 7 passes per waiting period, shared by all waiting drops, never inside a
+game update.
 
 ### Drop prefabs
 
@@ -2867,7 +2889,9 @@ Isolated test server with Core, the Dev bridge and `Progenitor.Sample`; an admin
 Iron Ore, a weapon and a few other stacks in the bag.
 
 1. `.drops prefabs`: six non-zero GUIDs.
-2. `.drops log`. Drop an Iron Ore stack with the inventory menu's drop key. Expect one
+2. Drop an Iron Ore stack and run `.drops near 5` at once and again two seconds later: the pile is
+   `in flight: not taken yet` only during the throw. If it still reads in flight after landing, stop:
+   the in-flight rule needs another signal. `.drops log`. Drop an Iron Ore stack with the inventory menu's drop key. Expect one
    `ground drop … DropKey item=<ore> x<stack> bag=<n>->0 at <your position>`. Drag another stack
    onto the ground: `DragOut`. Drop the weapon: the line ends with `item-entity`.
 3. `.drops near 5`: the two ore piles (and the weapon, `own item entity: not taken` or
@@ -2876,7 +2900,8 @@ Iron Ore, a weapon and a few other stacks in the bag.
    lower amount on a second client. `.drops take`: `Complete … removed`; the pile disappears on
    both clients within 2 s.
 5. Drop all (the game's drop-all). Expect `drop all … container=<i:v> match items=…`, and the
-   container on the ground holds what left the bag.
+   container on the ground holds what left the bag. With a second player dropping all beside you in
+   the same moment, each line names that player's own container.
 6. While casting, or in PvP combat with an action-bar slot: drop; nothing is logged.
 7. `.drops log` again to stop. Clean up: remove the Sample from the test server's reload folder
    and confirm the clean unload.

@@ -99,7 +99,7 @@ internal static unsafe class GroundPiles
         int maxStack = InventoryRuntime.TryItemInfo(item, out var info) ? info.MaxAmount : 0;
         var own = ItemEntityOf(em, e);
         pile = new GroundPile(new GroundPileId(e.Index, e.Version, epoch), item, amount, x, y, z, d2,
-            e.Has<Disabled>(em), maxStack, own.Index, own.Version);
+            e.Has<Disabled>(em), maxStack, own.Index, own.Version, InFlight(em, e));
         reason = "";
         return true;
     }
@@ -114,6 +114,13 @@ internal static unsafe class GroundPiles
         amount = *(int*)(p + Layout.ItemPickupItemAmountOffset);
         return true;
     }
+
+    /// <summary>
+    /// The game's throw still runs on the pile: it carries <c>DropItemThrowSystem.DropItem</c> (with its
+    /// own <c>Amount</c>, which a take would not update) or <c>SpellMovement</c>.
+    /// </summary>
+    private static bool InFlight(EntityManager em, Entity e) =>
+        e.Has<DropItemThrowSystem.DropItem>(em) || e.Has<SpellMovement>(em);
 
     /// <summary>The live item entity the pile's throw component names, or <c>Entity.Null</c>.</summary>
     private static Entity ItemEntityOf(EntityManager em, Entity e)
@@ -159,7 +166,7 @@ internal static unsafe class GroundPiles
         bool stale = id.IsStaleIn(epoch);
         bool exists = !id.IsNone && !stale && e.Exists(em);
         int item = 0, have = 0;
-        bool removing = false, own = false, known = false;
+        bool removing = false, own = false, known = false, flying = false;
         int maxStack = 0;
         if (exists)
         {
@@ -168,12 +175,13 @@ internal static unsafe class GroundPiles
             else
             {
                 own = ItemEntityOf(em, e) != Entity.Null;
+                flying = InFlight(em, e);
                 known = InventoryRuntime.TryItemInfo(item, out var info);
                 maxStack = known ? info.MaxAmount : 0;
             }
         }
 
-        string? refusal = GroundTakeRules.Refusal(id.IsNone, stale, into.IsNone, amount, exists, removing, have, own, known, maxStack);
+        string? refusal = GroundTakeRules.Refusal(id.IsNone, stale, into.IsNone, amount, exists, removing, have, flying, own, known, maxStack);
         if (refusal != null) return GroundTakeResult.Refuse(id, item, amount, have, refusal);
 
         int ask = GroundTakeRules.Ask(amount, have);

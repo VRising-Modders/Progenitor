@@ -67,8 +67,8 @@ public class DropTests
     public void Take_refusals_come_in_a_fixed_order()
     {
         string? Ref(bool none = false, bool stale = false, bool target = false, int req = 5, bool exists = true, bool removing = false,
-            int amount = 10, bool entity = false, bool known = true, int max = 100) =>
-            GroundTakeRules.Refusal(none, stale, target, req, exists, removing, amount, entity, known, max);
+            int amount = 10, bool flying = false, bool entity = false, bool known = true, int max = 100) =>
+            GroundTakeRules.Refusal(none, stale, target, req, exists, removing, amount, flying, entity, known, max);
 
         Assert.Null(Ref());
         Assert.Equal(GroundTakeRules.NoPile, Ref(none: true, stale: true, req: 0));
@@ -77,7 +77,8 @@ public class DropTests
         Assert.Equal(GroundTakeRules.StalePile, Ref(stale: true, exists: false));
         Assert.Equal(GroundTakeRules.Gone, Ref(exists: false, removing: true));
         Assert.Equal(GroundTakeRules.Removing, Ref(removing: true, amount: 0));
-        Assert.Equal(GroundTakeRules.Empty, Ref(amount: 0, entity: true));
+        Assert.Equal(GroundTakeRules.Empty, Ref(amount: 0, flying: true));
+        Assert.Equal(GroundTakeRules.InFlight, Ref(flying: true, entity: true));
         Assert.Equal(GroundTakeRules.ItemEntity, Ref(entity: true, known: false));
         Assert.Equal(GroundTakeRules.UnknownItem, Ref(known: false, max: 1));
         Assert.Equal(GroundTakeRules.NotStackable, Ref(max: 1));
@@ -353,41 +354,124 @@ public class DropTests
 
     // ---- the drop-all container matcher ---------------------------------------------------------
 
-    static PendingDropAll Req(float x, float z, HashSet<long>? before = null, bool position = true) =>
-        new() { HasPosition = position, X = x, Y = 0, Z = z, Before = before ?? new HashSet<long>() };
+    static PendingDropAll Req(float x, float z, bool position = true) =>
+        new() { HasPosition = position, X = x, Y = 0, Z = z };
 
     static DropContainerCandidate C(long key, float x, float z) => new(key, x, 0, z);
+
+    static readonly Func<int, int, bool> Any = (_, _) => true;
 
     [Fact]
     public void A_new_container_near_the_player_is_theirs()
     {
-        var m = DropContainerMatcher.Match(new[] { Req(0, 0) }, new[] { C(1, 1, 0), C(2, 20, 0) }, out var amb);
+        var m = DropContainerMatcher.Match(new[] { Req(0, 0) }, new[] { C(1, 1, 0), C(2, 20, 0) }, Any, out var amb);
         Assert.Equal(new[] { 0 }, m);
         Assert.False(amb[0]);
     }
 
     [Fact]
-    public void Containers_that_existed_before_or_lie_too_far_are_never_matched()
+    public void Containers_too_far_or_a_request_without_a_position_never_match()
     {
-        var before = new HashSet<long> { 1 };
-        var m = DropContainerMatcher.Match(new[] { Req(0, 0, before) },
-            new[] { C(1, 0, 0), C(2, DropContainerMatcher.MaxDistance + 1, 0) }, out _);
-        Assert.Equal(new[] { -1 }, m);
-        Assert.Equal(new[] { -1 }, DropContainerMatcher.Match(new[] { Req(0, 0, position: false) }, new[] { C(3, 0, 0) }, out _));
-        var unknownBefore = new PendingDropAll { HasPosition = true, Before = null };
-        Assert.Equal(new[] { -1 }, DropContainerMatcher.Match(new[] { unknownBefore }, new[] { C(3, 0, 0) }, out _));
+        Assert.Equal(new[] { -1 }, DropContainerMatcher.Match(new[] { Req(0, 0) },
+            new[] { C(2, DropContainerMatcher.MaxDistance + 1, 0) }, Any, out _));
+        Assert.Equal(new[] { -1 }, DropContainerMatcher.Match(new[] { Req(0, 0, position: false) }, new[] { C(3, 0, 0) }, Any, out _));
     }
 
     [Fact]
     public void Two_players_get_the_container_nearest_each_and_a_close_second_is_ambiguous()
     {
-        var m = DropContainerMatcher.Match(new[] { Req(0, 0), Req(6, 0) }, new[] { C(1, 5.5f, 0), C(2, 0.5f, 0) }, out var amb);
+        var m = DropContainerMatcher.Match(new[] { Req(0, 0), Req(6, 0) }, new[] { C(1, 5.5f, 0), C(2, 0.5f, 0) }, Any, out var amb);
         Assert.Equal(new[] { 1, 0 }, m);
         Assert.False(amb[0]);
 
-        var close = DropContainerMatcher.Match(new[] { Req(0, 0) }, new[] { C(1, 1f, 0), C(2, -1.2f, 0) }, out var amb2);
+        var close = DropContainerMatcher.Match(new[] { Req(0, 0) }, new[] { C(1, 1f, 0), C(2, -1.2f, 0) }, Any, out var amb2);
         Assert.Equal(new[] { 0 }, close);
         Assert.True(amb2[0]);
+    }
+
+    [Fact]
+    public void A_container_that_does_not_hold_the_bag_loss_is_never_handed_out()
+    {
+        // Alice and Bob both drop all within 8 m; only Alice's request made the batch (Bob's was
+        // past the cap). Bob's container lies nearer to Alice than her own does.
+        var alice = Req(0, 0);
+        alice.Items.Add(new DroppedStack(Ore, 40, false));
+        InventorySlot S(int item, int amount) => new(0, item, amount, 100, 0, false);
+        var held = new Dictionary<long, InventorySlot[]>
+        {
+            [1] = new[] { S(Wood, 9) },   // Bob's, 1 m away
+            [2] = new[] { S(Ore, 40) },   // Alice's, 3 m away
+        };
+        var candidates = new[] { C(1, 1, 0), C(2, 3, 0) };
+        var asked = new List<(int, int)>();
+        bool Covers(int r, int c)
+        {
+            asked.Add((r, c));
+            return DropContainerMatcher.ContentsCover(alice.Items, held[candidates[c].Key]);
+        }
+
+        var m = DropContainerMatcher.Match(new[] { alice }, candidates, Covers, out var amb);
+        Assert.Equal(new[] { 1 }, m);
+        Assert.False(amb[0]);
+        Assert.Equal(new[] { (0, 0), (0, 1) }, asked); // nearest first, each pair once
+
+        // Only Bob's container ever appears: Alice's drop stays unmatched and keeps waiting.
+        var none = DropContainerMatcher.Match(new[] { alice }, new[] { C(1, 1, 0) }, Covers, out _);
+        Assert.Equal(new[] { -1 }, none);
+    }
+
+    [Fact]
+    public void A_throwing_contents_check_counts_as_not_covered()
+    {
+        var m = DropContainerMatcher.Match(new[] { Req(0, 0) }, new[] { C(1, 1, 0) },
+            (_, _) => throw new InvalidOperationException("unreadable"), out _);
+        Assert.Equal(new[] { -1 }, m);
+    }
+
+    // ---- the container book ---------------------------------------------------------------------
+
+    [Fact]
+    public void Book_offers_only_containers_it_has_not_accounted_for()
+    {
+        var book = new DropContainerBook();
+        Assert.False(book.HasBaselineFor(3));
+        book.Baseline(3, new long[] { 10, 11 });
+        Assert.True(book.HasBaselineFor(3));
+        Assert.False(book.HasBaselineFor(4));
+
+        var fresh = new List<DropContainerCandidate>();
+        book.New(new[] { C(10, 0, 0), C(12, 0, 0), C(13, 0, 0) }, fresh);
+        Assert.Equal(new long[] { 12, 13 }, fresh.Select(c => c.Key));
+
+        book.Matched(12);
+        book.New(new[] { C(12, 0, 0), C(13, 0, 0) }, fresh);
+        Assert.Equal(new long[] { 13 }, fresh.Select(c => c.Key)); // 13 is still offered while drops wait
+
+        book.Settle(); // nothing waits: 13 belongs to nobody we know of, and is never offered again
+        book.New(new[] { C(13, 0, 0), C(14, 0, 0) }, fresh);
+        Assert.Equal(new long[] { 14 }, fresh.Select(c => c.Key));
+
+        book.Clear();
+        Assert.False(book.HasBaselineFor(3));
+        Assert.Equal(0, book.Count);
+    }
+
+    // ---- in flight ------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_pile_in_flight_is_not_takeable_and_take_refuses_it()
+    {
+        var flying = new GroundPile(new GroundPileId(1, 1, 1), Ore, 10, 0, 0, 0, 0, false, 4000, 0, 0, inFlight: true);
+        Assert.True(flying.InFlight);
+        Assert.False(flying.IsUnique);
+        Assert.False(flying.CanTake);
+        Assert.Contains("in-flight", flying.ToString());
+        Assert.Equal(GroundTakeRules.InFlight,
+            GroundTakeRules.Refusal(false, false, false, 5, true, false, 10, true, false, true, 4000));
+        // Empty and removing piles are refused before the flight check; the item checks come after it.
+        Assert.Equal(GroundTakeRules.Empty, GroundTakeRules.Refusal(false, false, false, 5, true, false, 0, true, false, true, 4000));
+        Assert.Equal(GroundTakeRules.InFlight, GroundTakeRules.Refusal(false, false, false, 5, true, false, 10, true, true, false, 1));
+        Assert.Contains("in flight", GroundTakeRules.InFlight);
     }
 
     [Fact]

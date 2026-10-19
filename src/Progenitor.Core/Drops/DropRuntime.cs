@@ -28,19 +28,22 @@ namespace Progenitor.Drops;
 /// rather than the player's own inventory is not this observer's: <c>OnPlayerMove</c> reports it
 /// (<c>Kind = Drop</c>, <c>Counterpart = Ground</c>).</para>
 ///
-/// <para><b>Whole-inventory drops.</b> When an update carries a <c>DropEntireInventoryEvent</c>, the
-/// Before also notes which containers of the dropped-inventory prefab
-/// (<c>RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID</c>) already exist. From the next
-/// frame tick a new container of that prefab within <see cref="DropContainerMatcher.MaxDistance"/> of
-/// where the player stood is that drop's, checked every few frames for up to
-/// <see cref="ContainerSearchFrames"/> frames.</para>
+/// <para><b>Whole-inventory drops.</b> While a drop-all listener exists, a book
+/// (<see cref="DropContainerBook"/>) knows which containers of the dropped-inventory prefab
+/// (<c>RootPrefabCollection.PlayerInventoryDropContainerPrefabGUID</c>) are already accounted for:
+/// a baseline when the first listener arrives and after each world load, always from the frame
+/// tick or the subscribing call, never inside a game update. After a drop, from the next frame
+/// tick and then every <see cref="ContainerSearchEvery"/> frames for up to
+/// <see cref="ContainerSearchFrames"/> frames, one shared scan per pass offers the new containers;
+/// a container within <see cref="DropContainerMatcher.MaxDistance"/> of where the player stood that
+/// holds what left the bag is that drop's.</para>
 ///
 /// <para><b>Cost.</b> The hooks exist only while something listens. They fire only on frames where
 /// their system runs; a run with no event is one or two cached-query emptiness checks. Per handled
 /// update: one entity array per event kind, a typed read and one raw read per request (64 at most),
-/// two raw bag reads and one position read per dropping character (32 at most). A whole-inventory drop
-/// also lists every inventory-bearing entity once in the Before, and again every few frames until its
-/// container is found, reading each one's prefab.</para>
+/// two raw bag reads and one position read per dropping character (32 at most). The container scan
+/// (the baseline, and each search pass while a drop waits) visits inventory-bearing entities and reads
+/// their prefab, at most <see cref="MaxScanVisits"/> per scan; it never runs inside the hooks.</para>
 /// </summary>
 internal static unsafe class DropRuntime
 {
@@ -51,7 +54,10 @@ internal static unsafe class DropRuntime
     internal const int ContainerSearchFrames = 60;
 
     /// <summary>Frames between two container searches while a drop waits.</summary>
-    private const int ContainerSearchEvery = 5;
+    internal const int ContainerSearchEvery = 10;
+
+    /// <summary>The most entities one container scan visits; past this the scan stops and says so.</summary>
+    internal const int MaxScanVisits = 50_000;
 
     private static DropEventHub<PlayerGroundDrop>? _ground;
     private static DropEventHub<PlayerDropAll>? _all;
@@ -67,14 +73,18 @@ internal static unsafe class DropRuntime
     private static readonly List<PendingGroundDrop> FoundGround = new();
     private static readonly List<PendingDropAll> FoundAll = new();
     private static readonly List<PendingDropAll> Waiting = new();
+    private static readonly List<DropContainerCandidate> Scanned = new();
     private static readonly List<DropContainerCandidate> Candidates = new();
-    private static HashSet<long>? _containersBefore;
+    private static readonly HashSet<long> ScanKeys = new();
+    private static readonly DropContainerBook Book = new();
+    private static long _nextSearch;
+    private static bool _scanCapped;
     private static long _frames;
     private static long _nextInstallTry;
     private static int _failures;
 
     // Counters for logs and a later bridge op.
-    internal static long Updates, Requests, Truncated, Unchanged, Unread, LostAfter, DropAllsFound, DropAllsTimedOut;
+    internal static long Updates, Requests, Truncated, Unchanged, Unread, LostAfter, DropAllsFound, DropAllsTimedOut, ScanCapped;
     internal static string LastError = "";
 
     internal static bool Installed => _ground != null;
@@ -89,7 +99,16 @@ internal static unsafe class DropRuntime
     {
         if (!Plugin.IsServerProcess || _ground != null) return;
         _ground = new DropEventHub<PlayerGroundDrop>("ground-drop", line => Plugin.Logger?.LogWarning(line)) { ActiveChanged = _ => SetHooks(AnyActive) };
-        _all = new DropEventHub<PlayerDropAll>("drop-all", line => Plugin.Logger?.LogWarning(line)) { ActiveChanged = _ => SetHooks(AnyActive) };
+        _all = new DropEventHub<PlayerDropAll>("drop-all", line => Plugin.Logger?.LogWarning(line))
+        {
+            ActiveChanged = on =>
+            {
+                // The book starts before the hooks can see a drop, so the first drop's container is new to it.
+                if (on) EnsureBaseline();
+                else Book.Clear();
+                SetHooks(AnyActive);
+            },
+        };
     }
 
     internal static void Uninstall()
@@ -106,10 +125,13 @@ internal static unsafe class DropRuntime
         DropPrefabsReader.Clear();
         Waiting.Clear();
         Candidates.Clear();
-        _containersBefore = null;
+        Scanned.Clear();
+        ScanKeys.Clear();
+        Book.Clear();
+        _nextSearch = 0;
         _ground = null;
         _all = null;
-        Updates = Requests = Truncated = Unchanged = Unread = LostAfter = DropAllsFound = DropAllsTimedOut = 0;
+        Updates = Requests = Truncated = Unchanged = Unread = LostAfter = DropAllsFound = DropAllsTimedOut = ScanCapped = 0;
         LastError = "";
         _failures = 0;
         _frames = 0;
@@ -134,7 +156,6 @@ internal static unsafe class DropRuntime
             DragBatch.Clear();
             ItemBatch.Clear();
             Waiting.Clear();
-            _containersBefore = null;
             return;
         }
 
@@ -177,7 +198,19 @@ internal static unsafe class DropRuntime
         }
 
         _ground.Drain();
-        if (Waiting.Count > 0) Search();
+        if (AllActive)
+        {
+            int epoch = Progenitor.WorldState.WorldEpoch.Current;
+            if (!Book.HasBaselineFor(epoch))
+            {
+                // A world load (the book had another epoch): drops still waiting belong to the old world.
+                if (Book.Epoch != int.MinValue) FlushWaiting(epoch, "the world was reloaded before the container was found");
+                EnsureBaseline();
+            }
+
+            if (Waiting.Count > 0) Search();
+        }
+        else if (Waiting.Count > 0) Waiting.Clear();
         _all.Drain();
     }
 
@@ -239,11 +272,12 @@ internal static unsafe class DropRuntime
             var world = hook.World;
             if (world == null || !world.IsCreated || world != Worlds.Server) return;
             var em = world.EntityManager;
-            // Drop-key requests also matter to a drop-all listener: one in the same update makes that drop ambiguous.
+            // Both kinds always: a drop-key request makes a drop-all of the same update ambiguous, and a
+            // bag that had a drop-all in this update must never be reported as per-item ground drops.
             var slots = Cached<DropItemAtSlotEvent>(SlotQuery, world, em);
-            var alls = all ? Cached<DropEntireInventoryEvent>(AllQuery, world, em) : default;
+            var alls = Cached<DropEntireInventoryEvent>(AllQuery, world, em);
             bool anySlot = !slots.IsEmptyIgnoreFilter;
-            bool anyAll = all && !alls.IsEmptyIgnoreFilter;
+            bool anyAll = !alls.IsEmptyIgnoreFilter;
             if (!anySlot && !anyAll) return;
             ItemBatch.Begin(ItemOwner);
             Updates++;
@@ -257,8 +291,6 @@ internal static unsafe class DropRuntime
             }
 
             ReadBags(em, ItemBatch, after: false);
-            // The containers that exist now are never this update's drop.
-            _containersBefore = ItemBatch.HasDropAll ? ExistingContainers(world, em) : null;
         }
         catch (Exception e)
         {
@@ -309,8 +341,6 @@ internal static unsafe class DropRuntime
             ReadBags(em, batch, after: true);
             FoundGround.Clear();
             FoundAll.Clear();
-            var before = ReferenceEquals(batch, ItemBatch) ? _containersBefore : null;
-            if (ReferenceEquals(batch, ItemBatch)) _containersBefore = null;
             batch.Emit(DateTime.UtcNow, FoundGround, FoundAll);
             Unchanged += batch.Unchanged;
             Unread += batch.Unread;
@@ -321,13 +351,20 @@ internal static unsafe class DropRuntime
                     _ground!.Enqueue(seq => copy.ToDrop(seq));
                 }
 
-            if (AllActive)
+            if (AllActive && FoundAll.Count > 0)
+            {
+                bool booked = Book.HasBaselineFor(Progenitor.WorldState.WorldEpoch.Current);
                 foreach (var a in FoundAll)
                 {
-                    a.Before = before;
                     a.Deadline = _frames + ContainerSearchFrames;
+                    // Without a book from before this drop, its container cannot be told from older ones.
+                    a.Unbooked = !booked;
                     Waiting.Add(a);
                 }
+
+                // The first search runs from the next frame tick, outside this update.
+                _nextSearch = _frames + 1;
+            }
 
             FoundGround.Clear();
             FoundAll.Clear();
@@ -363,38 +400,62 @@ internal static unsafe class DropRuntime
 
     // ---- whole-inventory drop containers ---------------------------------------------------------
 
-    /// <summary>The containers of the dropped-inventory prefab that exist now; null when the prefab is unknown.</summary>
-    private static HashSet<long>? ExistingContainers(World world, EntityManager em)
+    /// <summary>Take the book's baseline for this world load (outside any game update). Leaves the book unset when the prefab is not readable yet.</summary>
+    private static void EnsureBaseline()
     {
-        if (!DropPrefabsReader.TryRead(world, out var prefabs, out _) || prefabs.PlayerInventoryDropContainer == 0) return null;
-        var set = new HashSet<long>();
-        Candidates.Clear();
-        ListContainers(world, em, prefabs.PlayerInventoryDropContainer, Candidates);
-        foreach (var c in Candidates) set.Add(c.Key);
-        Candidates.Clear();
-        return set;
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return;
+        int epoch = Progenitor.WorldState.WorldEpoch.Current;
+        if (Book.HasBaselineFor(epoch)) return;
+        try
+        {
+            if (!DropPrefabsReader.TryRead(world, out var prefabs, out _) || prefabs.PlayerInventoryDropContainer == 0) return;
+            ScanContainers(world, prefabs.PlayerInventoryDropContainer, Scanned);
+            var keys = new List<long>(Scanned.Count);
+            foreach (var c in Scanned) keys.Add(c.Key);
+            Book.Baseline(epoch, keys);
+            Scanned.Clear();
+        }
+        catch (Exception e)
+        {
+            Fail("drop-all baseline", e);
+        }
     }
 
-    /// <summary>Every live entity with an inventory (its own slots, or instance rows) whose prefab is <paramref name="prefab"/>.</summary>
-    private static void ListContainers(World world, EntityManager em, int prefab, List<DropContainerCandidate> into)
+    /// <summary>
+    /// Every live entity of the prefab with an inventory (its own slots, or instance rows), each once,
+    /// visiting at most <see cref="MaxScanVisits"/> entities.
+    /// </summary>
+    private static void ScanContainers(World world, int prefab, List<DropContainerCandidate> into)
     {
-        Scan(em, Owners<InventoryBuffer>(BufferOwners, world, em), prefab, into);
-        Scan(em, Owners<InventoryInstanceElement>(InstanceOwners, world, em), prefab, into);
+        into.Clear();
+        ScanKeys.Clear();
+        _scanCapped = false;
+        var em = world.EntityManager;
+        int budget = MaxScanVisits;
+        budget = Scan(em, Owners<InventoryBuffer>(BufferOwners, world, em), prefab, into, budget);
+        if (budget > 0) Scan(em, Owners<InventoryInstanceElement>(InstanceOwners, world, em), prefab, into, budget);
+        ScanKeys.Clear();
     }
 
-    private static void Scan(EntityManager em, EntityQuery query, int prefab, List<DropContainerCandidate> into)
+    private static int Scan(EntityManager em, EntityQuery query, int prefab, List<DropContainerCandidate> into, int budget)
     {
         var array = query.ToEntityArray(Allocator.Temp);
         try
         {
             for (int i = 0; i < array.Length; i++)
             {
+                if (budget-- <= 0)
+                {
+                    _scanCapped = true;
+                    ScanCapped++;
+                    return 0;
+                }
+
                 var e = array[i];
                 if (!e.TryRead(em, out PrefabGUID guid) || guid.GuidHash != prefab) continue;
                 long key = Key(e);
-                bool dup = false;
-                foreach (var c in into) if (c.Key == key) { dup = true; break; }
-                if (dup) continue;
+                if (!ScanKeys.Add(key)) continue;
                 if (GroundPiles.TryPosition(em, e, out float x, out float y, out float z))
                     into.Add(new DropContainerCandidate(key, x, y, z));
             }
@@ -403,9 +464,11 @@ internal static unsafe class DropRuntime
         {
             array.Dispose();
         }
+
+        return budget;
     }
 
-    /// <summary>Find containers for the drops waiting; deliver the found ones and the ones out of time.</summary>
+    /// <summary>One shared pass for every drop waiting: offer the new containers, deliver the matched ones and the ones out of time.</summary>
     private static void Search()
     {
         var world = Worlds.Server;
@@ -415,23 +478,41 @@ internal static unsafe class DropRuntime
             return;
         }
 
-        bool due = _frames % ContainerSearchEvery == 0;
         bool anyExpired = false;
         foreach (var w in Waiting) if (_frames >= w.Deadline) { anyExpired = true; break; }
-        if (!due && !anyExpired) return;
+        if (_frames < _nextSearch && !anyExpired) return;
+        _nextSearch = _frames + ContainerSearchEvery;
 
-        var em = world.EntityManager;
         int epoch = Progenitor.WorldState.WorldEpoch.Current;
         int[] match = Array.Empty<int>();
         bool[] ambiguous = Array.Empty<bool>();
         string unknown = "";
+        var contents = new Dictionary<long, IReadOnlyList<InventorySlot>?>();
         try
         {
             Candidates.Clear();
-            if (DropPrefabsReader.TryRead(world, out var prefabs, out string why) && prefabs.PlayerInventoryDropContainer != 0)
+            if (!Book.HasBaselineFor(epoch)) unknown = "the dropped-inventory containers could not be listed before the drop";
+            else if (DropPrefabsReader.TryRead(world, out var prefabs, out string why) && prefabs.PlayerInventoryDropContainer != 0)
             {
-                ListContainers(world, em, prefabs.PlayerInventoryDropContainer, Candidates);
-                match = DropContainerMatcher.Match(Waiting, Candidates, out ambiguous);
+                ScanContainers(world, prefabs.PlayerInventoryDropContainer, Scanned);
+                Book.New(Scanned, Candidates);
+                Scanned.Clear();
+                match = DropContainerMatcher.Match(Waiting, Candidates, (r, c) =>
+                {
+                    if (Waiting[r].Unbooked) return false;
+                    long key = Candidates[c].Key;
+                    if (!contents.TryGetValue(key, out var slots))
+                    {
+                        var container = new Entity { Index = (int)(key >> 32), Version = (int)key };
+                        var snapshot = InventoryRuntime.Engine.Read(InventoryRef.For(container));
+                        slots = snapshot.Ok ? snapshot.Slots : null;
+                        contents[key] = slots;
+                    }
+
+                    bool covers = slots != null && DropContainerMatcher.ContentsCover(Waiting[r].Items, slots);
+                    if (!covers) Waiting[r].SawMismatch = true;
+                    return covers;
+                }, out ambiguous);
             }
             else unknown = "the dropped-inventory prefab could not be read (" + why + ")";
         }
@@ -448,34 +529,42 @@ internal static unsafe class DropRuntime
             if (at >= 0)
             {
                 var c = Candidates[at];
-                var container = new Entity { Index = (int)(c.Key >> 32), Version = (int)c.Key };
-                bool covers = false;
-                try
-                {
-                    var snapshot = InventoryRuntime.Engine.Read(InventoryRef.For(container));
-                    covers = snapshot.Ok && DropContainerMatcher.ContentsCover(w.Items, snapshot.Slots);
-                }
-                catch { covers = false; }
-
+                Book.Matched(c.Key);
                 DropAllsFound++;
-                string note = covers ? "" : "the container does not hold everything that left the bag";
+                int index = (int)(c.Key >> 32), version = (int)c.Key;
                 bool amb = ambiguous[i];
-                _all!.Enqueue(seq => w.ToDrop(seq, container.Index, container.Version, epoch, covers, amb, note));
+                _all!.Enqueue(seq => w.ToDrop(seq, index, version, epoch, true, amb, ""));
                 Waiting.RemoveAt(i);
             }
-            else if (_frames >= w.Deadline || w.Before == null || unknown.Length > 0)
+            else if (_frames >= w.Deadline || unknown.Length > 0 || w.Unbooked)
             {
                 DropAllsTimedOut++;
                 string reason = unknown.Length > 0 ? unknown
-                    : w.Before == null ? "the dropped-inventory prefab was not readable when the drop happened"
+                    : w.Unbooked ? "the dropped-inventory containers could not be listed before the drop (the prefab table was not readable)"
                     : !w.HasPosition ? "the player's position was not readable after the drop"
+                    : w.SawMismatch ? "a new dropped-inventory container lay within " + DropContainerMatcher.MaxDistance + " m but did not hold what left the bag"
                     : "no new dropped-inventory container appeared within " + DropContainerMatcher.MaxDistance + " m in " + ContainerSearchFrames + " frames";
+                if (_scanCapped) reason += " (the container scan stopped at " + MaxScanVisits + " entities)";
                 _all!.Enqueue(seq => w.ToDrop(seq, 0, 0, epoch, false, false, reason));
                 Waiting.RemoveAt(i);
             }
         }
 
         Candidates.Clear();
+        if (Waiting.Count == 0) Book.Settle();
+    }
+
+    /// <summary>Deliver every waiting drop without a container.</summary>
+    private static void FlushWaiting(int epoch, string reason)
+    {
+        foreach (var w in Waiting)
+        {
+            DropAllsTimedOut++;
+            var drop = w;
+            _all?.Enqueue(seq => drop.ToDrop(seq, 0, 0, epoch, false, false, reason));
+        }
+
+        Waiting.Clear();
     }
 
     // ---- helpers ----------------------------------------------------------------------------------

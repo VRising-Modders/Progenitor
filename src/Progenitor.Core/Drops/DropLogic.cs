@@ -17,6 +17,8 @@ internal static class GroundTakeRules
     internal const string Gone = "the pile is gone";
     internal const string Removing = "the pile is being removed";
     internal const string Empty = "the pile is empty";
+    internal const string InFlight =
+        "the pile is in flight (the game's throw is still running, and the throw holds its own amount); try again once it has landed";
     internal const string ItemEntity =
         "the pile carries its own item entity (gear with rolled stats, a jewel); TakeInto refuses it rather than copy the item without its state";
     internal const string NotStackable =
@@ -29,7 +31,7 @@ internal static class GroundTakeRules
     /// handle's epoch, the pile's presence and state, then what it holds.
     /// </summary>
     internal static string? Refusal(bool pileNone, bool stale, bool targetNone, int requested, bool exists, bool removing,
-        int amount, bool hasItemEntity, bool itemKnown, int maxStack)
+        int amount, bool inFlight, bool hasItemEntity, bool itemKnown, int maxStack)
     {
         if (pileNone) return NoPile;
         if (targetNone) return NoTarget;
@@ -38,6 +40,7 @@ internal static class GroundTakeRules
         if (!exists) return Gone;
         if (removing) return Removing;
         if (amount <= 0) return Empty;
+        if (inFlight) return InFlight;
         if (hasItemEntity) return ItemEntity;
         if (!itemKnown) return UnknownItem;
         if (maxStack <= 1) return NotStackable;
@@ -164,8 +167,11 @@ internal sealed class PendingDropAll
     internal float X, Y, Z;
     internal DateTime Utc;
 
-    /// <summary>Containers of the drop prefab that existed before the update (never this drop's).</summary>
-    internal HashSet<long>? Before;
+    /// <summary>A search offered a container near enough that did not hold what left the bag.</summary>
+    internal bool SawMismatch { get; set; }
+
+    /// <summary>The container book had no baseline when this drop happened: its container cannot be found.</summary>
+    internal bool Unbooked { get; set; }
 
     /// <summary>Frame tick count after which the search gives up.</summary>
     internal long Deadline { get; set; }
@@ -419,9 +425,11 @@ internal readonly struct DropContainerCandidate
 }
 
 /// <summary>
-/// Pairs pending whole-inventory drops with the new containers that appeared near them. Game-free.
-/// Pairs are taken nearest first across all requests, each container at most once, and only within
-/// <see cref="MaxDistance"/> of where the player stood.
+/// Pairs pending whole-inventory drops with the new containers near them. Game-free. Pairs are
+/// taken nearest first across all requests, each container at most once, only within
+/// <see cref="MaxDistance"/> of where the player stood, and only when <c>accept</c> says the
+/// container holds what left that player's bag. A request with no acceptable container stays
+/// unmatched (-1) and keeps waiting.
 /// </summary>
 internal static class DropContainerMatcher
 {
@@ -430,10 +438,12 @@ internal static class DropContainerMatcher
 
     /// <summary>
     /// For each request, the index into <paramref name="candidates"/> of its container, or -1.
-    /// <paramref name="ambiguous"/>[i] is true when another unassigned candidate was within 0.5 m of
-    /// the chosen distance. A request without a position or without its before-list is never matched.
+    /// <paramref name="accept"/>(request, candidate) is asked at most once per pair, nearest pairs
+    /// first. <paramref name="ambiguous"/>[i] is true when another unassigned candidate that would
+    /// also be accepted lay within 0.5 m of the chosen distance. A request without a position is never matched.
     /// </summary>
-    internal static int[] Match(IReadOnlyList<PendingDropAll> requests, IReadOnlyList<DropContainerCandidate> candidates, out bool[] ambiguous)
+    internal static int[] Match(IReadOnlyList<PendingDropAll> requests, IReadOnlyList<DropContainerCandidate> candidates,
+        Func<int, int, bool> accept, out bool[] ambiguous)
     {
         var result = new int[requests.Count];
         ambiguous = new bool[requests.Count];
@@ -445,12 +455,10 @@ internal static class DropContainerMatcher
         for (int r = 0; r < requests.Count; r++)
         {
             var q = requests[r];
-            // Without a position, or without the list of containers that existed before, no container can be told apart as new.
-            if (!q.HasPosition || q.Before == null) continue;
+            if (!q.HasPosition) continue;
             for (int c = 0; c < candidates.Count; c++)
             {
                 var k = candidates[c];
-                if (q.Before.Contains(k.Key)) continue;
                 float dx = k.X - q.X, dy = k.Y - q.Y, dz = k.Z - q.Z;
                 float d2 = dx * dx + dy * dy + dz * dz;
                 if (d2 <= max2) pairs.Add((d2, r, c));
@@ -464,15 +472,26 @@ internal static class DropContainerMatcher
             x = a.R.CompareTo(b.R);
             return x != 0 ? x : a.C.CompareTo(b.C);
         });
-        var taken = new bool[candidates.Count];
-        foreach (var (d, r, c) in pairs)
+        var asked = new Dictionary<(int, int), bool>();
+        bool Accepts(int r, int c)
         {
-            if (result[r] >= 0 || taken[c]) continue;
+            if (asked.TryGetValue((r, c), out bool known)) return known;
+            bool ok;
+            try { ok = accept(r, c); }
+            catch { ok = false; }
+            asked[(r, c)] = ok;
+            return ok;
+        }
+
+        var taken = new bool[candidates.Count];
+        foreach (var (_, r, c) in pairs)
+        {
+            if (result[r] >= 0 || taken[c] || !Accepts(r, c)) continue;
             result[r] = c;
             taken[c] = true;
         }
 
-        // A second free candidate about as close means the pick was a coin toss.
+        // A second free, acceptable candidate about as close means the pick was a coin toss.
         foreach (var (d, r, c) in pairs)
         {
             if (result[r] < 0 || result[r] == c || taken[c]) continue;
@@ -480,7 +499,7 @@ internal static class DropContainerMatcher
             var q = requests[r];
             float dx = chosen.X - q.X, dy = chosen.Y - q.Y, dz = chosen.Z - q.Z;
             float chosenD = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-            if (MathF.Sqrt(d) - chosenD <= 0.5f) ambiguous[r] = true;
+            if (MathF.Sqrt(d) - chosenD <= 0.5f && Accepts(r, c)) ambiguous[r] = true;
         }
 
         return result;
@@ -502,6 +521,70 @@ internal static class DropContainerMatcher
             if (!have.TryGetValue(kv.Key, out int got) || got < kv.Value) return false;
         return true;
     }
+}
+
+/// <summary>
+/// Which dropped-inventory containers are already accounted for, so a search only offers new
+/// ones. Game-free. A baseline is taken once per world load, outside any game update, while a
+/// drop-all listener exists; a matched container joins the book at once; containers no waiting
+/// drop accepted join it once nothing waits any more, so a later drop is never offered them.
+/// </summary>
+internal sealed class DropContainerBook
+{
+    private readonly HashSet<long> _known = new();
+    private readonly HashSet<long> _seen = new();
+
+    /// <summary>The world epoch of the baseline; int.MinValue before the first.</summary>
+    internal int Epoch { get; private set; } = int.MinValue;
+
+    internal bool HasBaselineFor(int epoch) => Epoch == epoch;
+
+    internal int Count => _known.Count;
+
+    /// <summary>Start over for <paramref name="epoch"/> with every container that exists now.</summary>
+    internal void Baseline(int epoch, IEnumerable<long> existing)
+    {
+        _known.Clear();
+        _seen.Clear();
+        foreach (long k in existing) _known.Add(k);
+        Epoch = epoch;
+    }
+
+    /// <summary>Forget everything (unload, last listener gone).</summary>
+    internal void Clear()
+    {
+        _known.Clear();
+        _seen.Clear();
+        Epoch = int.MinValue;
+    }
+
+    /// <summary>The candidates of one search pass that are not in the book; each is remembered as seen.</summary>
+    internal void New(IReadOnlyList<DropContainerCandidate> scanned, List<DropContainerCandidate> into)
+    {
+        into.Clear();
+        foreach (var c in scanned)
+        {
+            if (_known.Contains(c.Key)) continue;
+            _seen.Add(c.Key);
+            into.Add(c);
+        }
+    }
+
+    /// <summary>A container was handed to a drop.</summary>
+    internal void Matched(long key)
+    {
+        _known.Add(key);
+        _seen.Remove(key);
+    }
+
+    /// <summary>Nothing waits any more: every new container seen meanwhile is accounted for.</summary>
+    internal void Settle()
+    {
+        foreach (long k in _seen) _known.Add(k);
+        _seen.Clear();
+    }
+
+    internal bool Contains(long key) => _known.Contains(key);
 }
 
 /// <summary>

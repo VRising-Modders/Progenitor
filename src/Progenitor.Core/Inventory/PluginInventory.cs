@@ -368,7 +368,7 @@ public sealed partial class PluginInventory
     /// Raise one <see cref="Progenitor.Drops.PlayerDropAll"/> each time a player drops their whole
     /// inventory (<c>DropEntireInventoryEvent</c>, handled by <c>DropItemSystem</c>): the user, the
     /// character, what left the bag, and the container the game left for it
-    /// (<c>PlayerInventoryDropContainerPrefabGUID</c>) once a new one appears near the player, or
+    /// (<c>PlayerInventoryDropContainerPrefabGUID</c>) once a new one near the player holds what left the bag, or
     /// with <c>HasContainer</c> false and a reason after 60 frames. Called on the main thread from
     /// the frame tick. Tracked: unload stops it.
     /// <b>Experimental</b>: source-checked and game-free tested, not live-verified.
