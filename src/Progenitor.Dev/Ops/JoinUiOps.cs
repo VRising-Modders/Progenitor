@@ -18,7 +18,7 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{"action":"row","id":"&lt;mod id&gt;"}</c> — a required row's action</item>
 /// <item><c>{"action":"recommend","key":"&lt;id or package&gt;"}</c> — toggle a recommended checkbox</item>
 /// <item><c>{"action":"dont_show","on":true}</c>, <c>{"action":"escape"}</c></item>
-/// <item><c>{"action":"show"}</c>, <c>{"action":"preview"}</c>, <c>{"action":"forget_seen"}</c>, <c>{"action":"forget_trust"[,"fingerprint":"…"]}</c> (the Thunderstore confirmations)</item>
+/// <item><c>{"action":"show"}</c>, <c>{"action":"preview"}</c>, <c>{"action":"forget_seen"[,"host":"…"]}</c>,<c>{"action":"forget_trust"[,"fingerprint":"…"]}</c> (the Thunderstore confirmations)</item>
 /// <item><c>{"action":"render","message":"…","next":"2026-10-10T18:00:00Z","repeat":"None","every":1,"wipeEvery":30,"wipeDay":"Saturday","startDate":"2026-09-01","now":"…"}</c>
 /// (RESETWIPE1: <c>wipeEvery</c> 0 is no game wipes, omitted is the joined server's schedule; precision and the passed text are automatic)</item>
 /// <item>JOINFLOW2: <c>install</c>, <c>ts_install</c>, <c>join_now</c>, <c>restart</c> (<c>"dryRun":true</c> writes the record and
@@ -57,7 +57,9 @@ internal static class JoinUiOps
             case "show": return Call("Show");
             case "show_mods": return Call("ShowMods");
             case "preview": return Call("Preview");
-            case "forget_seen": return Call("ForgetSeen");
+            // host: every remembered server at that address; none while joined: the joined server; none at the title
+            // screen: every remembered server.
+            case "forget_seen": return Call("ForgetSeen", Str(args, "host"));
             case "forget_trust": return Call("ForgetTrust", Str(args, "fingerprint"));
             case "render":
                 // RESETWIPE1: precision is automatic and the passed text is "now" (precision / passed are ignored);
@@ -122,6 +124,9 @@ internal static class JoinUiOps
             ?? throw new InvalidOperationException("Core has no " + BridgeType + " (older than JOINFLOW1)");
         var mi = type.GetMethod(method, BindingFlags.Public | BindingFlags.Static)
             ?? throw new InvalidOperationException(BridgeType + "." + method + " not found");
+        // An older Core's method without the newer trailing arguments (forget_seen's host): call it with what it takes.
+        int takes = mi.GetParameters().Length;
+        if (takes < args.Length) Array.Resize(ref args, takes);
         try
         {
             return mi.Invoke(null, args) as Dictionary<string, object?>

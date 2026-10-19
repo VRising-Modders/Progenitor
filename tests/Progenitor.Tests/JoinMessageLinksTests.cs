@@ -270,7 +270,8 @@ public sealed class JoinMessageLinksTests
         var inside = JoinFlowLayout.InSection(line, CellSection.Green, last: true);
         Assert.Equal(CellSectionEdge.Last, inside.SectionEdge);
         Assert.Equal(CellRowSpec.SectionPad, inside.RightInset);
-        Assert.Equal(line.Height, inside.Height);
+        // Drawn as tall as the panel reserves it (a one-line row is shorter than the row floor).
+        Assert.Equal(Math.Max(line.Height, PanelLayout.MinRowHeight), inside.Height);
         Assert.Equal(CellKind.Spacer, inside.Cells[0].Kind);
         Assert.Same(line.Cells[0], inside.Cells[1]);
         Assert.Equal("green", UiCellRowHandle.SectionName(CellSection.Green));
@@ -278,6 +279,36 @@ public sealed class JoinMessageLinksTests
         // The pad and inset fit inside the row: the text cell keeps a readable width.
         var placed = MenuPanelLayout.CellColumns(600f, inside);
         Assert.True(placed.Single(p => p.Key == JoinFlowLayout.CellText).Width >= 600f - 2f * CellRowSpec.SectionPad - 20f);
+    }
+
+    [Fact]
+    public void A_section_band_has_no_seam_between_its_heading_and_its_rows()
+    {
+        // Live 2026.10.128: a dark full-width band under REQUIRED TO JOIN and RECOMMENDED BY THIS SERVER. The 34 px
+        // heading was drawn 34 tall in a 40 px reservation; the next row's gap fill covered only the row gap.
+        var rows = new List<CellRowSpec>
+        {
+            JoinFlowLayout.SectionHeading(JoinFlowLayout.RequiredHeadRow, "Required to join", "0 of 0 ready", CellSection.Red),
+            JoinFlowLayout.InSection(JoinFlowLayout.Line("join-required-none", "This server requires no mods.", CellTone.Muted, 536f),
+                CellSection.Red, last: false),
+            JoinFlowLayout.NotAllowedSpacer(),
+            JoinFlowLayout.NotAllowedHeading(1),
+            JoinFlowLayout.InSection(JoinFlowLayout.Line("x", "Not allowed row", CellTone.Muted, 536f), CellSection.Red, last: true),
+            JoinFlowLayout.SectionHeading(JoinFlowLayout.RecommendedHeadRow, "Recommended by this server", "Client mods · optional",
+                CellSection.Green),
+            JoinFlowLayout.InSection(JoinFlowLayout.Line("y", "A recommended row", CellTone.Muted, 536f), CellSection.Green, last: true),
+        };
+        var tops = PanelLayout.StackCellRows(rows);
+        for (int i = 0; i + 1 < rows.Count; i++)
+        {
+            Assert.True(rows[i].Height >= PanelLayout.CellRowFloor(rows[i]), rows[i].Key + " is drawn shorter than it is reserved");
+            if ((rows[i + 1].SectionEdge & CellSectionEdge.First) != 0) continue;
+            // Between this row's drawn bottom and the next row's top lies exactly the row gap the next row's gap fill covers.
+            Assert.Equal(PanelLayout.RowGap, tops[i + 1] - (tops[i] + rows[i].Height), 3);
+        }
+
+        // A row outside a section keeps its own height.
+        Assert.Equal(34f, JoinFlowLayout.Heading("h", "t", "n").Height);
     }
 
     private static int CountOf(string s, string part)

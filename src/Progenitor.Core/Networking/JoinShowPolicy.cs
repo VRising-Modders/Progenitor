@@ -120,6 +120,31 @@ internal static class JoinSeenStore
         }
     }
 
+    /// <summary>
+    /// Forget every server whose key is <paramref name="host"/> or ends <c>@</c><paramref name="host"/> (any operator at
+    /// that address), or every server when <paramref name="host"/> is empty. The number of rows removed; -1 when the
+    /// file could not be read or written.
+    /// </summary>
+    public static int ForgetHost(string path, string? host)
+    {
+        string h = (host ?? "").Trim().ToLowerInvariant();
+        try
+        {
+            var rows = Read(path, out bool unreadable);
+            if (unreadable) return -1;
+            int removed = rows.RemoveAll(r => h.Length == 0
+                || string.Equals(r.Key, h, StringComparison.OrdinalIgnoreCase)
+                || (r.Key ?? "").EndsWith("@" + h, StringComparison.OrdinalIgnoreCase));
+            if (removed == 0) return 0;
+            Write(path, rows);
+            return removed;
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
     /// <summary>Rows, oldest written first.</summary>
     internal static List<JoinSeenRow> Read(string path) => Read(path, out _);
 

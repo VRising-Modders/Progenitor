@@ -302,7 +302,10 @@ internal static class JoinFlowLayout
 
     internal const string NotAllowedGapRow = "join-notallowed-gap";
 
-    /// <summary>The space above the sub-heading inside the red band (live 2026-10-05 it sat right under the last required row).</summary>
+    /// <summary>
+    /// The space above the sub-heading inside the red band (live 2026-10-05 it sat right under the last required row). The
+    /// panel reserves at least a row's floor for it, and <see cref="CellRowSpec.InSection"/> draws the band that tall.
+    /// </summary>
     internal const float NotAllowedGap = 14f;
 
     /// <summary>The gap row before the sub-heading: a middle row of the red band with nothing in it.</summary>
@@ -797,6 +800,7 @@ internal static class JoinFlowLayout
         {
             if (cell.Key != CellAction) continue;
             cell.Text = JoinText.InstallPhaseWord(state);
+            cell.Visible = true;
             cell.Tone = state.Phase == JoinInstallPhase.Loaded ? CellTone.OkBright
                 : state.Phase == JoinInstallPhase.AfterRestart ? CellTone.Info
                 : state.Terminal ? CellTone.Orange : CellTone.Gold;
@@ -807,10 +811,7 @@ internal static class JoinFlowLayout
 
     private static CellRowSpec RecommendedCore(JoinRecommendedRow row, bool on, string change)
     {
-        var parts = new List<string>(3);
-        if (row.Mod.Reason.Length > 0) parts.Add("“" + row.Mod.Reason + "”");
-        if (row.Mod.Package.Length > 0) parts.Add("Thunderstore · " + JoinText.Owner(row.Mod.Package));
-        if (row.Mod.Version.Length > 0) parts.Add(row.Mod.Version);
+        var parts = RecommendedNoteParts(row, out string reason, out string source, out string version);
         var cells = new List<CellSpec>();
         if (row.Installed)
             cells.Add(new CellSpec(CellKind.Spacer, CellCheck).With(width: CellWidth.Px(44f)));
@@ -819,6 +820,7 @@ internal static class JoinFlowLayout
                 tone: on ? CellTone.Gold : CellTone.Muted));
         var nameCell = new CellSpec(CellKind.Text, CellName).With(text: row.Name + "\n" + string.Join(" · ", parts),
             wrap: CellWrap.TwoLine, width: CellWidth.Fill(120f));
+        nameCell.NoteChoices = RecommendedNoteChoices(reason, source, version);
         string tag = JoinShowPolicy.TagWord(change);
         if (tag.Length > 0)
         {
@@ -829,10 +831,60 @@ internal static class JoinFlowLayout
         cells.Add(nameCell);
         // JOINTURNON (live 2026-10-05): any off, waiting or paused copy reads amber; the cell fits the longest state word.
         bool offCopy = row.OffCopy != null;
-        cells.Add(new CellSpec(CellKind.Text, CellAction).With(text: JoinText.RecommendedWord(row),
+        string word = JoinText.RecommendedWord(row);
+        // Live 2026.10.128: a row with no state word kept the longest word's width empty at its right, and its reason
+        // was cut half the row short of the edge. With no word the name takes that width (an install state brings it back).
+        var action = new CellSpec(CellKind.Text, CellAction).With(text: word,
             tone: offCopy ? CellTone.Amber : CellTone.OkBright, align: CellAlign.Right,
-            width: CellWidth.Px(JoinText.RecommendedWordWidth(CellLayout.TextFontSize))));
+            width: CellWidth.Px(RecommendedActionWidth));
+        action.Visible = word.Length > 0;
+        cells.Add(action);
         return new CellRowSpec(RecommendedRow(JoinPageModel.KeyOf(row)), cells, twoLine: true, plain: true);
+    }
+
+    /// <summary>A recommended row's state cell while it shows a word: the longest word's width.</summary>
+    internal static float RecommendedActionWidth => JoinText.RecommendedWordWidth(CellLayout.TextFontSize);
+
+    /// <summary>A recommended row's second line parts: the quoted reason, <c>Thunderstore · owner</c>, the version (each empty when absent).</summary>
+    private static List<string> RecommendedNoteParts(JoinRecommendedRow row, out string reason, out string source, out string version)
+    {
+        reason = row.Mod.Reason.Length > 0 ? "“" + row.Mod.Reason + "”" : "";
+        source = row.Mod.Package.Length > 0 ? "Thunderstore · " + JoinText.Owner(row.Mod.Package) : "";
+        version = row.Mod.Version;
+        var parts = new List<string>(3);
+        foreach (string p in new[] { reason, source, version })
+            if (p.Length > 0) parts.Add(p);
+        return parts;
+    }
+
+    /// <summary>
+    /// The recommended row's second line, most complete first (<see cref="CellSpec.NoteChoices"/>): the reason, source and
+    /// version; the reason and version; the reason alone, which is cut (keeping its closing quote) only at the row's edge.
+    /// Without a reason: the source and version, then the source.
+    /// </summary>
+    internal static IReadOnlyList<string> RecommendedNoteChoices(string reason, string source, string version)
+    {
+        static string Join(params string[] p) => string.Join(" · ", Array.FindAll(p, s => s.Length > 0));
+        var list = new List<string>(3);
+        void Add(string s)
+        {
+            if (s.Length > 0 && !list.Contains(s)) list.Add(s);
+        }
+
+        if (reason.Length > 0)
+        {
+            Add(Join(reason, source, version));
+            Add(Join(reason, version));
+            Add(reason);
+        }
+        else
+        {
+            Add(Join(source, version));
+            Add(source);
+            Add(version);
+        }
+
+        return list;
     }
 
     /// <summary>

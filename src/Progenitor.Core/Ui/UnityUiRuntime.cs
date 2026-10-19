@@ -15813,7 +15813,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             var (fill, rim) = MenuPalette.SectionBand(_spec.Section);
             bool first = (_spec.SectionEdge & CellSectionEdge.First) != 0;
             bool last = (_spec.SectionEdge & CellSectionEdge.Last) != 0;
-            float reach = first ? 0f : PanelLayout.RowGap;
+            // The gap above this row: its own (GapAbove) when it sets one, else the panel's row gap.
+            float reach = first ? 0f : _spec.GapAbove >= 0f ? _spec.GapAbove : PanelLayout.RowGap;
             try
             {
                 if (!first)
@@ -17109,9 +17110,15 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     title = MenuPanelLayout.ClipLabel(title, width - 4f, CellLayout.TwoLineTitleFontSize);
                     // INSTALLSIDES1: an overlay over the right end of the second line keeps that width free.
                     float noteWidth = CellLayout.TwoLineNoteWidth(spec, width);
+                    // Live 2026.10.128: a recommended row's reason was cut at the estimate (“Item totals while you
+                    // gather.…), half the row short of the edge. A cell with note choices draws the first that fits,
+                    // measured with the drawn font, and cuts only at the measured edge.
+                    var choices = spec.NoteChoices;
                     string line = inline != null
                         ? CellLayout.InlineNoteLine(lead, note, inline.InlineAfter, noteWidth, room, out at)
-                        : MenuPanelLayout.ClipLabel(lead + note, noteWidth, CellLayout.TwoLineNoteFontSize);
+                        : choices != null && choices.Count > 0
+                            ? CellLayout.FitNoteLine(lead, choices, noteWidth, s => MeasureInlineNote(tmp, s))
+                            : MenuPanelLayout.ClipLabel(lead + note, noteWidth, CellLayout.TwoLineNoteFontSize);
                     if (line.Length >= lead.Length && line.StartsWith(lead, StringComparison.Ordinal))
                         note = line.Substring(lead.Length);
                     else

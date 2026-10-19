@@ -290,7 +290,8 @@ public sealed class ClientPolicyStage2Tests : IDisposable
         // A resolved row's action cell is the narrow one, so its name gets the room.
         Assert.True(JoinFlowLayout.NotAllowedTextWidth(rows[1], popup) > JoinFlowLayout.NotAllowedTextWidth(rows[2], popup));
         // The sub-heading: a gap row, then a heading as tall as a section heading, with the count.
-        Assert.Equal(JoinFlowLayout.NotAllowedGap, JoinFlowLayout.NotAllowedSpacer().Height);
+        // The gap row is drawn as tall as the panel reserves it (the row floor), so the band has no unpainted strip.
+        Assert.Equal(Math.Max(JoinFlowLayout.NotAllowedGap, PanelLayout.MinRowHeight), JoinFlowLayout.NotAllowedSpacer().Height);
         var head = JoinFlowLayout.NotAllowedHeading(2);
         Assert.Equal(JoinFlowLayout.SectionHeading("x", "t", "n", CellSection.Red).Height, head.Height);
         Assert.Equal("2 mods", head.Cells.Single(c => c.Key == JoinFlowLayout.CellCount).Text);

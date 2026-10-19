@@ -51,12 +51,27 @@ internal static class JoinFlowTestBridge
         return After("preview");
     }
 
-    /// <summary>Forget "don't show again" for the joined server, so the message shows on the next join.</summary>
-    public static Dictionary<string, object?> ForgetSeen()
+    /// <summary>
+    /// Forget what a server's screens showed (the message, "don't show again", the mods lists behind the Changed tags),
+    /// so its next join is a first join. <paramref name="host"/> (an address such as <c>127.0.0.1:9976</c>): every
+    /// remembered server at that address. Empty while joined: the joined server. Empty with no server joined (the title
+    /// screen; 2026.10.128 this was a no-op and the next join still said the mod list changed): every remembered server.
+    /// </summary>
+    public static Dictionary<string, object?> ForgetSeen(string? host)
     {
+        string path = JoinFlowClient.SeenPath;
+        string h = (host ?? "").Trim();
         string key = JoinFlowClient.ServerKey;
-        bool removed = key.Length > 0 && JoinSeenStore.Forget(JoinFlowClient.SeenPath, key);
-        return After(removed ? "forgotten " + key : "nothing remembered for " + (key.Length > 0 ? key : "(no server)"));
+        if (h.Length == 0 && key.Length > 0)
+            return After(JoinSeenStore.Forget(path, key) ? "forgotten " + key : "nothing remembered for " + key);
+
+        int removed = JoinSeenStore.ForgetHost(path, h);
+        string what = h.Length > 0 ? "at " + h : "(no server joined: every server)";
+        if (removed < 0) return After("the seen file could not be read or written; nothing forgotten " + what);
+        return After(removed == 0
+            ? "nothing remembered " + what
+            : "forgotten " + removed.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + (removed == 1 ? " server " : " servers ") + what);
     }
 
     /// <summary>
