@@ -240,6 +240,12 @@ public sealed class JoinFlowStage2ClientTests : IDisposable
         // A real press starts the relauncher, then quits.
         Assert.Equal("quitting", JoinFlowTestBridge.Restart(dryRun: false)["result"]);
         Assert.Equal(new[] { "start", "quit" }, _relauncher.Calls);
+        // REJOINSELF1: the record names this process, and this process never picks it up.
+        Assert.True(JoinFlowClient.RejoinPickupChecked);
+        var real = (Dictionary<string, object?>)JoinFlowTestBridge.RejoinRead()["record"]!;
+        Assert.Equal(RejoinStore.ProcessStamp(), real["writer"]);
+        Assert.Equal(true, real["ownProcess"]);
+        Assert.Equal(false, real["used"]);
         // A second press while quitting never starts a second relauncher.
         Assert.Equal("already restarting", JoinFlowTestBridge.Restart(dryRun: false)["result"]);
         Assert.Equal(new[] { "start", "quit" }, _relauncher.Calls);

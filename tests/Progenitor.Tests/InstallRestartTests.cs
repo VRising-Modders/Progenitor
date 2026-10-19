@@ -414,6 +414,87 @@ public sealed class InstallRestartTests : IDisposable
         Assert.False(record!.DryRun);
     }
 
+    // ---- REJOINSELF1: the restarting process never spends its own records ---------------------
+
+    private void InstallProbes()
+    {
+        JoinFlowClient.Clock = () => _now;
+        JoinFlowClient.Relauncher = _relauncher;
+        JoinFlowClient.ConnectHost = _host;
+        JoinFlowClient.TargetProbe = () => new JoinTarget { Address = "127.0.0.1", Port = 9976, Protocol = "SteamIPv4", ServerName = "Night Garden" };
+        JoinFlowClient.PendingRestartProbe = () => _pending;
+    }
+
+    [Fact]
+    public void A_real_restart_marks_this_generations_start_pickup_as_done()
+    {
+        // Joined straight from the server list: this generation never saw the title screen ready.
+        _host.World = true;
+        Assert.False(JoinFlowClient.RejoinPickupChecked);
+        JoinFlowClient.PressRestartButton();
+        Assert.Equal("leaving", JoinFlowClient.AnswerRestart(yes: true, dryRun: false));
+        Assert.True(JoinFlowClient.RejoinPickupChecked);
+        Assert.True(RejoinRecord.TryParse(RejoinFile(), out var written));
+        Assert.Equal(RejoinStore.ProcessStamp(), written!.Writer);
+        Assert.Equal(RejoinStore.ProcessStamp(), InstallRestartRecord.Read(InstallFile())!.Writer);
+
+        // The Leave lands on the title screen in this same process: the record stays for the relaunched game.
+        _host.World = false;
+        Tick();
+        Assert.Equal(new[] { "start", "quit" }, _relauncher.Calls);
+        Assert.DoesNotContain(_host.Calls, c => c.StartsWith("launch:", StringComparison.Ordinal));
+        Assert.True(RejoinRecord.TryParse(RejoinFile(), out var after));
+        Assert.False(after!.Used);
+        Assert.True(File.Exists(InstallFile()));
+    }
+
+    [Fact]
+    public void A_dry_run_leaves_the_start_pickup_alone()
+    {
+        _host.World = true;
+        JoinFlowClient.PressRestartButton();
+        Assert.Equal("dry-run", JoinFlowClient.AnswerRestart(yes: true, dryRun: true));
+        Assert.False(JoinFlowClient.RejoinPickupChecked);
+    }
+
+    [Fact]
+    public void After_a_core_swap_during_the_leave_the_same_process_still_leaves_the_record_and_the_next_process_rejoins()
+    {
+        var stamp = RejoinStore.ProcessStamp;
+        try
+        {
+            RejoinStore.ProcessStamp = () => "100:1";
+            _host.World = true;
+            JoinFlowClient.PressRestartButton();
+            Assert.Equal("leaving", JoinFlowClient.AnswerRestart(yes: true, dryRun: false));
+
+            // A Core swap resets the generation's flags; the new generation sees the title screen first.
+            JoinFlowClient.Uninstall();
+            InstallProbes();
+            Assert.False(JoinFlowClient.RejoinPickupChecked);
+            _host.World = false;
+            Tick();
+            Assert.True(JoinFlowClient.RejoinPickupChecked);
+            Assert.Equal("own-process", JoinFlowClient.DescribeInstallRestart()["lastPickup"]);
+            Assert.Equal("own-process", JoinFlowTestBridge.Read()["lastPickup"]);
+            Assert.Equal(new[] { "leave" }, _host.Calls);
+            Assert.True(RejoinRecord.TryParse(RejoinFile(), out var kept));
+            Assert.False(kept!.Used);
+            Assert.True(File.Exists(InstallFile()));
+
+            // The relaunched game is another process: it picks the record up once and rejoins.
+            RejoinStore.ProcessStamp = () => "200:2";
+            JoinFlowClient.Uninstall();
+            InstallProbes();
+            Tick();
+            Tick();
+            Assert.Equal(new[] { "leave", "launch:127.0.0.1:9976" }, _host.Calls);
+            Assert.True(RejoinStore.Peek(Path.Combine(_dir, RejoinStore.FileName))!.Used);
+            Assert.False(File.Exists(InstallFile()));
+        }
+        finally { RejoinStore.ProcessStamp = stamp; }
+    }
+
     [Fact]
     public void A_missing_relauncher_quits_to_desktop_without_starting_anything()
     {
