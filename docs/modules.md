@@ -2899,7 +2899,10 @@ Iron Ore, a weapon and a few other stacks in the bag.
    `ground drop … DropKey item=<ore> x<stack> bag=<n>->0 at <your position>`. Drag another stack
    onto the ground: `DragOut`. Drop the weapon: the line ends with `item-entity`.
 3. `.drops near 5`: the two ore piles (and the weapon, `own item entity: not taken` or
-   `does not stack: not taken`).
+   `does not stack: not taken`). For each landed pile, record its distance from the position its
+   `ground drop` line reported (`PlayerGroundDrop.X/Y/Z`), over at least five drops facing different
+   ways. Report the largest: Autoloot matches a player's own drop within 4 m of that position, so a
+   throw that regularly lands farther needs a wider match.
 4. `.drops take 10`: `Partial` or `Complete … pile <n>-><n-10>`; the pile in the world shows the
    lower amount on a second client. `.drops take`: `Complete … removed`; the pile disappears on
    both clients within 2 s.
