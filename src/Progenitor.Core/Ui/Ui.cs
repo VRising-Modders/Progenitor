@@ -1046,7 +1046,11 @@ public static partial class Ui
 
     /// <summary>PICKFRONT1: the stack a shown panel's canvas order is counted in (<see cref="UiWindowLayout.DrawOrders"/>).</summary>
     internal static UiDrawBand DrawBandOf(UiPanelHandle panel) =>
-        panel.MountedInTab ? UiDrawBand.None : panel.IsDialog ? UiDrawBand.Dialog : UiDrawBand.Floating;
+        panel.MountedInTab ? UiDrawBand.None
+        : panel.IsDialog ? UiDrawBand.Dialog
+        : panel.WindowWidth > 0f || panel.IsGameWindow ? UiDrawBand.Window
+        : panel.ShownCaptureMode == UiCaptureMode.Never ? UiDrawBand.Passive
+        : UiDrawBand.Floating;
 
     /// <summary>WINDOWS1: whether the runtime was last asked to dim the workspace behind the windows.</summary>
     private static bool _windowShade;

@@ -81,6 +81,17 @@ internal static class ScopedSettingsWire
     internal static byte RowVersion(bool hints, bool listFilters) =>
         !hints ? Version : listFilters ? ListFilterVersion : PresentationVersion;
 
+    /// <summary>PICKFRONT1: whether <paramref name="worstCase"/> (a list row at its limits) encodes in one packet at <paramref name="version"/>.</summary>
+    internal static bool FitsWorstCaseListRow(ScopedSettingRecord worstCase, byte version)
+    {
+        try
+        {
+            Encode(new ScopedSettingsPacket { Kind = 2, Generation = Guid.NewGuid(), Row = worstCase }, version);
+            return true;
+        }
+        catch (ArgumentException) { return false; }
+    }
+
     /// <summary>A version this wire encodes and decodes (1 to <see cref="ListFilterVersion"/>).</summary>
     internal static bool Known(byte version) => version >= Version && version <= ListFilterVersion;
     internal const int MaxPacketBytes = 15 * 1024;

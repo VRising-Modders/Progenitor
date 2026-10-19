@@ -124,6 +124,84 @@ public sealed class PanelDrawOrderTests : IDisposable
     }
 
     [Fact]
+    public void A_docked_standard_window_stays_above_the_dim_it_turns_on()
+    {
+        // Review: a docked window (WindowWidth > 0) counted as an ordinary panel; shown first it got 5000, under the dim.
+        var dock = new UiDockSpec(UiDock.Left, UiDockAlign.Center, 16f, 640f, 0f);
+        var spots = UiWindowLayout.Spots(new[] { "docked" }, _ => 640f, _ => false, _ => false, _ => 1L, _ => dock);
+        Assert.Equal(UiWindowLayout.WindowSorting, spots.Single().Spot.Sorting);
+        Assert.True(spots.Single().Spot.Sorting > UiWindowLayout.ShadeSorting);
+
+        // The handle's band: a standard or game window is a window, docked or not.
+        var window = UiApi.Window(UiWindowPreset.Header, "Lone Chest", _owner, "example.mod", "Example Mod", "1.2.3", null);
+        window.Show();
+        Assert.Equal(UiWindowLayout.WindowSorting, _runtime.SpotFor("Lone Chest").Sorting);
+        var game = (UiPanelHandle)UiApi.Panel("Game", _owner, "example.mod").GameWindow();
+        Assert.Equal(UiDrawBand.Window, UiApi.DrawBandOf(game));
+    }
+
+    [Fact]
+    public void A_passive_hud_panel_is_not_raised_over_a_window_however_late_it_is_shown()
+    {
+        var window = UiApi.Window(UiWindowPreset.Header, "Iron Chest", _owner, "example.mod", "Example Mod", "1.2.3", null);
+        window.Show();
+        var hud = UiApi.Panel("Tracker", _owner, "example.mod");
+        hud.CaptureMode = UiCaptureMode.Never;
+        hud.Show();
+        Assert.Equal(UiOwnership.OverlaySorting, _runtime.SpotFor("Tracker").Sorting);
+        Assert.True(_runtime.SpotFor("Iron Chest").Sorting > _runtime.SpotFor("Tracker").Sorting);
+        // Hidden and shown again (a HUD that comes back): still under the window and the dim, never taking its clicks.
+        hud.Hide();
+        hud.Show();
+        Assert.Equal(UiOwnership.OverlaySorting, _runtime.SpotFor("Tracker").Sorting);
+        Assert.True(UiOwnership.OverlaySorting < UiWindowLayout.ShadeSorting);
+
+        // An input-taking panel shown after the window is raised over it.
+        var popup = UiApi.Panel("Popup", _owner, "example.mod");
+        popup.CaptureMode = UiCaptureMode.WhileShown;
+        popup.Show();
+        Assert.True(_runtime.SpotFor("Popup").Sorting > _runtime.SpotFor("Iron Chest").Sorting);
+
+        // Pure: passive panels take no rank, so they never push the windows shown after them up the band.
+        var orders = UiWindowLayout.DrawOrders(
+            new[] { UiDrawBand.Window, UiDrawBand.Passive, UiDrawBand.Passive, UiDrawBand.Window },
+            new long[] { 1, 2, 3, 4 });
+        Assert.Equal(new[] { UiWindowLayout.WindowSorting, UiOwnership.OverlaySorting, UiOwnership.OverlaySorting, UiWindowLayout.WindowSorting + 1 }, orders);
+    }
+
+    [Fact]
+    public void Past_the_band_the_newest_panel_keeps_the_top_order_and_the_older_ones_are_pressed_under_it()
+    {
+        int n = 20;
+        var orders = UiWindowLayout.DrawOrders(Enumerable.Repeat(UiDrawBand.Window, n).ToArray(),
+            Enumerable.Range(0, n).Select(i => (long)i).ToArray());
+        Assert.Equal(UiWindowLayout.WindowSortingMax, orders[n - 1]);
+        // The newest 14 each have their own order, strictly increasing to the top; the oldest share the floor.
+        int slots = UiWindowLayout.WindowSortingMax - UiWindowLayout.WindowSorting + 1;
+        for (int k = n - slots + 1; k < n; k++) Assert.True(orders[k] > orders[k - 1]);
+        for (int k = 0; k <= n - slots; k++) Assert.Equal(UiWindowLayout.WindowSorting, orders[k]);
+
+        // Shown in another order than created: the one shown last is on top.
+        var seq = Enumerable.Range(0, n).Select(i => (long)(i == 3 ? 100 : i)).ToArray();
+        orders = UiWindowLayout.DrawOrders(Enumerable.Repeat(UiDrawBand.Window, n).ToArray(), seq);
+        Assert.Equal(UiWindowLayout.WindowSortingMax, orders[3]);
+        Assert.Single(orders, o => o == UiWindowLayout.WindowSortingMax);
+
+        // Dialogs: 4 orders; the newest of 6 is on top alone.
+        orders = UiWindowLayout.DrawOrders(Enumerable.Repeat(UiDrawBand.Dialog, 6).ToArray(), new long[] { 1, 2, 3, 4, 5, 6 });
+        Assert.Equal(UiWindowLayout.DialogSortingMax, orders[5]);
+        Assert.Equal(UiWindowLayout.DialogSortingMax - 1, orders[4]);
+        Assert.Equal(UiWindowLayout.DialogSorting, orders[0]);
+
+        // An ordinary input panel pressed down past the windows' floor drops to the overlay order, never onto the dim.
+        orders = UiWindowLayout.DrawOrders(
+            new[] { UiDrawBand.Floating }.Concat(Enumerable.Repeat(UiDrawBand.Window, 14)).ToArray(),
+            Enumerable.Range(0, 15).Select(i => (long)i).ToArray());
+        Assert.Equal(UiOwnership.OverlaySorting, orders[0]);
+        Assert.DoesNotContain(UiWindowLayout.ShadeSorting, orders);
+    }
+
+    [Fact]
     public void The_runtime_takes_the_order_from_the_spot_and_nothing_else_raises_a_panel()
     {
         string windows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
