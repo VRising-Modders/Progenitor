@@ -9,7 +9,7 @@ tags: escape, build-mode, input, input-context, build-search
 route: menu-hotkey guard input context (order 498) holding Back, Menu_Close and Building_Exit, plus a close-key input hold so the context exists
 status: failed
 date: 2026-10-18
-evidence: live report on the guide client (Progenitor 2026.10.128, main 07bad52da), 2026-10-18; game input asset probe in the internal research notes (game-input-asset)
+evidence: live report on the guide client (Progenitor 2026.10.128, main 07bad52da), 2026-10-18; live check of the fix on the guide client (Progenitor 2026.10.133, main 0e415ea2a), 2026-10-19; game input asset probe in the internal research notes (game-input-asset)
 ---
 
 ## Goal
@@ -29,7 +29,9 @@ The typed-key pump turns on the close hold from the frames before the press, and
 
 ## Verification
 
-Not live-verified after the fix. Game-free unit tests cover the held action set, the keyboard-only rule and the close-key hold decision (`BuildMenuBlobTests`); `dotnet build` and `dotnet test` pass. The failing route was observed live once on the guide client.
+The failing route was observed live once on the guide client. Game-free unit tests cover the held action set, the keyboard-only rule and the close-key hold decision (`BuildMenuBlobTests`); `dotnet build` and `dotnet test` pass.
+
+The `Building_Exit` hold was verified live on 2026-10-19 (release package 2026.10.133, main 0e415ea2a, installed cold on the guide client, the server and a headless second client, no hot swap; keyboard and mouse): Copy building filled the box, box not focused, placement cancelled with Space; one Escape cleared the search and build mode stayed open on its category; a second Escape left build mode. Not tested: that Escape with a placement still selected, the gamepad, and a key capture or framework dialog in build mode.
 
 ## Gotchas
 
