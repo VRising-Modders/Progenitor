@@ -25,6 +25,32 @@ public sealed class WipePlanTests : IDisposable
 
     public void Dispose() => ServerRulesRows.Reset();
 
+    /// <summary>
+    /// WIPEDAY1 (live 2026-10-19): the confirmation's main button says what Yes does, and a day picked while no wipe is
+    /// scheduled is only kept for later.
+    /// </summary>
+    [Fact]
+    public void The_main_button_names_the_change_and_a_day_without_a_schedule_waits_for_one()
+    {
+        Assert.Equal(WipePlan.ConfirmCaption, WipePlan.YesCaption(0, 30));
+        Assert.Equal(WipePlan.ConfirmCaption, WipePlan.YesCaption(30, 7));
+        Assert.Equal(WipePlan.TurnOffCaption, WipePlan.YesCaption(30, 0));
+        Assert.Equal(WipePlan.SaveCaption, WipePlan.YesCaption(0, 0));
+
+        Assert.Equal("Wipe on Saturday · takes effect once a wipe is scheduled", WipePlan.DayWaitsNote(0, "Saturday"));
+        Assert.Null(WipePlan.DayWaitsNote(0, "Any"));
+        Assert.Null(WipePlan.DayWaitsNote(0, null));
+        Assert.Null(WipePlan.DayWaitsNote(30, "Saturday"));
+
+        // Should the dialog ever be drawn for a day with wipes off, it never reads "off → off" or turns anything off.
+        var o = WipePlan.For(Start, 0, "Any", 0, "Saturday", new DateTime(2026, 10, 7, 9, 0, 0), null, null, "world1");
+        Assert.Equal("Wipe on Any → Saturday", o.Facts[0].Value);
+        Assert.DoesNotContain("off → off", o.Body, StringComparison.Ordinal);
+        Assert.Contains("takes effect once a wipe is scheduled", o.Body, StringComparison.Ordinal);
+        Assert.Equal(WipePlan.SaveCaption, ServerRulesRows.WipeConfirm(0, "Any", 0, "Saturday").Yes);
+        Assert.Equal(WipePlan.TurnOffCaption, ServerRulesRows.WipeConfirm(30, "Any", 0, "Any").Yes);
+    }
+
     [Fact]
     public void A_picked_date_becomes_whole_days_from_the_worlds_start()
     {

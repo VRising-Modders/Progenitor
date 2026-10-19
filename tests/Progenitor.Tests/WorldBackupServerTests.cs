@@ -232,6 +232,29 @@ public sealed class WorldBackupServerTests : IDisposable
         Assert.Contains("the manual backup from", restore.Note);
     }
 
+    /// <summary>
+    /// BACKUPROWS1 (live 2026-10-19: the page's Last backup row stayed on "saving the world…" after the backup was made):
+    /// a finished backup tells the admins who read the Backups, so their rows ask once for the result.
+    /// </summary>
+    [Fact]
+    public void A_finished_backup_tells_the_admins_who_read_the_backups()
+    {
+        var changes = new List<BackupsPendingChange>();
+        Action<BackupsPendingChange> record = changes.Add;
+        ServerBackupsServer.PendingChanged += record;
+        try
+        {
+            Assert.True(Ask(new ServerRulesRequest { Op = ServerRulesRequest.OpBackupNow }).Ok);
+            Assert.Empty(changes);
+            Pump();
+            Assert.Null(ServerBackupsJob.Current);
+            var change = Assert.Single(changes);
+            Assert.Equal(ServerBackups.BackupFinishedWhy, change.Why);
+            Assert.Equal("", change.PendingId);
+        }
+        finally { ServerBackupsServer.PendingChanged -= record; }
+    }
+
     [Fact]
     public void Core_unloading_stops_a_running_copy_and_removes_its_partial_folder()
     {

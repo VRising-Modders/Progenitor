@@ -27,6 +27,35 @@ internal static class WipePlan
     internal const string Heading = "Change the scheduled wipe?";
     internal const string ConfirmCaption = "Change the wipe";
 
+    /// <summary>The main button of a change that turns a scheduled wipe off.</summary>
+    internal const string TurnOffCaption = "Turn off the wipe";
+
+    /// <summary>WIPEDAY1: the main button of a change that neither turns a wipe on nor off (only the day, with wipes off).</summary>
+    internal const string SaveCaption = "Save";
+
+    /// <summary>WIPEDAY1: what a day picked while no wipe is scheduled does.</summary>
+    internal const string DayWaitsSuffix = "takes effect once a wipe is scheduled";
+
+    /// <summary>
+    /// WIPEDAY1 (live 2026-10-19: picking Saturday with wipes off asked "Change: off → off" and offered "Turn off the wipe"):
+    /// with no scheduled wipe, a weekday is only kept for later. <c>Wipe on Saturday · takes effect once a wipe is scheduled</c>,
+    /// or null when a wipe is scheduled or the day is Any.
+    /// </summary>
+    internal static string? DayWaitsNote(int interval, string? day)
+    {
+        string d = string.IsNullOrWhiteSpace(day) ? "Any" : day!.Trim();
+        if (interval > 0 || string.Equals(d, "Any", StringComparison.OrdinalIgnoreCase)) return null;
+        return "Wipe on " + d + " · " + DayWaitsSuffix;
+    }
+
+    /// <summary>
+    /// WIPEDAY1: the main button for a change from <paramref name="intervalBefore"/> to <paramref name="intervalAfter"/>:
+    /// <see cref="TurnOffCaption"/> only when a scheduled wipe is really turned off, <see cref="SaveCaption"/> when wipes stay
+    /// off, else <see cref="ConfirmCaption"/>.
+    /// </summary>
+    internal static string YesCaption(int intervalBefore, int intervalAfter) =>
+        intervalAfter > 0 ? ConfirmCaption : intervalBefore > 0 ? TurnOffCaption : SaveCaption;
+
     /// <summary>
     /// The interval that makes the wipe fall on <paramref name="picked"/> (its date): whole days from the world's start
     /// date, at least 1. Null with <paramref name="refusal"/> when the start date is unknown, or the date is not after the
@@ -71,6 +100,8 @@ internal static class WipePlan
         if (string.Equals(current, "Any", StringComparison.OrdinalIgnoreCase)) return "Any";
         return string.Equals(current, picked.DayOfWeek.ToString(), StringComparison.OrdinalIgnoreCase) ? current : "Any";
     }
+
+    private static string DayWord(string? day) => string.IsNullOrWhiteSpace(day) ? "Any" : day!.Trim();
 
     /// <summary><c>every 34 days on Wednesday</c>, <c>every 30 days on Any</c>, or <c>off</c>.</summary>
     internal static string Describe(int interval, string? day) =>
@@ -147,8 +178,14 @@ internal static class WipePlan
 
         // WIPEPOLISH1 (live 2026-10-06: a centered wall of text): label/value lines, left-aligned, then the due warning
         // on its own line in the danger tone, above the typed-word field.
-        o.Facts.Add(new DialogFact("Change", Describe(intervalBefore, dayBefore) + " → " + Describe(intervalAfter, dayAfter)));
-        if (o.Off) o.Facts.Add(new DialogFact("Wipe date", "none; the world keeps running"));
+        if (o.Off && intervalBefore <= 0)
+        {
+            // WIPEDAY1: wipes stay off; only the day the next scheduled wipe waits for changes.
+            o.Facts.Add(new DialogFact("Change", "Wipe on " + DayWord(dayBefore) + " → " + DayWord(dayAfter)));
+            o.Facts.Add(new DialogFact("Wipe date", "none; Wipe on " + DayWaitsSuffix));
+        }
+        else o.Facts.Add(new DialogFact("Change", Describe(intervalBefore, dayBefore) + " → " + Describe(intervalAfter, dayAfter)));
+        if (o.Off && intervalBefore > 0) o.Facts.Add(new DialogFact("Wipe date", "none; the world keeps running"));
         else if (o.After is { } wipe)
         {
             o.Facts.Add(new DialogFact("Wipe date", WhenLine(wipe, serverZone, playerZone)));

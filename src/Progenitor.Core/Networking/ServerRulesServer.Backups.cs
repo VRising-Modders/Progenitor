@@ -61,7 +61,8 @@ internal static class ServerBackupsServer
     /// <summary>
     /// BACKUPSDLG1: the pending restore request or its countdown changed (a request written, cancelled, a countdown that ended
     /// without a stop), whoever caused it: an admin's dialog, the dev bridge, another admin. Live: the Server rules channel tells
-    /// the admins who read the Backups, so an open dialog asks again instead of showing the old request. Main thread.
+    /// the admins who read the Backups, so an open dialog asks again instead of showing the old request. BACKUPROWS1: also
+    /// raised when a manual or scheduled backup finished (<see cref="ServerBackups.BackupFinishedWhy"/>). Main thread.
     /// </summary>
     internal static event Action<BackupsPendingChange>? PendingChanged;
 

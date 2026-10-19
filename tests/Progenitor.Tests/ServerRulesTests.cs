@@ -674,6 +674,10 @@ public sealed class ServerRulesTests : IDisposable
         Assert.NotEqual("Unchanged.", users.Note);
         Assert.Contains("\"MaxConnectedUsers\": 10", File.ReadAllText(file), StringComparison.Ordinal);
         Assert.Equal("Unchanged.", Write(ServerRules.DayOfReset, "friday").Note);
+        // WIPEDAY1: no scheduled wipe here, so a new day waits for one (no confirmation needed) and the note says so.
+        var day = Write(ServerRules.DayOfReset, "saturday");
+        Assert.True(day.Ok, day.Error);
+        Assert.Equal("Saved: Wipe on Saturday · takes effect once a wipe is scheduled.", day.Note);
     }
 
     [Fact]

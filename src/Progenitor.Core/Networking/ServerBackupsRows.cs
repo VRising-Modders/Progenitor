@@ -100,6 +100,29 @@ internal static class ServerBackupsRows
         return true;
     }
 
+    /// <summary>
+    /// BACKUPROWS1 (live 2026-10-19: after Back up now the Last backup row stayed on "saving the world…" for 40 s, and the
+    /// Backups row on "No restore points yet"): the show-if above runs only when the page is re-evaluated (its build, or an
+    /// answer of the channel), so a running backup's progress was asked for once and never again. The rows' own lines,
+    /// repainted every second while the page shows them, ask while a backup runs (at most every <see cref="AskEverySeconds"/>);
+    /// the answer repaints them and re-evaluates the page. Returns whether a request went out.
+    /// </summary>
+    internal static bool KeepCurrent() => _state is { JobRunning: true } && AskIfDue(AskEverySeconds);
+
+    /// <summary>The Backups row's line (<see cref="ServerBackups.Summary"/>), asking for news while a backup runs.</summary>
+    internal static string SummaryLine()
+    {
+        KeepCurrent();
+        return ServerBackups.Summary(_state);
+    }
+
+    /// <summary>The Last backup row's line (<see cref="ServerBackups.BackupLine"/>), asking for news while a backup runs.</summary>
+    internal static string LastBackupLine()
+    {
+        KeepCurrent();
+        return ServerBackups.BackupLine(_state);
+    }
+
     internal static bool AskIfDue(double every = AskEverySeconds)
     {
         double now = Clock();
@@ -254,8 +277,19 @@ internal static class ServerBackupsRows
         string head = "pending " + (string.IsNullOrEmpty(pendingId) ? "none" : pendingId) + (countdown ? ", countdown" : "") + " (" + (why ?? "") + ")";
         string result;
         var open = OpenDialog();
-        if (open == null) result = "no Backups dialog open";
-        else if (string.Equals(ServerBackups.PendingSignature(pendingId, countdown), _openSignature, StringComparison.Ordinal)) result = "the open view is current";
+        // BACKUPROWS1: a backup finished (or one was running as this page last heard): ask once, so the Last backup and
+        // Backups rows show the result without waiting for the page's next draw.
+        bool backupNews = string.Equals(why, ServerBackups.BackupFinishedWhy, StringComparison.Ordinal) || _state is { JobRunning: true };
+        bool viewCurrent = open != null && string.Equals(ServerBackups.PendingSignature(pendingId, countdown), _openSignature, StringComparison.Ordinal);
+        if (backupNews && (open == null || viewCurrent))
+        {
+            string? refusal = Ask(new ServerRulesRequest { Op = ServerRulesRequest.OpBackups }, null);
+            _lastAsk = Clock();
+            result = (open == null ? "no Backups dialog open" : "the open view is current") + "; "
+                + (refusal == null ? "asked for the backup's result" : "not asked: " + refusal);
+        }
+        else if (open == null) result = "no Backups dialog open";
+        else if (viewCurrent) result = "the open view is current";
         else
         {
             string? refusal = Ask(new ServerRulesRequest { Op = ServerRulesRequest.OpBackups }, response =>
@@ -303,7 +337,7 @@ internal static class ServerBackupsRows
     /// <summary>The Backups rows, placed after the next-wipe row of Server rules.</summary>
     internal static void Build(SettingsPageBuilder page)
     {
-        page.Info(BackupsLabel, () => ServerBackups.Summary(_state), refreshSeconds: 1,
+        page.Info(BackupsLabel, SummaryLine, refreshSeconds: 1,
                 help: "Restore points of this world: the game's wipe archives (made when a scheduled wipe ran) and the backups "
                     + "Progenitor makes before every restore. Only admins see them.", showIf: Shown)
             .InScope(SettingScope.ServerWide)
@@ -335,7 +369,7 @@ internal static class ServerBackupsRows
                     + "file by file, while the server keeps running. It is listed under Restore an earlier world and can be restored.",
                 showIf: Shown)
             .InScope(SettingScope.ServerWide);
-        page.Info(LastBackupLabel, () => ServerBackups.BackupLine(_state), refreshSeconds: 1,
+        page.Info(LastBackupLabel, LastBackupLine, refreshSeconds: 1,
                 help: "The backup running now (saving, copying, checking) or the last manual or scheduled backup's result.",
                 showIf: () => Shown() && ServerBackups.BackupLine(_state).Length > 0)
             .InScope(SettingScope.ServerWide)

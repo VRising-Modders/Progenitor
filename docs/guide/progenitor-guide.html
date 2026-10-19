@@ -825,7 +825,7 @@ LockedInGame = server-rules, updates` } }
 <p><strong>Preset</strong> warns when a preset overrides a row.</p>` },
         { id: "wipes", title: "Scheduled wipes",
           html: `<ul><li><strong>Scheduled wipes every (days)</strong>: 0 (never) to 365. The game archives the world and starts a new one.</li>
-<li><strong>Wipe on</strong>: a weekday, or Any.</li><li><strong>Next wipe</strong>: pick the date; Progenitor sets the days. Asks you to confirm.</li></ul>
+<li><strong>Wipe on</strong>: a weekday, or Any. With no scheduled wipe, the day is saved for later: <em>Wipe on Saturday · takes effect once a wipe is scheduled</em>.</li><li><strong>Next wipe</strong>: pick the date; Progenitor sets the days. Asks you to confirm.</li></ul>
 <p>Read only: <strong>Next scheduled wipe</strong>, <strong>Listed as Merciless</strong>, <strong>Territory (read only)</strong>, <strong>Days running (read only)</strong>, <strong>Standard settings (read only)</strong>.</p>` }
       ]
     },
@@ -835,7 +835,7 @@ LockedInGame = server-rules, updates` } }
           html: `<p>Under Server rules, admins only.</p>
 <table><thead><tr><th class="label">Row</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Back up the world now</td><td></td><td><strong>Back up now</strong>: a checked copy while the server runs.</td></tr>
-<tr><td>Last backup</td><td></td><td>Progress, or the last result.</td></tr>
+<tr><td>Last backup</td><td></td><td>Progress while a backup runs, then its result. <strong>Backups</strong> counts the new restore point.</td></tr>
 <tr><td>Back up at every server start</td><td>Off</td><td>A copy before the world loads.</td></tr>
 <tr><td>Back up every</td><td class="num">0</td><td>Hours, up to 168; 0 is off.</td></tr>
 <tr><td>Keep backups per kind</td><td class="num">10</td><td>0 is no limit.</td></tr>

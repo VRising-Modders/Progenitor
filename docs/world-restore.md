@@ -32,7 +32,7 @@ The current per-save settings files (`ServerHostSettings.json`, `ServerGameSetti
 | **Last restore** | The last result: `Restored <name>. Backup of the previous world: <backup name>.` or `Not restored: <reason>. Nothing changed.` |
 | **Keep Progenitor backups** | The backups made before restores: 0 (keep every one) or 2 to 100 (default 5; 1 is raised to 2). Also `[WorldRestore] KeepBackups` in the server's `progenitor.cfg`. Manual and scheduled backups have their own rule (below). |
 | **Back up the world now** · **Back up now** | The [manual backup](#backups-back-up-now-and-the-schedule), after a short confirmation. |
-| **Last backup** | The backup running now (`Manual backup by <admin>: copying 12 of 40 files (35 %)…`) or the last manual or scheduled backup's result, amber when it failed. |
+| **Last backup** | The backup running now (`Manual backup by <admin>: copying 12 of 40 files (35 %)…`) or the last manual or scheduled backup's result, amber when it failed. While a backup runs, the page asks the server for news every 5 seconds; when it finishes the server tells the admins who read the Backups, so this row and **Backups** show the result within moments (BACKUPROWS1, 2026-10-19; game-free tested in `BackupRowsRefreshTests`, not live-verified). |
 | **Back up at every server start** | On or off (default off). `[WorldRestore] BackupAtStart`. |
 | **Back up every** | Hours, 0 (off, the default) to 168. `[WorldRestore] BackupEveryHours`. |
 | **Keep backups per kind** | The newest this many of each kind, 0 (no count limit) to 100 (default 10). `[WorldRestore] BackupKeepCount`. |
