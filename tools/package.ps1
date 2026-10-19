@@ -389,6 +389,8 @@ Copy-Item -LiteralPath (Join-Path $tsRoot "README.md") -Destination (Join-Path $
 Copy-Item -LiteralPath (Join-Path $tsRoot "CHANGELOG.md") -Destination (Join-Path $stage "CHANGELOG.md") -Force
 # The mod-authoring guide at the zip root, beside the README (its links point into the repository).
 Copy-Item -LiteralPath (Join-Path $repo "PROGENITOR_GUIDE.md") -Destination (Join-Path $stage "PROGENITOR_GUIDE.md") -Force
+# The license at the package root, and LICENSE + NOTICE beside Core so the manual install (only BepInEx/) carries them too.
+Copy-Item -LiteralPath (Join-Path $repo "LICENSE") -Destination (Join-Path $stage "LICENSE") -Force
 
 $icon = Join-Path $tsRoot "icon.png"
 if (Test-Path -LiteralPath $icon) {
@@ -407,6 +409,8 @@ Copy-Item -LiteralPath $preloaderDll -Destination (Join-Path $patchersDir "Proge
 $coreDir = Join-Path $stage "BepInEx\progenitor-core"
 New-Item -ItemType Directory -Force -Path $coreDir | Out-Null
 Copy-Item -LiteralPath $coreDll -Destination (Join-Path $coreDir "Progenitor.dll") -Force
+Copy-Item -LiteralPath (Join-Path $repo "LICENSE") -Destination (Join-Path $coreDir "LICENSE") -Force
+Copy-Item -LiteralPath (Join-Path $repo "NOTICE") -Destination (Join-Path $coreDir "NOTICE") -Force
 # Address-library tables ship next to Core so Bootstrap can resolve its detour sites from disk.
 $tablesSrc = Join-Path $PSScriptRoot "addresslib"
 # {client,server}-<build>.json only. tools/addresslib is a build-output folder (its .gitignore
@@ -483,9 +487,21 @@ Assert-NoDevPayload -Root $stage -DevExpected ([bool]$IncludeDev)
 Assert-NoDeveloperArtefacts -Root $stage
 Assert-NoInstallScripts -Names @(Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object { $_.FullName }) -Where "the staged tree"
 
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $compression = [System.IO.Compression.CompressionLevel]::Optimal
-[System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipPath, $compression, $false)
+# Entries are written one by one with '/' separators, as New-GameFolderZip does: Windows PowerShell's
+# CreateFromDirectory writes '\', which extractors on other systems keep as part of the file name.
+$stageFull = [System.IO.Path]::GetFullPath($stage).TrimEnd('\', '/')
+$tsArchive = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+  foreach ($file in @(Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName)) {
+    $relative = $file.FullName.Substring($stageFull.Length + 1).Replace('\', '/')
+    [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($tsArchive, $file.FullName, $relative, $compression)
+  }
+} finally {
+  $tsArchive.Dispose()
+}
 
 # ...and again on the artifact itself, which is what actually reaches a player.
 $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
@@ -497,10 +513,14 @@ try {
   if ($IncludeDev -and -not ($zip.Entries | Where-Object { $_.Name -eq "Progenitor.Dev.dll" })) {
     throw "packaging assertion failed: -IncludeDev was passed but $zipPath has no Progenitor.Dev.dll"
   }
-  # The public layout: these three DLLs at exactly these paths. Windows PowerShell's CreateFromDirectory writes '\'
-  # separators, so entry names are compared with '/'.
-  foreach ($requiredEntry in @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll")) {
-    if (-not ($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $requiredEntry })) {
+  # Every entry is named with '/' separators...
+  $backslashed = @($zip.Entries | Where-Object { $_.FullName.Contains('\') })
+  if ($backslashed.Count -gt 0) {
+    throw "packaging assertion failed: $zipPath has entry names with '\' separators: $(($backslashed | ForEach-Object { $_.FullName }) -join ', ')"
+  }
+  # ...and the public layout: these three DLLs at exactly these paths, plus the license.
+  foreach ($requiredEntry in @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll", "LICENSE")) {
+    if (-not ($zip.Entries | Where-Object { $_.FullName -eq $requiredEntry })) {
       throw "packaging assertion failed: $zipPath has no $requiredEntry"
     }
   }
