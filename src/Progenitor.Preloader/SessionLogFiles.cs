@@ -179,22 +179,24 @@ internal static class SessionLogFiles
 }
 
 /// <summary>
-/// A size-capped, thread-safe line writer over one session log. Lines are buffered and flushed every
-/// second, and at once for a line written with <c>flushNow</c> (errors), so a crash loses at most a
-/// second of ordinary lines. Game-free.
+/// A size-capped, thread-safe line writer over one session log. The thread that logs only appends the line to a
+/// pending list; the timer thread writes and flushes that list every second, outside the lock the logging thread
+/// takes, so a slow disk never stalls the game's frame. A line written with <c>flushNow</c> (errors) asks the timer to
+/// write at once instead of waiting for the second; without a timer (tests) it is written on the spot. Game-free.
 /// </summary>
 internal sealed class SessionLogWriter : IDisposable
 {
     private static readonly Encoding Utf8 = new UTF8Encoding(false);
 
-    private readonly object _gate = new();
+    private readonly object _gate = new(); // _pending and the counters: held only for a list append
+    private readonly object _io = new();   // the stream: held while writing to disk
     private readonly Stream _stream;
     private readonly StreamWriter _writer;
     private readonly long _maxBytes;
     private readonly Timer? _flush;
+    private List<string> _pending = new();
     private long _written;
     private bool _capped;
-    private bool _dirty;
     private bool _disposed;
 
     internal SessionLogWriter(Stream stream, long maxBytes, bool timedFlush = true)
@@ -205,7 +207,7 @@ internal sealed class SessionLogWriter : IDisposable
         if (timedFlush) _flush = new Timer(_ => Flush(), null, 1000, 1000);
     }
 
-    /// <summary>Bytes written so far (UTF-8, newlines included).</summary>
+    /// <summary>Bytes accepted so far (UTF-8, newlines included).</summary>
     internal long Written
     {
         get { lock (_gate) return _written; }
@@ -217,57 +219,92 @@ internal sealed class SessionLogWriter : IDisposable
         get { lock (_gate) return _capped; }
     }
 
+    /// <summary>Lines accepted and not yet written to the stream.</summary>
+    internal int PendingLines
+    {
+        get { lock (_gate) return _pending.Count; }
+    }
+
     internal void WriteLine(string? line, bool flushNow = false)
     {
+        bool urgent = flushNow;
         lock (_gate)
         {
             if (_disposed || _capped) return;
             string text = line ?? "";
             long bytes = Utf8.GetByteCount(text) + Environment.NewLine.Length;
+            if (_written + bytes > _maxBytes)
+            {
+                _capped = true;
+                _pending.Add(SessionLogFiles.TruncatedLine(_maxBytes));
+                urgent = true;
+            }
+            else
+            {
+                _pending.Add(text);
+                _written += bytes;
+            }
+        }
+        if (urgent) RequestFlush();
+    }
+
+    /// <summary>Have the pending lines written now: by the timer thread when there is one, else here.</summary>
+    private void RequestFlush()
+    {
+        if (_flush != null)
+        {
             try
             {
-                if (_written + bytes > _maxBytes)
-                {
-                    _capped = true;
-                    _writer.WriteLine(SessionLogFiles.TruncatedLine(_maxBytes));
-                    _writer.Flush();
-                    _dirty = false;
-                    return;
-                }
-
-                _writer.WriteLine(text);
-                _written += bytes;
-                _dirty = true;
-                if (flushNow)
-                {
-                    _writer.Flush();
-                    _dirty = false;
-                }
+                _flush.Change(0, 1000);
+                return;
             }
-            catch { /* a full disk must not reach the game */ }
+            catch (ObjectDisposedException) { return; }
+            catch { /* write here instead */ }
+        }
+        Flush();
+    }
+
+    /// <summary>Write and flush every pending line. Called by the timer, at exit and by tests.</summary>
+    internal void Flush()
+    {
+        lock (_io)
+        {
+            List<string> batch;
+            lock (_gate)
+            {
+                if (_disposed || _pending.Count == 0) return;
+                batch = _pending;
+                _pending = new List<string>();
+            }
+            WriteBatch(batch);
         }
     }
 
-    internal void Flush()
+    /// <summary>Caller holds <see cref="_io"/>.</summary>
+    private void WriteBatch(List<string> batch)
     {
-        lock (_gate)
+        try
         {
-            if (_disposed || !_dirty) return;
-            try { _writer.Flush(); }
-            catch { /* best effort */ }
-            _dirty = false;
+            foreach (string text in batch) _writer.WriteLine(text);
+            _writer.Flush();
         }
+        catch { /* a full disk or a closed stream must not reach the game */ }
     }
 
     public void Dispose()
     {
         _flush?.Dispose();
-        lock (_gate)
+        lock (_io)
         {
-            if (_disposed) return;
-            _disposed = true;
-            try { _writer.Flush(); }
-            catch { /* best effort */ }
+            List<string> batch;
+            lock (_gate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                batch = _pending;
+                _pending = new List<string>();
+            }
+            WriteBatch(batch);
             try { _writer.Dispose(); }
             catch { /* best effort */ }
             try { _stream.Dispose(); }

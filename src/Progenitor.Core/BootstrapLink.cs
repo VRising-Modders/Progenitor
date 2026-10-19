@@ -1289,6 +1289,32 @@ internal static class BootstrapLink
         }
     }
 
+    private static MethodInfo? _consoleLogCost;
+    private static bool _consoleLogCostLooked;
+
+    /// <summary>
+    /// <c>ProcessHost.ConsoleLogCost(bool)</c>: the queued console's counters (see <c>ConsoleLogQueue.ToArray</c> in
+    /// Bootstrap), or null when the console is not queued or Bootstrap is older. Read once per hitch-summary window.
+    /// </summary>
+    public static long[]? ConsoleLogCost(bool resetMaxima)
+    {
+        try
+        {
+            if (!_consoleLogCostLooked)
+            {
+                var host = _hostType ?? FindHostType();
+                if (host == null) return null;
+                _consoleLogCost = host.GetMethod("ConsoleLogCost", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(bool) }, null);
+                _consoleLogCostLooked = true;
+            }
+            return _consoleLogCost?.Invoke(null, new object[] { resetMaxima }) as long[];
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>Game port of the client's last recorded join, or 0 (absent/older Bootstrap, or no join yet).</summary>
     public static int LastConnectPort => ReadHostInt("LastConnectPort");
 

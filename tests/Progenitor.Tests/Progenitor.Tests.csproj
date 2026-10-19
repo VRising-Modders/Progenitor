@@ -498,6 +498,8 @@
     <!-- TEXTEXPAND1: the expanded editor's layout and the text-scroll arithmetic. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextExpand.cs" Link="Linked\UiTextExpand.cs" />
     <Compile Include="..\..\src\Progenitor.Bootstrap\TextInputRing.cs" Link="Linked\TextInputRing.cs" />
+    <!-- The queued console's bounded line queue (QueuedConsoleLogListener is the game-bound half). -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\ConsoleLogQueue.cs" Link="Linked\ConsoleLogQueue.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiChoice.cs" Link="Linked\UiChoice.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiNumeric.cs" Link="Linked\UiNumeric.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiSliderEntry.cs" Link="Linked\UiSliderEntry.cs" />

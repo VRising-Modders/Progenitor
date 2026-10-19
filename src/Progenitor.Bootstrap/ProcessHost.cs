@@ -459,6 +459,9 @@ public static class ProcessHost
         try { IsHostedChild = CoreWatchPolicy.IsHostedChild(Environment.CommandLine); }
         catch { IsHostedChild = false; }
         LogRing.Install();
+        // Before anything else logs much: console lines go through a queue and a background writer from here on.
+        string consoleLine = QueuedConsoleLogListener.Install(owner?.Config);
+        if (consoleLine.Length > 0) Log?.LogInfo(consoleLine);
         SelfUpdate.Install();
         try
         {
@@ -661,6 +664,13 @@ public static class ProcessHost
     public static void Drain() => WorkQueue.Drain();
 
     public static long LatestSeq => LogRing.Instance.LatestSeq;
+
+    /// <summary>
+    /// The queued console's counters (<see cref="ConsoleLogQueue.ToArray"/>), or null when the console is not queued.
+    /// Core's hitch summary reads it by name once per window; <paramref name="resetMaxima"/> starts the window's maxima again.
+    /// An older Bootstrap has no such method and the summary leaves the field out.
+    /// </summary>
+    public static long[]? ConsoleLogCost(bool resetMaxima) => QueuedConsoleLogListener.Snapshot(resetMaxima);
 
     public static List<LogLine> ReadLogs(long since, int max, string? filter, int? minLevelValue)
     {

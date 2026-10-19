@@ -522,6 +522,7 @@ Files:
 | `Directory` | shared `[Persistence]` | server | world load |
 | `SkipCoreHarmony`, `SkipCoreHarmonyAllowLiveWorld`, `SkipCoreModules`, `SkipCoreModulesAllowLiveWorld`, `HolderScanWide`; `CollectBeforeWorldLoad` | shared `[Diagnostics]` | both | restart (Bootstrap); live* (the last) |
 | `WatchCore` | shared `[Reload]` | both | restart |
+| `QueuedConsole` (default true: the BepInEx console window is written by a background thread; [bridge.md](bridge.md#logging-policy), added 2026-10-19) | shared `[Logging]` | both | restart |
 | `DropUnknownPrefabs`, `FailLoadInstead`, `MaxDropPercent`, `MaxDropEntities`, `MinPrefabLookupCount` | shared `[SaveSafety]` | server | restart |
 | `RewriteMode` | shared `[Compat]` | both | reload |
 | Archive mode and `InteropArchives` | shared `[Resilience]` | both | reload |

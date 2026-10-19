@@ -97,7 +97,8 @@ internal static class WorldSaveGuard
             Plugin.Logger?.LogInfo("WorldSaveGuard: the guard is back on (" + OffMaxSeconds + " s passed).");
         }
         if (!Suspension.Active || !Suspension.ShouldResume(now, SaveStamp())) return;
-        Plugin.Logger?.LogInfo("WorldSaveGuard: guarded state goes back "
+        // File-only (docs/bridge.md, "Logging policy"): it is written after every world save.
+        Plugin.Logger.LogDiag("WorldSaveGuard: guarded state goes back "
             + (Suspension.TimedOut ? "(the save file never changed in " + SyncSaveSuspension.TimeoutSeconds + " s)." : "after the save was written."));
         Raise(Resume, "resume");
     }
