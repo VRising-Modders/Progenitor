@@ -53,6 +53,7 @@ The same files work in the game and on a dedicated server. Progenitor adds `BepI
 ## Help
 
 - The **Help Guide** opens from the Mods menu. It covers players, server admins and mod authors. You can also [read it online](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html) before you install.
+- **Video guides** for players, server admins and mod authors are on [Progenitor's YouTube channel](https://www.youtube.com/@ProgenitorMods).
 - Something wrong? **Mods** → **Progenitor** → **Get help** → **Collect logs**, then post the zip in the [Progenitor channel](https://discord.com/channels/978094827830915092/1112888087836631090) on the V Rising Mod Community Discord ([join it](https://vrisingmods.com/discord) first) or [open a bug report](https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml).
 
 ## About

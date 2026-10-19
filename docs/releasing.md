@@ -53,5 +53,6 @@ After the switch, open the Security tab once as an outside reader would and conf
 
 5. Create the GitHub release from the tag with the changelog (`packaging/thunderstore/CHANGELOG.md`) and attach `Progenitor-<version>.zip` (the manual install players download), `Progenitor-<version>-thunderstore.zip` and `SHA256SUMS`.
 6. Publish `Progenitor-<version>-thunderstore.zip` to Thunderstore as `VRising_Modders-Progenitor`, categories **Mods**, **Client**, **Server** and **Tools**, plus the current game update's category. The package layout, dependencies and checks are in [publishing.md](publishing.md); Progenitor's own package files are under `packaging/thunderstore/`. Its README shows images from `packaging/listing/` on `main`, so merge listing changes before uploading.
+   Before uploading, open every link in the listing; the Help section points at the online Help Guide and the video guides on YouTube, which must already be up.
 7. Publish `Progenitor-<version>.zip` (the manual install) on Nexus Mods with the page fields, description and images in [packaging/nexus](../packaging/nexus/README.md).
 8. Install the published package with a mod manager into a clean profile and confirm it loads on a client and on a test server you run yourself.
