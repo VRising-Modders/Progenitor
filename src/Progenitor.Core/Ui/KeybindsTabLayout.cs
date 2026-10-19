@@ -310,8 +310,10 @@ internal sealed class KeybindsRowModel
             ["help"] = HelpLine,
             ["reserved"] = Reserved,
             ["decision"] = DecisionNote,
-            ["scope"] = Claim.Scope switch { KeybindScope.Menu => "menu", KeybindScope.Photo => "photo", KeybindScope.Map => "map", KeybindScope.Chat => "chat", KeybindScope.Window => "window", KeybindScope.Build => "build", _ => "gameplay" },
-            ["scopeText"] = Keybinds.ScopeText(Claim.Scope),
+            ["scope"] = Claim.IsPanelKey ? "panel" : Claim.Scope switch { KeybindScope.Menu => "menu", KeybindScope.Photo => "photo", KeybindScope.Map => "map", KeybindScope.Chat => "chat", KeybindScope.Window => "window", KeybindScope.Build => "build", _ => "gameplay" },
+            ["scopeText"] = Claim.IsPanelKey ? Keybinds.PanelScopeText(Claim.Panel) : Keybinds.ScopeText(Claim.Scope),
+            ["panel"] = Claim.IsPanelKey ? Claim.Panel : null,
+            ["panelHoldsInput"] = Claim.IsPanelKey ? Claim.Scope == KeybindScope.Panel : null,
             ["visible"] = visible,
             ["conflict"] = KeybindArbiter.ConflictReadback(Verdict) ?? (Secondary == null ? null : KeybindArbiter.ConflictReadback(Secondary)),
         };
@@ -812,6 +814,28 @@ internal sealed class KeybindsTabModel
             if (ids.Count > 0)
                 displayGroups.Add(new KeybindGroupDefinition(section.OwnerId, section.OwnerId + ":build-mode",
                     Keybinds.ScopeText(KeybindScope.Build), ids, Array.Empty<KeybindInfoRow>(), null, long.MaxValue));
+
+            // PANELKEY1: a mod's panel keys are grouped by panel (While Object preview is open), unless the mod grouped them.
+            var panels = new List<string>();
+            var panelIds = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in section.Rows)
+            {
+                if (!row.Claim.IsPanelKey) continue;
+                bool assigned = displayGroups.Exists(g => string.Equals(g.OwnerPluginId, section.OwnerId,
+                    StringComparison.OrdinalIgnoreCase) && g.IndexOf(row.Claim.ActionId) >= 0);
+                if (assigned) continue;
+                if (!panelIds.TryGetValue(row.Claim.Panel, out var list))
+                {
+                    panelIds[row.Claim.Panel] = list = new List<string>();
+                    panels.Add(row.Claim.Panel);
+                }
+
+                list.Add(row.Claim.ActionId);
+            }
+
+            foreach (var panel in panels)
+                displayGroups.Add(new KeybindGroupDefinition(section.OwnerId, section.OwnerId + ":panel:" + panel,
+                    Keybinds.PanelScopeText(panel), panelIds[panel], Array.Empty<KeybindInfoRow>(), null, long.MaxValue));
         }
         ApplyGroups(sections, displayGroups);
         sections.AddRange(gameSections);
@@ -1233,7 +1257,8 @@ internal static class KeybindsTabLayout
         if (row.IsGame && string.Equals(row.Claim.Category, GameKeybindCatalog.Debug, StringComparison.Ordinal))
             info.Add(DebugKeyNote);
         if (row.IsInfo && row.Claim.NotEditableReason.Length > 0) info.Add(row.Claim.NotEditableReason);
-        if (row.Claim.Scope == KeybindScope.Menu) info.Add(MenuScopeNote);
+        if (row.Claim.IsPanelKey) info.Add(PanelScopeNote(row.Claim));
+        else if (row.Claim.Scope == KeybindScope.Menu) info.Add(MenuScopeNote);
         else if (row.Claim.Scope == KeybindScope.Photo) info.Add(PhotoScopeNote);
         else if (row.Claim.Scope == KeybindScope.Map) info.Add(MapScopeNote);
         else if (row.Claim.Scope == KeybindScope.Chat) info.Add(ChatScopeNote);
@@ -1268,6 +1293,19 @@ internal static class KeybindsTabLayout
     /// (press and release Alt) is a key for a hold bind.
     /// </summary>
     internal const string ModifiersOnlyReason = "Two modifiers together can't be a key; hold them with another key (for example F9 + Ctrl + Shift), or press and release one modifier on its own.";
+
+    /// <summary>
+    /// PANELKEY1: the description column's note on a panel key (<c>ctx.Keybinds.RegisterWhileShown</c>): where it works
+    /// and, from the panel's input mode, whether the game's keys meet it.
+    /// </summary>
+    internal static string PanelScopeNote(KeybindClaim claim) =>
+        "Works while " + claim.Panel + " is open. " + (claim.Scope == KeybindScope.Panel
+            ? PanelHoldsInputNote
+            : PanelSharesInputNote);
+
+    internal const string PanelHoldsInputNote = "The panel holds the input then, so the game's gameplay keys don't clash with it.";
+
+    internal const string PanelSharesInputNote = "The panel doesn't hold the input, so the game's keys still clash with it.";
 
     /// <summary>KEYS4: the description column's note on a menu key (the workspace's back and forward).</summary>
     internal const string MenuScopeNote = "Works only while the Mods menu is open, so it never clashes with a gameplay key.";

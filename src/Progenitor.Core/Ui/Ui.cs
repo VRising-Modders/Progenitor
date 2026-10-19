@@ -228,14 +228,14 @@ public static partial class Ui
         if (_skipped)
         {
             Plugin.Logger?.LogInfo("Ui: Panel('" + title + "') skipped; returning a disabled handle.");
-            return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, CurrentRuntime(), panel: null, enabled: false)));
+            return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, CurrentRuntime(), panel: null, enabled: false) { Title = title.Trim() }));
         }
 
         var runtime = CurrentRuntime();
         if (!runtime.IsClient)
         {
             Plugin.Logger?.LogInfo("Ui: Panel('" + title + "') is client-only; returning a disabled handle.");
-            return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, runtime, panel: null, enabled: false)));
+            return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, runtime, panel: null, enabled: false) { Title = title.Trim() }));
         }
 
         IRuntimePanel? panel = null;
@@ -251,7 +251,7 @@ public static partial class Ui
         else
             Plugin.Logger?.LogDiag("Ui: panel '" + title + "' under " + root);
 
-        return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, runtime, panel, enabled)));
+        return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, runtime, panel, enabled) { Title = title.Trim() }));
     }
 
     /// <summary>

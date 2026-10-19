@@ -146,6 +146,66 @@ public sealed class PluginKeybinds
     }
 
     /// <summary>
+    /// PANELKEY1: a key that works only while <paramref name="panel"/> is shown, such as a "Keep open" button's key on a
+    /// docked panel. Hidden or destroyed, the panel leaves the bind inactive; unload releases it (the handle is tracked).
+    ///
+    /// <para><b>Where it meets other keys</b> follows the panel's <see cref="IUiPanel.CaptureMode"/>, read each frame. A
+    /// <see cref="UiCaptureMode.WhileShown"/> panel holds the input whenever it is shown and the game's actions are blocked
+    /// then, so the game's gameplay keys never clash with the bind: Space can be its key although the game binds Respawn to
+    /// it. It still meets what is live while the panel is up: the game's menu keys and Rotate Camera (the panel lets those
+    /// through, and they win), other mods' panel keys and menu, map and build keys (first installed wins), and ordinary
+    /// mods' key settings. A Progenitor gameplay key on the same chord shares it: while the panel is shown this bind acts and
+    /// the gameplay key stands aside. A <see cref="UiCaptureMode.WhenHovered"/> or <see cref="UiCaptureMode.Never"/> panel
+    /// leaves the game's keys live, so the bind then meets them like a <see cref="Register(string, KeyChord, string, Action, bool)"/>
+    /// key (the game wins its chords).</para>
+    ///
+    /// <para>Same cfg entry, Keys row and Keybinds-tab row as <c>Register</c>; the tab groups it under
+    /// <c>While &lt;panel&gt; is open</c> and says where it works. <c>Button(...).KeyHint(id)</c> shows its key. Chat focus
+    /// and a focused text field suppress it. <paramref name="panelName"/> names the panel in the tab; null uses the title
+    /// the panel was made with. Registering the same id again (a panel built anew each time it opens) replaces the earlier
+    /// binding.</para>
+    /// </summary>
+    public IKeybindHandle RegisterWhileShown(
+        IUiPanel panel,
+        string id,
+        KeyChord defaultKey,
+        string description,
+        Action onPressed,
+        string? panelName = null) =>
+        RegisterHoldWhileShown(panel, id, defaultKey, description,
+            onPressed ?? throw new ArgumentNullException(nameof(onPressed)), panelName: panelName);
+
+    /// <summary>
+    /// PANELKEY1: the press, hold and release form of <see cref="RegisterWhileShown"/> (any handler may be null, not all).
+    /// <paramref name="onReleased"/> also runs once when the panel hides under a held key.
+    /// </summary>
+    public IKeybindHandle RegisterHoldWhileShown(
+        IUiPanel panel,
+        string id,
+        KeyChord defaultKey,
+        string description,
+        Action? onPressed = null,
+        Action? whileHeld = null,
+        Action? onReleased = null,
+        string? panelName = null)
+    {
+        var handle = Keybinds.RegisterWhileShown(
+            _ctx.Owner,
+            _ctx.Guid,
+            id,
+            _ctx.Config.File,
+            panel,
+            defaultKey,
+            description,
+            onPressed,
+            whileHeld,
+            onReleased,
+            panelName);
+        _ctx.Track(handle);
+        return handle;
+    }
+
+    /// <summary>
     /// PAD1: give one of this plugin's binds a controller default, so it also fires on a gamepad:
     /// <c>ctx.Keybinds.SetGamepad(handle, KeyChord.Gamepad(UiKey.GamepadNorth, UiKey.GamepadDpadDown))</c> presses Pad Y
     /// while D-Pad Down is held. The player's choice in the Keybinds tab (saved as <c>[Keybinds] &lt;id&gt;.Gamepad</c>)
