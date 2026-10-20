@@ -156,6 +156,10 @@ internal static class CatalogUpdateTags
     public static bool IsTagged(CatalogEntry entry, string? updateTag)
     {
         if (entry == null || string.IsNullOrEmpty(updateTag)) return false;
+        // INDEX1 (live 2026-10-20: a merged Index row never showed): update tags are Thunderstore categories, which an Index
+        // row has none of. Its compatibility is its own progenitor range, so the "Current update only" filters and the stale
+        // warning never judge it by Thunderstore's tags.
+        if (entry.FromIndex) return true;
         var tags = UpdateTagsOf(entry);
         for (int i = 0; i < tags.Count; i++)
         {

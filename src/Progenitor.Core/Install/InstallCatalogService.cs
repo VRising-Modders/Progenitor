@@ -94,6 +94,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
     private IReadOnlyList<CatalogEntry> _indexEntries = Array.Empty<CatalogEntry>();
     private int _indexEntriesVersion = -1;
     private int _indexShadowed;
+    private bool _logIndexMerge;
     private ProgenitorIndexSource? _indexSource;
 
     /// <summary>
@@ -214,6 +215,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
 
         _indexEntries = rows;
         _indexEntriesVersion = version;
+        _logIndexMerge = true;
         return true;
     }
 
@@ -1954,6 +1956,13 @@ internal sealed class InstallCatalogService : IInstallCatalog
                     catch { /* the staging sweep removes it */ }
                 }
             }
+
+        if (_logIndexMerge)
+        {
+            _logIndexMerge = false;
+            InstallLog.Info("Install: merged " + _indexEntries.Count + " Progenitor Index row(s) into the catalog (" + _indexShadowed
+                + " Thunderstore row(s) replaced, " + _entries.Count + " rows in all).");
+        }
 
         return _entries.Count;
     }
