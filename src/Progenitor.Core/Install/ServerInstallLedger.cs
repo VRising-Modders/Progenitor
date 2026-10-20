@@ -24,8 +24,10 @@ internal sealed class ServerInstallLedgerEntry
         bool uninstallPending = false,
         bool hot = false,
         string? pluginId = null,
-        string? route = null)
+        string? route = null,
+        string? origin = null)
     {
+        Origin = string.IsNullOrWhiteSpace(origin) ? "" : origin!.Trim();
         Hot = hot;
         Route = string.IsNullOrWhiteSpace(route) ? "" : route!.Trim();
         Path = path ?? throw new ArgumentNullException(nameof(path));
@@ -95,9 +97,19 @@ internal sealed class ServerInstallLedgerEntry
     /// </summary>
     public string Route { get; }
 
+    /// <summary>
+    /// INDEX1: where the package this file came from was listed. <see cref="ProgenitorIndex.LedgerOrigin"/> (<c>index</c>)
+    /// for an install from the Progenitor Index; empty for Thunderstore, the local test source and every row an earlier build
+    /// wrote (all of them Thunderstore or local). Only an Index install may hot load or hot unload; updates and uninstalls
+    /// read it to know where a mod came from.
+    /// </summary>
+    public string Origin { get; }
+
+    public bool FromIndex => string.Equals(Origin, ProgenitorIndex.LedgerOrigin, StringComparison.Ordinal);
+
     /// <summary>The same row with <see cref="Route"/> replaced.</summary>
     public ServerInstallLedgerEntry WithRoute(string? route) =>
-        new(Path, Sha256, Size, Category, Source, WrittenUtc, UninstallPending, Hot, PluginId, route);
+        new(Path, Sha256, Size, Category, Source, WrittenUtc, UninstallPending, Hot, PluginId, route, Origin);
 }
 
 /// <summary>
@@ -224,7 +236,8 @@ internal sealed class ServerInstallLedger
                         marked,
                         hot,
                         ReadString(item, "pluginId"),
-                        ReadString(item, "route")));
+                        ReadString(item, "route"),
+                        ReadString(item, "origin")));
                 }
             }
 
@@ -276,6 +289,8 @@ internal sealed class ServerInstallLedger
                 if (f.Hot) w.WriteBoolean("hot", true);
                 // REMOTEINST1: only a remote install writes it, so a local ledger keeps its bytes.
                 if (f.Route.Length > 0) w.WriteString("route", f.Route);
+                // INDEX1: only an Index install writes it, so every other row keeps the bytes earlier builds wrote.
+                if (f.Origin.Length > 0) w.WriteString("origin", f.Origin);
                 w.WriteEndObject();
             }
 

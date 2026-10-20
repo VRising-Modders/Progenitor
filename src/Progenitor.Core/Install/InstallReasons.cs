@@ -95,6 +95,14 @@ internal static class InstallReasons
         "missing, contradictory or unsupported metadata; hot load is not offered";
     public const string ProgenitorDepDoesNotGrantHotLoad =
         "a Progenitor dependency alone never enables hot loading";
+    /// <summary>INDEX1: a hotLoadable package from Thunderstore installs for the next start; only Index installs load now.</summary>
+    public const string HotLoadIndexOnly =
+        "installed from Thunderstore, so it loads at the next start; only mods installed from the Progenitor Index load without a restart";
+
+    /// <summary>INDEX1: a copy installed from Thunderstore is removed at the next start.</summary>
+    public const string HotUnloadIndexOnly =
+        "it was not installed from the Progenitor Index, so it is removed at the next start";
+
     public const string HotLoadableIsAuthorClaim =
         "hotLoadable is the author's claim, not proof of cleanup; the installer still decides";
     public const string EligibilityNotWired =

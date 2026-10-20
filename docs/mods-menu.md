@@ -726,7 +726,21 @@ Status: **source-checked, built (Debug and Release), game-free tested, and live-
 2. Cancel installing on the Client cell: the pending file and its ledger row go, and the cell returns to `! Missing: the server has it`.
 3. Hot swap Core, then reopen the tab: HotDemo's Client cell still reads `! Missing: the server has it` (from `progenitor-cache/verified`), with no download in the log.
 
+## Progenitor Index listings (INDEX1)
+
+Status: **source-checked, built and game-free tested (`ProgenitorIndexTests`, `AdmissionTests`, `InstallHotLoadTests`, `RemoteInstallTests`); not live-verified.** The list, its signature, cache and download rules are in [auto-update.md](auto-update.md#the-progenitor-index).
+
+- **One list.** The Install tab lists the signed Progenitor Index together with Thunderstore. Each refresh checks the Index first (its own conditional request), then the Thunderstore index, and merges: the local test source, then the Index, then Thunderstore. A mod in both is its Index row.
+- **Source label.** An Index row's second line ends with `· Progenitor Index` (`by owner · Progenitor Index`); Thunderstore rows are unchanged. The drawer's facts add **Source** (`Progenitor Index`, `Thunderstore` or the local test source).
+- **README and icon.** An Index row's README and changelog come from the list itself (nothing is fetched); its icon is the one the Index publishes beside the list.
+- **Takedowns.** A `warning` version reads `· ⚠ Warning` on its row and a **Warning** fact with the reason; a `hidden` or `disable` version is not listed and cannot be installed. An installed copy of a `warning` or `disable` version gets a problem line on its mod page (`Warning from the Progenitor Index` / `Taken down from the Progenitor Index`, with the reason).
+- **Progenitor version.** A mod whose `progenitor` range excludes this Progenitor reads `· Needs a newer Progenitor`, with a **Needs** fact (`Progenitor >=X (this is Y)`); its install is refused before any download.
+- **Hot load.** Only an Index install may load without a restart. The same hotLoadable package from Thunderstore installs for the next start; its plan reads `installed from Thunderstore, so it loads at the next start; …`.
+- **Updates.** An update of a mod the Index lists comes from the Index.
+
 ## HotDemo: hot install and uninstall, trusted hotLoadable (HOTDEMO1)
+
+**Since INDEX1 this route is for Progenitor Index installs (and the local test source) only;** a Thunderstore listing takes the restart route whatever its flag says.
 
 **Live (2026-10-03, Steam client in game on the isolated test server, Core 2026.10.28.7 / generation 12, branch fix/hotdemo-hot-path 32f825dc):** Server → Uninstall logged `Install: local server copy of Progenitor-HotDemo is unloaded now (trusted hotLoadable, reload folder watched).` and the server logged `Reload: unloaded Progenitor Hot Demo: clean` with no `.uninstall` marker left; Client → Install planned `ApplyNow`, wrote into `progenitor-reload` and logged `Reload: loaded Progenitor Hot Demo 0.1.0`, the cell reading `Installed 0.1.0`; Server → Install planned `ApplyNow` for the local server and the server logged `Reload: loaded Progenitor Hot Demo 0.1.0`; Client → Uninstall removed the file and logged `Reload: unloaded Progenitor Hot Demo: clean`; Client → Install again loaded it. No step needed a restart. **Not live-verified:** the stopped-server fallback to `progenitor-pending`, the refusal cases (hash mismatch, `hotLoadable: false`, unsafe images), and remote (non-local) servers.
 
@@ -767,7 +781,8 @@ The [join screens](join-flow.md#4-installing-from-thunderstore-stage-2) install 
 What the join adds:
 
 - **The exact version.** A server names `Owner-Name` and the version its handshake requires. The package's version list is read (`ThunderstoreVersions`; up to 1,024 versions, active ones only) and that version's entry replaces the newest in the batch's catalog (`InstallCatalogService.UseVersionEntry`). A version that is gone is refused, never replaced by a newer one.
-- **Refusals the join needs:** `[Mods] UseThunderstore` off; `[Mods] ShowNsfwContent` off for an author-flagged package; a fetched listing whose download is not `https` on `thunderstore.io` or its hosts (`NotThunderstore`; the local index is allowed); a server-only package (`SideMismatch`); a package whose plugin is not the mod the server named; an Update or "Use version" over a copy MANAGED1 reads as **Managed elsewhere**; a downloaded zip whose size is not the listing's.
+- **The Progenitor Index first (INDEX1).** A package the Index lists is resolved from its version list (after the local test source, before Thunderstore) and installed from it, pinned by its sha256; only such an install may load without a restart.
+- **Refusals the join needs:** `[Mods] UseThunderstore` off (for a package the Index does not list); `[Mods] ShowNsfwContent` off for an author-flagged package; a fetched listing whose download is not `https` on `thunderstore.io` or its hosts (`NotThunderstore`; the local index is allowed); a server-only package (`SideMismatch`); a package whose plugin is not the mod the server named; an Update or "Use version" over a copy MANAGED1 reads as **Managed elsewhere**; a downloaded zip whose size is not the listing's.
 - **Progress.** `ProgressCatalogTransport` counts the bytes of the responses read under the row's `JoinDownloadProgress.Current` (an `AsyncLocal`, so two rows downloading at once each see their own): `Downloading 62%` on the row. A `file://` download from the local index reports no percentage.
 - **At most two at a time;** plans and writes one at a time.
 

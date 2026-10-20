@@ -589,8 +589,8 @@ On **Progenitor's own page** in the Mods menu, under **Server settings**, sectio
 | Row (cfg key) | Control | Value |
 |---|---|---|
 | Server list description (`Description`) | Server-wide text area with the expanded editor; `MaxLength` 128; the editor's counter counts against the room left by the signature | The admin's text: plain text, line breaks kept, tokens `{reset:relative}` (and `{reset}`, drawn the same) and `{reset:date}` in the **server's** zone with its abbreviation (`Sat, Oct 10, 6:00 PM EDT`), from the reset rows above. Starts as the server's current description on the first run. |
-| Room left | Muted counter line right under the field (LISTING1: no longer its own row, never a hover target), on each edit | `72 of 82 characters left (the signature line takes 46)`, or `8 over 82 …: saving cuts the end of your text and adds …`, counted on the text being typed, tokens as they read now |
-| Progenitor signature (`Signature`) | Switch (default on) | Adds `Requires the Progenitor mod (thunderstore.io)` on its own line. Off: the admin's text exactly as written. |
+| Room left | Muted counter line right under the field (LISTING1: no longer its own row, never a hover target), on each edit | `59 of 69 characters left (the signature line takes 59)`, or `8 over 69 …: saving cuts the end of your text and adds …`, counted on the text being typed, tokens as they read now |
+| Progenitor signature (`Signature`) | Switch (default on) | Adds `Requires Progenitor: github.com/VRising-Modders/Progenitor` on its own line. Off: the admin's text exactly as written. |
 | Players see | The line under the field (TOKENINSERT1, it replaced Listed as) | The composed description with the signature line, wrapped to four lines |
 | Status | Info line (`Published`, written by the server) | `Published Oct 5, 2:05 PM (server time) · Steam updated · saved in ServerHostSettings.json.`, plus a warning when `-description` or `VR_DESCRIPTION` overrides the file at start |
 

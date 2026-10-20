@@ -19,7 +19,10 @@ internal static class ServerListDescription
     public const int MaxChars = 128;
 
     /// <summary>The fixed line after the admin's text. ASCII, no markup.</summary>
-    public const string Signature = "Requires the Progenitor mod (thunderstore.io)";
+    public const string Signature = "Requires Progenitor: github.com/VRising-Modders/Progenitor";
+
+    /// <summary>INDEX1: the line earlier builds wrote (Progenitor is no longer on Thunderstore); a seed drops it too.</summary>
+    public const string LegacySignature = "Requires the Progenitor mod (thunderstore.io)";
 
     /// <summary>What ends an admin text shortened to fit.</summary>
     public const string Ellipsis = "…";
@@ -403,9 +406,13 @@ internal static class ServerListDescription
     public static string SeedFrom(string? currentDescription)
     {
         string text = Normalize(currentDescription);
-        if (text == Signature) return "";
-        if (text.EndsWith("\n" + Signature, StringComparison.Ordinal))
-            text = text.Substring(0, text.Length - Signature.Length - 1).TrimEnd();
+        foreach (string sig in new[] { Signature, LegacySignature })
+        {
+            if (text == sig) return "";
+            if (text.EndsWith("\n" + sig, StringComparison.Ordinal))
+                return text.Substring(0, text.Length - sig.Length - 1).TrimEnd();
+        }
+
         return text;
     }
 

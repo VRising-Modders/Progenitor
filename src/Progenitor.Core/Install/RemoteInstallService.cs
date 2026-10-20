@@ -323,6 +323,8 @@ internal sealed class RemoteInstallService
             foreach (var row in rows)
             {
                 if (IsPendingPath(row.Path)) continue;
+                // INDEX1: only a copy installed from the Progenitor Index (or this server's local test source) unloads now.
+                if (!row.FromIndex && !catalog.IsLocalKey(entry.Key)) return (false, InstallReasons.HotUnloadIndexOnly);
                 files.Add(ServerInstallLedger.Absolute(game!, row.Path));
             }
 
@@ -675,7 +677,9 @@ internal sealed class RemoteInstallService
             return;
         }
 
-        if (!local && !string.IsNullOrEmpty(entry.ListingUrl)
+        // INDEX1: a Progenitor Index entry is a V Rising mod by its listing; its download is checked against its signed pin.
+        bool fromIndex = entry.FromIndex;
+        if (!local && !fromIndex && !string.IsNullOrEmpty(entry.ListingUrl)
             && entry.ListingUrl!.IndexOf("/c/v-rising/", StringComparison.OrdinalIgnoreCase) < 0)
         {
             Finish(request, actor, send, RemoteInstallStage.Refused, RemoteInstallReason.NotVRising,
@@ -691,7 +695,7 @@ internal sealed class RemoteInstallService
             return;
         }
 
-        if (!local && !settings.IsThunderstoreUrl(entry.DownloadUrl))
+        if (!local && !fromIndex && !settings.IsThunderstoreUrl(entry.DownloadUrl))
         {
             Finish(request, actor, send, RemoteInstallStage.Refused, RemoteInstallReason.NotThunderstore,
                 "the download link is not on " + settings.ThunderstoreBaseUrl, none);
@@ -1029,7 +1033,7 @@ internal sealed class RemoteInstallService
             }
 
             next.Add(new ServerInstallLedgerEntry(row.Path, row.Sha256, row.Size, row.Category, source, row.WrittenUtc,
-                row.UninstallPending, row.Hot, row.PluginId, ServerInstallLedger.RouteRemote));
+                row.UninstallPending, row.Hot, row.PluginId, ServerInstallLedger.RouteRemote, row.Origin));
             changed = true;
         }
 

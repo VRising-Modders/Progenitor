@@ -23,8 +23,10 @@ internal enum PackageVersionAvailability
 /// <summary>JOINFLOW2: one package's version list, and the catalog entry of the version a server named.</summary>
 internal sealed class PackageVersions
 {
-    public PackageVersions(string package, string requested, IReadOnlyList<string> active, string? matched, CatalogEntry? entry, bool local)
+    public PackageVersions(string package, string requested, IReadOnlyList<string> active, string? matched, CatalogEntry? entry, bool local,
+        bool fromIndex = false)
     {
+        FromIndex = fromIndex;
         Package = package ?? "";
         Requested = requested ?? "";
         Active = active ?? Array.Empty<string>();
@@ -50,6 +52,49 @@ internal sealed class PackageVersions
 
     /// <summary>The listing came from the configured local index (<c>[Install] LocalIndexPath</c>), not the fetched one.</summary>
     public bool Local { get; }
+
+    /// <summary>INDEX1: the versions are the Progenitor Index's (it lists the package; Thunderstore's listing is not used).</summary>
+    public bool FromIndex { get; }
+
+    /// <summary>
+    /// INDEX1: the version lists of the packages in <paramref name="wanted"/> that the Progenitor Index lists
+    /// (<paramref name="indexRows"/>: every listed version, <see cref="IndexCatalog.ToEntries"/> with all versions), added to
+    /// <paramref name="into"/> unless a package is already there (the local test source is read first). Each version is
+    /// chosen under its package's rule exactly as for Thunderstore.
+    /// </summary>
+    public static void AddFromIndex(
+        IReadOnlyList<CatalogEntry>? indexRows,
+        IReadOnlyDictionary<string, string> wanted,
+        IDictionary<string, PackageVersions> into,
+        IReadOnlyDictionary<string, Plugins.NetworkVersionRule>? rules)
+    {
+        if (indexRows == null || indexRows.Count == 0 || wanted == null) return;
+        foreach (var kv in wanted)
+        {
+            string package = (kv.Key ?? "").Trim();
+            if (package.Length == 0 || into.ContainsKey(package)) continue;
+            var active = new List<string>();
+            var byVersion = new Dictionary<string, CatalogEntry>(StringComparer.Ordinal);
+            foreach (var row in indexRows)
+            {
+                if (!string.Equals(row.Key, package, StringComparison.OrdinalIgnoreCase)) continue;
+                string v = row.Manifest.Version ?? "";
+                if (v.Length == 0 || byVersion.ContainsKey(v)) continue;
+                active.Add(v);
+                byVersion[v] = row;
+            }
+
+            if (active.Count == 0) continue;
+            var rule = Plugins.NetworkVersionRule.Exact;
+            if (rules != null)
+                foreach (var r in rules)
+                    if (string.Equals(r.Key, package, StringComparison.OrdinalIgnoreCase)) rule = r.Value;
+            string? matched = ThunderstoreVersions.Resolve(active, kv.Value, rule, out _);
+            CatalogEntry? entry = matched != null && byVersion.TryGetValue(matched, out var e) ? e : null;
+            string key = entry?.Key ?? byVersion[active[0]].Key;
+            into[key] = new PackageVersions(key, kv.Value ?? "", active, entry == null ? null : matched, entry, local: false, fromIndex: true);
+        }
+    }
 
     /// <summary>The newest version Thunderstore serves, or empty.</summary>
     public string Latest => ThunderstoreVersions.Highest(Active, _ => true) ?? "";

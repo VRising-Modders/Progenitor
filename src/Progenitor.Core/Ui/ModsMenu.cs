@@ -3778,6 +3778,9 @@ public static partial class ModsMenu
         service.LoadedPluginGuids = target => target == InstallTarget.LocalServer
             ? Array.Empty<string>()
             : LoadedPluginGuidsOnClient();
+        // INDEX1: the Install tab lists the Progenitor Index beside Thunderstore (checked about every 30 minutes).
+        service.IndexSource = ProgenitorIndexSource.ForRoot(root);
+        service.IndexRefreshAge = ProgenitorIndexSource.InstallTabAge;
         _catalog = service;
         _catalogIndexUrl = CatalogFetchOptions.Default.IndexUrl;
         // INSTALLSIDES2 item 7: abandoned downloads (orphaned by a restart or a Core swap) go now, off
@@ -3810,6 +3813,9 @@ public static partial class ModsMenu
             root,
             service.LoadIndexFromJson,
             ConditionalIndexFetch.Over(fetcher, options.IndexUrl, new IndexDiskCache(root, options.IndexUrl), "install tab"));
+        // INDEX1: each refresh checks the Progenitor Index first (its own conditional request), so the list it hands the
+        // catalog is merged with the Index's.
+        _indexRefresher.BeforeLoad = (ct, force) => service.RefreshIndexAsync(ct, force);
         _indexRefresher.InheritSession(previousRefresher);
 #endif
     }

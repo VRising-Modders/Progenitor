@@ -151,5 +151,5 @@ The client fixes it from the join screens and answers the handshake again. See
 
 A mod the server held a copy of and would send to a client that consented (`OfferPackage` /
 `ModManifest.Offer`). Servers no longer send mod files; both calls are obsolete no-ops. A mod
-joining players need comes from Thunderstore: name its package in the catalog. See
+joining players need comes from the Progenitor Index (read first) or Thunderstore: name its package in the catalog. See
 [client-mod-policy.md](client-mod-policy.md#security).

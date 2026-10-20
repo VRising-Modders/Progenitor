@@ -592,7 +592,9 @@ internal sealed class CatalogFetcher
 
         // LOCALTS1: plain http only for the active dev Thunderstore on a loopback address.
         if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            && !ThunderstoreMirror.AllowsHttp(parsed))
+            && !ThunderstoreMirror.AllowsHttp(parsed)
+            // INDEX1: and for a dev Progenitor Index on a loopback address ([Install] IndexDevUrl, developer tree only).
+            && !ProgenitorIndexConfig.AllowsHttp(parsed))
         {
             error = InstallReasons.FetchNotHttps;
             return false;

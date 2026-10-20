@@ -265,6 +265,8 @@ internal static class HotLoadExecutor
             // POLISH4 item 1: the plugin id this route already knows, recorded beside the listing key
             // rather than in place of it.
             pluginId: plan.PluginId,
-            sweepHotFlags: !crossProcess);
+            sweepHotFlags: !crossProcess,
+            // INDEX1: the hot route is an Index install (or the local test source's); the row says which.
+            origin: IndexCatalog.LedgerOriginOf(plan.Entry));
     }
 }

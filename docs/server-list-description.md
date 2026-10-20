@@ -141,9 +141,9 @@ Two rows in Progenitor's **Server settings** (Progenitor's mod page, next to the
 
 A fixed line after the admin's text, on its own line:
 
-> Requires the Progenitor mod (thunderstore.io)
+> Requires Progenitor: github.com/VRising-Modders/Progenitor
 
-At 46 characters, it leaves about 80 for the admin's text.
+At 59 characters with its line break, it leaves 69 for the admin's text.
 
 - **Wording:** it says Progenitor is a **mod** and where to get it, for a new player who knows neither. The browser does not make URLs clickable, so the site is spelled out.
 - **No mod list:** once Progenitor is installed, its join screens offer the rest (the same reasoning as the in-game notice).
@@ -183,7 +183,7 @@ Source-checked, built and game-free tested; nothing below has been seen in the g
 | Part | Where | Notes |
 |---|---|---|
 | Rows | `ServerListDescriptionSettings` (Core); `BepInEx/config/progenitor.serverlist.cfg`, `[ServerList]` `Description`, `Signature`, `Published` | Placed by `JoinServerSettings`' page builder, section **Server list** after the server message rows ([join-flow.md](join-flow.md#server-message-settings-admins)). `Description` is a server-wide text area with `MaxLength(128)`; its expanded editor counts against the room (`EditorCounterLimit`). **Room left** (every 0.25 s) counts the text being typed (`ModSettingsView.TypedText`: the field, or the open editor) after rendering the tokens. `Signature` is a switch: an administrator's bool row is now drawn as one (it was a field + Apply). `Published` is the server's status line, shown read-only as **Status**. On a server's first run (no cfg yet) `Description` starts as the game's live description, without a signature line an earlier run composed. |
-| Composition | `ServerListDescription.Compose` | Text normalized (`\r\n` to `\n`, trimmed); room 128, or 82 with the signature (45 characters plus its line break); a longer text is cut to room − 1 and ends in `…` (a surrogate pair is never split); the signature is never cut. Empty text with the signature on is the signature alone. |
+| Composition | `ServerListDescription.Compose` | Text normalized (`\r\n` to `\n`, trimmed); room 128, or 69 with the signature (58 characters plus its line break); a longer text is cut to room − 1 and ends in `…` (a surrogate pair is never split); the signature is never cut. Empty text with the signature on is the signature alone. |
 | Tokens | `ServerListDescription.Render` | `{reset:relative}` and `{reset}` read `in N days` / `in N hours` / `today` (a list row is drawn once, so `{reset}` is coarse here too); `{reset:date}` reads `Sat, Oct 10, 6:00 PM EDT` in the **server's** zone (always with the time since RESETWIPE1; seconds never). With the game's scheduled wipes on, the reset is the next wipe ([join-flow.md](join-flow.md#server-message-settings-admins)). The abbreviation comes from a table of common Windows and IANA zone ids (`EST`/`EDT`, `CET`/`CEST`, `GMT`/`BST`, `JST`, …); any other zone shows its offset (`UTC+05:30`): Windows has no abbreviations and initials of its names mislead. No reset: `not scheduled`; a passed one-time reset: its passed text. |
 | Apply loop | `ServerListApplier` over `IServerListGame`; live half `ServerListGame` | Server only (`Plugin.IsServerProcess`, like the rest of the join flow), every 250 ms on the main thread. Waits until `SettingsManager._ServerHostSettings` exists and the server world is up, then applies at once (so the signature is advertised without anyone opening the page), after each edit (`SettingChanged`), and re-renders every minute, publishing only when the composed text differs from what was published **or** from the game's live value (a `ReloadSettings` re-read). |
 | Live value | `ServerHostSettings.Description` field | Written directly: `ServerBootstrapSystem.SetServerDescription` would ignore an empty text and adds only the 128 cut the composition already makes. EOS follows through the game's own one-second `ModifySession`. |

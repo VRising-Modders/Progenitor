@@ -26,9 +26,9 @@ public class ServerListDescriptionTests
     {
         var c = ServerListDescription.Compose("Hardcore PvP, wipes monthly.", signature: true);
         Assert.Equal("Hardcore PvP, wipes monthly.\n" + ServerListDescription.Signature, c.Text);
-        Assert.Equal("Requires the Progenitor mod (thunderstore.io)", ServerListDescription.Signature);
-        Assert.Equal(46, ServerListDescription.SignatureCost);
-        Assert.Equal(82, ServerListDescription.Room(signature: true));
+        Assert.Equal("Requires Progenitor: github.com/VRising-Modders/Progenitor", ServerListDescription.Signature);
+        Assert.Equal(59, ServerListDescription.SignatureCost);
+        Assert.Equal(69, ServerListDescription.Room(signature: true));
         Assert.False(c.Cut);
     }
 
@@ -49,7 +49,7 @@ public class ServerListDescriptionTests
     [Fact]
     public void Text_at_the_limit_fits_and_one_more_character_is_cut_with_an_ellipsis_keeping_the_signature()
     {
-        string exact = new string('a', 82);
+        string exact = new string('a', 69);
         var fits = ServerListDescription.Compose(exact, signature: true);
         Assert.False(fits.Cut);
         Assert.Equal(128, fits.Text.Length);
@@ -58,7 +58,7 @@ public class ServerListDescriptionTests
         Assert.True(over.Cut);
         Assert.Equal(128, over.Text.Length);
         Assert.EndsWith("\u2026\n" + ServerListDescription.Signature, over.Text);
-        Assert.StartsWith(new string('a', 81), over.Text);
+        Assert.StartsWith(new string('a', 68), over.Text);
 
         var off = ServerListDescription.Compose(new string('x', 200), signature: false);
         Assert.Equal(128, off.Text.Length);
@@ -80,11 +80,11 @@ public class ServerListDescriptionTests
     [Fact]
     public void The_counter_warns_before_save()
     {
-        Assert.Equal("72 of 82 characters left (the signature line takes 46)", ServerListDescription.CounterLine("0123456789", true));
+        Assert.Equal("59 of 69 characters left (the signature line takes 59)", ServerListDescription.CounterLine("0123456789", true));
         Assert.Equal("118 of 128 characters left", ServerListDescription.CounterLine("0123456789", false));
         Assert.Equal("1 of 128 character left", ServerListDescription.CounterLine(new string('a', 127), false));
         string over = ServerListDescription.CounterLine(new string('a', 90), true);
-        Assert.StartsWith("8 over 82", over);
+        Assert.StartsWith("21 over 69", over);
         Assert.Contains("cuts the end of your text", over);
     }
 
@@ -159,7 +159,7 @@ public class ServerListDescriptionTests
         string raw = "Wipe {reset:relative}"; // 21 typed, "Wipe in 3 days" = 14 rendered
         string rendered = ServerListDescription.Render(raw, Schedule(Now.AddDays(3).AddHours(1)), Now, zone);
         Assert.Equal(14, rendered.Length);
-        Assert.StartsWith("68 of 82", ServerListDescription.CounterLine(rendered, true));
+        Assert.StartsWith("55 of 69", ServerListDescription.CounterLine(rendered, true));
     }
 
     // ---- change detection -----------------------------------------------------------------------

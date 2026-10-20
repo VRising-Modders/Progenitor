@@ -48,6 +48,7 @@ internal sealed class ModVersionBooks : IModVersionBooks
                     WrittenUtc = f.WrittenUtc.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
                     PluginId = f.PluginId,
                     Route = f.Route,
+                    Origin = f.Origin,
                 };
             }
         }
@@ -102,7 +103,7 @@ internal sealed class ModVersionBooks : IModVersionBooks
                 : books.Ledger.Category.Length > 0 ? books.Ledger.Category : ServerInstallLedger.CategoryMod;
             l.With(new ServerInstallLedgerEntry(
                 LedgerPath(bepRelPath), sha256, size, category, books.Ledger.Source, _now(),
-                uninstallPending: false, hot: false, pluginId: books.Ledger.PluginId, route: books.Ledger.Route)).Write(_paths.GameRoot);
+                uninstallPending: false, hot: false, pluginId: books.Ledger.PluginId, route: books.Ledger.Route, origin: books.Ledger.Origin)).Write(_paths.GameRoot);
         }
 
         if (books.Record != null && _recordPath.Length > 0)

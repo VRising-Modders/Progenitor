@@ -566,6 +566,7 @@ public sealed class HotAdmissionSnapshotTests : IClassFixture<AdmissionFixtures>
     {
         string zip = Zip(_f.Valid);
         var (catalog, _) = Service(new MovingSource(Values()), policy: null);
+        catalog.IndexSource = null; // this test is about Thunderstore listing a newer version
         Assert.True(catalog.InspectLocalZip(Key, zip).Ok);
         Assert.NotNull(catalog.ZipPathOf(Key));
 
@@ -609,6 +610,7 @@ public sealed class HotAdmissionSnapshotTests : IClassFixture<AdmissionFixtures>
             policyProvider: policy != null ? null : () => QualificationPolicyCache.Current(_root));
         var catalog = new InstallCatalogService(
             _root, new NoTransport(), null, null, null, false, pipeline, null, null, false);
+        catalog.IndexSource = IndexKit.Mirror(Listing()); // INDEX1: only an Index install hot loads
         Assert.True(catalog.LoadIndexFromJson(Listing(), "stamp").Ok);
         return (catalog, snapshots);
     }

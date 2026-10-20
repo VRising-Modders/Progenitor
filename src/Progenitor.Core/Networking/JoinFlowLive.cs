@@ -43,6 +43,10 @@ internal static class JoinFlowLive
                 () => LocalIndexConfig.Resolve());
             // AUTOUPDATE1: a fresh read here is also an update check (no request of its own).
             index.OnFetched = (json, stamp) => Ui.ModsMenu.AdoptJoinIndex(json, stamp);
+            // INDEX1: the Progenitor Index answers the packages it lists (checked about every 10 minutes); Thunderstore is
+            // read only while [Mods] UseThunderstore is on.
+            index.IndexRows = ct => IndexRowsAsync(root, ProgenitorIndexSource.JoinAge, ct);
+            index.ThunderstoreEnabled = () => OnMain(() => Ui.ModsMenu.ThunderstoreEnabled, true);
             JoinFlowClient.PackageIndex = index;
             // LOCALJOIN1 (debug): the join window's local test source, read at each build (empty: none).
             JoinFlowClient.LocalTestFolderProbe = () => LocalIndexConfig.Resolve();
@@ -174,12 +178,25 @@ internal static class JoinFlowLive
             policyProvider: () => Progenitor.Install.Admission.QualificationPolicyCache.Current(root));
         var service = new InstallCatalogService(root, transport, admission: admission, thisProcessIsServer: false, registerForBridge: false);
         service.LoadedPluginGuids = _ => LoadedGuidsOnMain();
+        // INDEX1: the batch installs from the Progenitor Index too (and only its installs may hot load).
+        service.IndexSource = ProgenitorIndexSource.ForRoot(root);
+        service.IndexRefreshAge = ProgenitorIndexSource.JoinAge;
         return service;
+    }
+
+    /// <summary>INDEX1: every listed version of the Progenitor Index, checked when the last check is older than <paramref name="age"/>.</summary>
+    private static async Task<IReadOnlyList<CatalogEntry>> IndexRowsAsync(string root, TimeSpan age, System.Threading.CancellationToken ct)
+    {
+        var source = ProgenitorIndexSource.ForRoot(root);
+        if (source == null || !source.Enabled) return Array.Empty<CatalogEntry>();
+        await source.RefreshAsync(age, ct).ConfigureAwait(false);
+        return source.Entries(allVersions: true);
     }
 
     private static JoinInstallRules Rules(string root) => new()
     {
         ThunderstoreEnabled = () => OnMain(() => Ui.ModsMenu.ThunderstoreEnabled, true),
+        IndexEnabled = () => ProgenitorIndexConfig.Enabled,
         ShowNsfw = () => OnMain(() => Ui.ModsMenu.ShowNsfwContent, false),
         ManagedElsewhere = entry => OnMain(() => ManagedElsewhereOf(root, entry), null),
         RunOnMain = work => Dev.MainThread.Run(work, Owner),
@@ -268,6 +285,8 @@ internal static class JoinFlowLive
             () => ReadCachedIndex(root),
             () => LocalIndexConfig.Resolve(),
             maxAge: JoinPackageIndex.ServerMaxAge);
+        // INDEX1: a package the Progenitor Index lists is available from it (checked on the same 30-minute reuse).
+        index.IndexRows = ct => IndexRowsAsync(root, JoinPackageIndex.ServerMaxAge, ct);
         return new ServerPackageAvailability((wanted, ct) => index.LoadAsync(wanted, ct), null, http);
     }
 

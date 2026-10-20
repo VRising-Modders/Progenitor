@@ -244,6 +244,13 @@ internal static class ThunderstoreAdapter
     {
         url = "";
         if (entry == null) return false;
+        // INDEX1: an Index listing's icon is the one the Index publishes beside its list.
+        if (entry.FromIndex)
+        {
+            url = entry.Pin!.IconUrl;
+            return url.Length > 0;
+        }
+
         string? fullName = entry.SelectedVersionFullName;
         if (string.IsNullOrWhiteSpace(fullName))
         {

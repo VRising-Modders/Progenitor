@@ -342,6 +342,8 @@ internal static class ModProblems
             Sources.Add(new DependencyOffSource());
             Sources.Add(new ProcessLifetimeSource());
             Sources.Add(new WaitingPluginSource());
+            // INDEX1: installed copies of a version the Progenitor Index took down or warns about.
+            Sources.Add(new Progenitor.Install.IndexRevocationSource());
         }
     }
 

@@ -921,6 +921,10 @@ internal sealed class JoinPageModel
             : facts.ThunderstoreVersions == null
                 ? Install.PackageVersionAvailability.Unknown
                 : Install.ThunderstoreVersions.Availability(facts.ThunderstoreVersions, package, required, rule);
+        // INDEX1: only an install from the Progenitor Index loads without a restart; a Thunderstore listing restarts.
+        if (hot && package != null && facts.ThunderstoreVersions != null && facts.ThunderstoreVersions.TryGetValue(package, out var listedAt)
+            && !listedAt.FromIndex && !listedAt.Local)
+            hot = false;
         // LOCALJOIN1 (debug): no usable source from the server, and the configured local test index provides it.
         long size = mod?.Size ?? 0;
         string? sha = mod?.Sha256;

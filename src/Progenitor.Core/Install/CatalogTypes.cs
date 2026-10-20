@@ -265,7 +265,20 @@ internal sealed class CatalogEntry
             ReleasedUtc,
             Downloads,
             RatingScore,
-            HasNsfwContent);
+            HasNsfwContent)
+        {
+            Pin = Pin,
+        };
+
+    /// <summary>
+    /// INDEX1: the signed file this listing installs (its URL, size and sha256 from the Progenitor Index, or a dependency
+    /// pin), and for an Index listing its dependencies and any takedown. Null for an unpinned Thunderstore or local
+    /// listing. A pinned listing installs only the file the pin names (<see cref="ProgenitorIndex.CheckDownload"/>).
+    /// </summary>
+    public IndexPin? Pin { get; init; }
+
+    /// <summary>INDEX1: a listing read from the Progenitor Index (its installs may hot load; Thunderstore installs restart).</summary>
+    public bool FromIndex => string.Equals(SourceId, ProgenitorIndex.SourceId, StringComparison.Ordinal) && Pin != null;
 
     internal static string? EmptyToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();

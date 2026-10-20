@@ -75,11 +75,11 @@ public static class ModManifest
 
     /// <summary>The one line a dropped <c>PrmR</c> or <c>PrmC</c> packet logs (once per id and Core generation).</summary>
     internal const string RetiredPacketLog =
-        "ModManifest: dropped a {0} packet: servers no longer send mod files (mods come only from Thunderstore); further ones are dropped silently";
+        "ModManifest: dropped a {0} packet: servers no longer send mod files (mods come from the Progenitor Index or Thunderstore); further ones are dropped silently";
 
     /// <summary>The once-per-generation warning of the obsolete <see cref="Offer"/> and <c>Handshake.OfferPackage</c>.</summary>
     internal const string OfferObsoleteLog =
-        "ModManifest: OfferPackage({0}) does nothing: servers no longer distribute mod files; publish the mod on Thunderstore "
+        "ModManifest: OfferPackage({0}) does nothing: servers no longer distribute mod files; publish a GitHub release of the mod, list it in the Progenitor Index "
         + "and name its package in progenitor-manifest.json so players can install it from the join screens";
 
     private static readonly object Gate = new();
@@ -969,12 +969,12 @@ public static class ModManifest
     }
 
     /// <summary>
-    /// Removed 2026-10-05: servers no longer distribute mod files; mods come only from Thunderstore. Kept so a plugin
+    /// Removed 2026-10-05: servers no longer distribute mod files; mods come from the Progenitor Index or Thunderstore. Kept so a plugin
     /// built against an older Core still loads and runs: it registers nothing, logs one line per mod id and Core
-    /// generation, and returns a handle whose <c>Dispose</c> does nothing. Publish the mod on Thunderstore and name its
+    /// generation, and returns a handle whose <c>Dispose</c> does nothing. Publish a GitHub release of the mod, list it in the Progenitor Index and name its
     /// package in <c>progenitor-manifest.json</c> instead.
     /// </summary>
-    [Obsolete("Servers no longer distribute mod files; publish the mod on Thunderstore. This call does nothing.")]
+    [Obsolete("Servers no longer distribute mod files; publish a GitHub release and list it in the Progenitor Index. This call does nothing.")]
     public static IDisposable Offer(string modId, string path)
     {
         NoteObsoleteOffer(modId);
@@ -985,7 +985,7 @@ public static class ModManifest
     /// Removed 2026-10-05 with <see cref="Offer"/>: always false, with <paramref name="reason"/>
     /// <c>"removed"</c>, an empty hash and size 0.
     /// </summary>
-    [Obsolete("Servers no longer distribute mod files; publish the mod on Thunderstore. This call always answers false.")]
+    [Obsolete("Servers no longer distribute mod files; publish a GitHub release and list it in the Progenitor Index. This call always answers false.")]
     public static bool TryGetOfferTransferState(
         string modId, out string sha256, out long size, out string reason)
     {

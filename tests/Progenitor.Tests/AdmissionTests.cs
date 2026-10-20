@@ -918,6 +918,7 @@ public sealed class AdmissionPlannerTests : IClassFixture<AdmissionFixtures>, ID
         var snapshots = new FakeSnapshots();
         var pipeline = new AdmissionPipeline(snapshots, policyJson == null ? null : QualificationPolicy.Parse(policyJson), Identities());
         var catalog = new InstallCatalogService(_root, new NoTransport(), null, null, null, localServer, pipeline);
+        catalog.IndexSource = IndexKit.Mirror(Listing()); // INDEX1: only an Index install hot loads
         Assert.True(catalog.LoadIndexFromJson(Listing(), "stamp").Ok);
         var inspect = catalog.InspectLocalZip("team-Sample", Zip(dll, embedded));
         Assert.True(inspect.Ok, inspect.Error);
@@ -954,6 +955,27 @@ public sealed class AdmissionPlannerTests : IClassFixture<AdmissionFixtures>, ID
         Assert.False(File.Exists(_f.SentinelPath));
         // Revert: an admitted plan that still wrote pending only leaves the hot-load lane
         // unreachable; an unadmitted plan that wrote progenitor-reload/ would load unreviewed bytes.
+    }
+
+    [Fact]
+    public void INDEX1_the_same_qualified_image_from_Thunderstore_installs_for_the_next_start_and_never_writes_the_reload_folder()
+    {
+        var (catalog, snapshots) = Service(_f.Valid, RecordJson(_f.Valid));
+        snapshots.Snapshot = Live();
+        Assert.Equal(InstallDecision.ApplyNow, catalog.Plan("team-Sample", InstallTarget.Client).Plan!.Decision);
+
+        // The listing is Thunderstore's only now: same bytes, same record, same live snapshot, restart route.
+        catalog.IndexSource = null;
+        Assert.True(catalog.InspectLocalZip("team-Sample", Zip(_f.Valid, false)).Ok);
+        Assert.False(catalog.TryGetEntry("team-Sample", out var entry) && entry!.FromIndex);
+        var plan = catalog.Plan("team-Sample", InstallTarget.Client).Plan!;
+        Assert.Equal(InstallDecision.RestartClientRequired, plan.Decision);
+        Assert.Contains(InstallReasons.HotLoadIndexOnly, plan.Reason);
+        Assert.False(plan.ExecutorAvailable);
+        Assert.True(catalog.Approve(plan.PlanHash).Ok);
+        Assert.True(catalog.ExecuteToPending(plan.PlanHash).Ok);
+        Assert.True(PendingWritten);
+        Assert.False(ReloadWritten);
     }
 
     [Fact]
@@ -1047,6 +1069,7 @@ public sealed class AdmissionPlannerTests : IClassFixture<AdmissionFixtures>, ID
         var (catalog, _) = Service(_f.Valid, null);
         // The pipeline always supplies a result here; the legacy stub is only reached without one.
         var withoutAdmission = new InstallCatalogService(_root, new NoTransport());
+        withoutAdmission.IndexSource = IndexKit.Mirror(Listing());
         Assert.True(withoutAdmission.LoadIndexFromJson(Listing(), "stamp").Ok);
         Assert.True(withoutAdmission.InspectLocalZip("team-Sample", Zip(_f.Valid)).Ok);
         var legacy = withoutAdmission.Plan("team-Sample", InstallTarget.Client).Plan!;

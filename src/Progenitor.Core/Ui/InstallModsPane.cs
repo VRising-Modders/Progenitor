@@ -597,6 +597,24 @@ internal static class InstallModsCopy
     public const string ReadFullDescription = "Read full description";
     public const string FactDependencies = "Dependencies";
     public const string FactPackage = "Package";
+
+    /// <summary>INDEX1: the source label of a Progenitor Index listing (row and drawer).</summary>
+    public const string SourceIndex = "Progenitor Index";
+
+    /// <summary>INDEX1: the <c>Source</c> fact of a Thunderstore listing.</summary>
+    public const string SourceThunderstore = "Thunderstore";
+
+    /// <summary>INDEX1: the drawer's fact for an Index takedown with a warning.</summary>
+    public const string FactIndexWarning = "Warning";
+
+    /// <summary>INDEX1: the drawer's fact for an Index mod that needs a newer Progenitor than this one.</summary>
+    public const string FactNeedsProgenitor = "Needs";
+
+    /// <summary>INDEX1: the row's short mark for an Index mod that needs a newer Progenitor.</summary>
+    public const string NeedsNewerProgenitorMark = "Needs a newer Progenitor";
+
+    /// <summary>INDEX1: the row's short mark for an Index listing with a takedown warning.</summary>
+    public const string IndexWarningMark = "⚠ Warning";
     /// <summary>INSTORD2: the plugin GUID a prior inspection recorded, shown at rest without a download.</summary>
     public const string FactPlugin = "Plugin";
     public const string FactUpdateTag = "Update tag";
@@ -8009,7 +8027,22 @@ internal sealed partial class InstallModsPane
     {
         string name = HeadingText(entry);
         string author = HeaderAuthor(entry);
-        return author.Length == 0 ? name : name + "\n" + InstallModsCopy.ByPrefix + author;
+        string second = author.Length == 0 ? "" : InstallModsCopy.ByPrefix + author;
+        second = WithSourceLabel(entry, second);
+        return second.Length == 0 ? name : name + "\n" + second;
+    }
+
+    /// <summary>
+    /// INDEX1: a Progenitor Index listing's second line ends with the source label (<c>by owner · Progenitor Index</c>), and
+    /// one the Index flags with a takedown warning with <c>⚠ Warning</c>. Thunderstore rows are unchanged.
+    /// </summary>
+    internal static string WithSourceLabel(CatalogEntry entry, string line)
+    {
+        if (entry == null || !entry.FromIndex) return line;
+        string label = InstallModsCopy.SourceIndex;
+        if (entry.Pin?.Revocation is { Mode: IndexRevocationMode.Warning }) label += SideCells.Dot + InstallModsCopy.IndexWarningMark;
+        if (IndexCatalog.ProgenitorTooOld(entry, out _)) label += SideCells.Dot + InstallModsCopy.NeedsNewerProgenitorMark;
+        return line.Length == 0 ? label : line + SideCells.Dot + label;
     }
 
     /// <summary>
@@ -9999,6 +10032,13 @@ internal sealed partial class InstallModsPane
         facts.Add((InstallModsCopy.FactRequires, DependenciesFact(entry)));
         if (entry.HasNsfwContent) facts.Add((InstallModsCopy.FactNsfw, InstallModsCopy.NsfwFlagged));
         facts.Add((InstallModsCopy.FactPackage, PackageFact(entry)));
+        // INDEX1: where it comes from, and the Index's warning when a takedown names this version.
+        facts.Add((InstallModsCopy.FactSource, entry.FromIndex ? InstallModsCopy.SourceIndex
+            : IsLocalListing(entry) ? LocalTestSource.Words : InstallModsCopy.SourceThunderstore));
+        if (entry.Pin?.Revocation is { Mode: IndexRevocationMode.Warning } warned)
+            facts.Add((InstallModsCopy.FactIndexWarning, IndexCatalog.RevocationText(warned)));
+        if (IndexCatalog.ProgenitorTooOld(entry, out string needs))
+            facts.Add((InstallModsCopy.FactNeedsProgenitor, needs));
         string identity = IdentityFact(entry);
         if (identity.Length > 0) facts.Add((InstallModsCopy.FactPlugin, identity));
         facts.Add((InstallModsCopy.FactUpdateTag, UpdateTagText(entry)));
@@ -11715,8 +11755,21 @@ internal sealed class InstallIndexRefresher
         }
     }
 
+    /// <summary>
+    /// INDEX1: run before each refresh's own check (the Progenitor Index's check in the client), so the list handed to the
+    /// catalog is merged with it. A failure or a throw never stops the refresh.
+    /// </summary>
+    public Func<CancellationToken, bool, Task>? BeforeLoad { get; set; }
+
     private async Task<CatalogLoadResult> RefreshCoreAsync(CancellationToken cancellationToken, bool force)
     {
+        if (BeforeLoad is { } before)
+        {
+            try { await before(cancellationToken, force).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return new CatalogLoadResult(false, InstallReasons.FetchCancelled, 0, null); }
+            catch { /* the Index keeps its last good list */ }
+        }
+
         CatalogTextFetchResult fetched;
         try
         {

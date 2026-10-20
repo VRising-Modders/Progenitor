@@ -25,7 +25,8 @@ internal static class InstallPlanner
         OrdinaryDependencyView? ordinaryView = null,
         bool thisProcessIsServer = false,
         AdmissionResult? serverAdmission = null,
-        bool localServerHot = false)
+        bool localServerHot = false,
+        bool hotSourceAllowed = true)
     {
         if (entry == null) throw new ArgumentNullException(nameof(entry));
         if (inspection == null) throw new ArgumentNullException(nameof(inspection));
@@ -135,6 +136,11 @@ internal static class InstallPlanner
                 : InstallReasons.MissingMetadataNoHotLoad;
             return Restart(entry, inspection, target, artifacts, dependencies, reason, pluginId, fileName);
         }
+
+        // INDEX1 (decided 2026-10-20): only an install from the Progenitor Index may hot load. A Thunderstore listing that
+        // declares hotLoadable installs for the next start, whatever admission would say.
+        if (!hotSourceAllowed)
+            return Restart(entry, inspection, target, artifacts, dependencies, InstallReasons.HotLoadIndexOnly, pluginId, fileName);
 
         if (admission != null)
         {

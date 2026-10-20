@@ -193,6 +193,8 @@ internal static class RemoteInstallEvents
             thisProcessIsServer: true);
         // Planning runs on a worker: it reads the copy the main thread last took.
         catalog.LoadedPluginGuids = _ => _loadedCache;
+        // INDEX1: the server installs and updates from the Progenitor Index too (null in tests).
+        catalog.IndexSource = ProgenitorIndexSource.ForRoot(root);
         return catalog;
     }
 
