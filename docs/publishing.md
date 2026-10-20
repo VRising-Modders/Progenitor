@@ -6,7 +6,9 @@ Mods built on Progenitor are published on the [Progenitor Index](https://github.
 
 This page covers the package and Progenitor's own rules. The Index's entry format, checks and review are in its [README](https://github.com/VRising-Modders/ProgenitorIndex#readme) and [CONTRIBUTING.md](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md); this page does not repeat them. Where something is a hard requirement (the Index's or Progenitor's), this page says so; the rest are suggestions from the people who maintain the framework.
 
-**Status.** The package rules below are **source-checked** against Progenitor's package inspection and install planner. The checker, `tools/publish-check.ps1`, is **game-free tested** (`tests/Progenitor.Tests/PublishCheckTests.cs`). No package built from this page has been listed on the Index or installed from it in a test.
+**Status.** Install Mods and join screens read the Progenitor Index from the release that adds Index support; until then only Thunderstore.
+
+The package rules below are **source-checked** against Progenitor's package inspection and install planner. The checker, `tools/publish-check.ps1`, is **game-free tested** (`tests/Progenitor.Tests/PublishCheckTests.cs`). No package built from this page has been listed on the Index or installed from it in a test.
 
 **Contents**
 
@@ -96,6 +98,7 @@ powershell -File tools/publish-check.ps1 -Dll MyMod\bin\Release\net6.0\MyMod.dll
   "side": "client",
   "hotLoadable": true,
   "sha256": "9532f6ae3071fd12bac81a5964be7585a41e3f7ed3df00993e40f1725d6f24e3",
+  "progenitor": ">=2026.10.162",
   "compatibility": { "peers": ">=1.0.0 <2.0.0" }
 }
 ```
@@ -107,6 +110,7 @@ powershell -File tools/publish-check.ps1 -Dll MyMod\bin\Release\net6.0\MyMod.dll
 | `side` | `[ProgenitorSide]` (`both` when absent) | `client`, `server` or `both`. Decides where the Install tab offers it. |
 | `hotLoadable` | Your choice (`-HotLoadable`) | True when the mod obeys the [unload rules](modules.md#ownership-and-pin-constraints) and can load without a restart. Install Mods hot loads a mod only when this is true. The generator applies the Install tab's own image rule and refuses it unless the DLL has exactly one plugin deriving from `ProgenitorPlugin`, resolvable references, and no `ctx.UnsafeHarmony`, HarmonyLib, IL2CPP type registration, P/Invoke or function-pointer calls, or reflection escapes (`Activator`, `Type.GetType`, `MakeGenericType`, `MakeGenericMethod`, `Assembly.Load*`, `System.Reflection.Emit`). |
 | `sha256` | The DLL bytes | A rebuilt DLL needs a regenerated file. |
+| `progenitor` | The Progenitor Core version the DLL was compiled against | The Progenitor releases the mod needs, as a range: `>=` that version. The Progenitor Index reads it; it replaces a manifest dependency on Progenitor ([versions](#6-versions-and-compatibility)). |
 | `compatibility.peers` | `[NetworkCompatibility(Peers = …)]` | Only when declared. Progenitor refuses a package whose two values disagree. |
 
 The Index accepts this file as it is: it allows fields it does not read ([its `progenitor.json` rules](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md#progenitorjson-optional)).
@@ -120,7 +124,7 @@ The Index accepts this file as it is: it allows fields it does not read ([its `p
 ```
 
 - **BepInExPack.** Required. Use the pack version you test with.
-- **Progenitor: do not list it.** Progenitor is not a package on Thunderstore or on the Index; players install it from its GitHub releases, and your README tells them how ([requirement block](#readme-requirement-block)). `publish-check` fails a manifest that depends on any `*-Progenitor-*` package.
+- **Progenitor: do not list it.** Progenitor is not a package on Thunderstore or on the Index; players install it from its GitHub releases, and your README tells them how ([requirement block](#readme-requirement-block)). `publish-check` fails a manifest that depends on any `*-Progenitor-*` or `*-Progenitor_VRising-*` package, in any case. The Progenitor release the mod needs goes in `progenitor.json`'s `progenitor` range instead.
 - **Other mods** use the `Owner-Name-Version` form. The Index resolves each one from its own entries first, then from Thunderstore ([Dependencies](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md#dependencies)).
 - **In the plugin**, declare the Progenitor dependency so BepInEx and Progenitor order the load:
 
@@ -273,6 +277,7 @@ Checklist:
 ## 6. Versions and compatibility
 
 - **Semantic versions.** `major.minor.patch`, one string in `[BepInPlugin]`, `manifest.json` and `progenitor.json`. Follow the [compatibility contract](mod-compatibility.md#the-compatibility-contract): patch changes nothing on the wire, minor only adds, major removes or changes.
+- **Minimum Progenitor version.** `progenitor.json`'s `progenitor` range says which Progenitor releases the mod needs; the generator writes `>=` the Core version the DLL was compiled against. Building against the oldest Progenitor release that provides every API you call keeps the range wide: a newer one forces every player to update Progenitor before they can install your mod. Progenitor versions are dates (`2026.10.162`), see [versioning.md](versioning.md). `publish-check` warns when the range is missing or its lower bound differs from the compiled Core.
 - **Declare `Peers`** in `[NetworkCompatibility]` when the mod talks to itself across the network (client and server parts, `ctx.Messages`) and you know which other versions it works with: `Peers = ">=1.2.0 <2.0.0"`. Without it, the attribute's `NetworkVersionRule` decides (`Exact`: that version only; `None`: any version); with no rule declared either, the default is the same minor version. The generator copies `Peers` into `progenitor.json`.
 - **Keep message fixtures.** At each release record what the mod sends and check the fixtures in; the next release's tests replay them with `Progenitor.Testing` and `MessageCompat.CheckRange`. Step by step: [tutorial 6c](tutorial.md#6c-make-your-mod-work-across-versions); reference: [modules.md](modules.md#testing-your-mod-across-versions-mod-compatibility-c5).
 
@@ -295,8 +300,9 @@ It builds `tools/publishcheck` (a .NET 8 tool; no game install needed) and print
 | `manifest.bom` | `manifest.json` has a BOM | |
 | `manifest.fields`, `.name`, `.version`, `.website` | A required field is missing; the name has other than letters, digits and `_`; the version is not three numbers; `website_url` is not http(s) | The name is not PascalCase; `website_url` is empty |
 | `manifest.description`, `.side` | Over 250 characters; no side prefix, or one that contradicts the mod's side | No "Requires Progenitor." (`manifest.message`); "official", "verified" or "approved" (`manifest.wording`) |
-| `deps.bepinex`, `deps.format` | No BepInExPack dependency; a dependency not in `Owner-Package-1.2.3` form | |
-| `deps.progenitor` | The manifest depends on a `*-Progenitor-*` package (Progenitor is not a package; players install it from GitHub) | |
+| `deps.bepinex`, `deps.format` | No BepInExPack dependency; a dependency not in `Owner-Package-1.2.3` form (the Index's rule: the owner may contain hyphens, such as `VRising-Modders`; the package name is the last part before the version) | |
+| `deps.progenitor` | The manifest depends on a `Progenitor` or `Progenitor_VRising` package, in any case (Progenitor is not a package; players install it from GitHub) | |
+| `pj.progenitor` | The `progenitor` range is not a string, or not a range the Index accepts | No range; its `>=` lower bound is older or newer than the Core the DLL was compiled against |
 | `icon` | Not a 256×256 PNG | |
 | `readme.requirement`, `readme.wording` | A mod that needs Progenitor has no "Requires Progenitor" block; a mod that soft-depends on it has no "Works better with Progenitor" block | No block at all for a mod with no Progenitor dependency; endorsement words next to Progenitor |
 | `pj.*` | `progenitor.json` is missing (unless the dependency is soft) or not at the root; a field is missing; `id` is not the plugin's GUID or is not a GUID Progenitor can install (letters, digits, `.`, `_`, `-`); `version`, `side` or `compatibility.peers` disagrees with the DLL or the manifest; `compatibility` is not an object or `peers` not a string; `sha256` matches no DLL; `hotLoadable` is true for an image the Install tab would not load hot (the same rule, shared code) | `progenitor.json` has a BOM; `sha256` is another DLL's, not the plugin's |
@@ -317,7 +323,13 @@ Run it from a Progenitor checkout; it is not yet shipped with Progenitor's relea
 2. **Run `tools/publish-check.ps1`** until nothing fails.
 3. **Test the real install.** Serve the zip from a local index (`[Install] LocalIndexPath`, see `tools/make-dummy-package.ps1`), install it from **Install Mods**, and join a test server with it.
 4. **Create a GitHub release** in the mod's repository, from the commit you built, with the zip attached. Write its notes from `CHANGELOG.md`.
-5. **Add the Index entry.** Fork [ProgenitorIndex](https://github.com/VRising-Modders/ProgenitorIndex), add `entries/<YourAccount>/<Name>/<version>.json` pointing at the release asset, generate its meta with `node tools/validate.mjs --write-meta <entry>`, and open a pull request. The entry format, the walkthrough and what reviewers ask about are in its [CONTRIBUTING.md](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md).
+5. **Add the Index entry.** Fork [ProgenitorIndex](https://github.com/VRising-Modders/ProgenitorIndex) and add `entries/<YourAccount>/<Name>/<version>.json` pointing at the release asset. In your fork, generate its meta (and lock any new Thunderstore dependency):
+
+   ```
+   node tools/validate.mjs --update-lock --write-meta entries/<YourAccount>/<Name>/<version>.json
+   ```
+
+   Then open a pull request. The entry format, the walkthrough and what reviewers ask about are in its [CONTRIBUTING.md](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md).
 6. **Credit forks.** If the mod is a fork or contains others' work, credit them in the README as their licenses require.
 
 Release discipline:
@@ -336,4 +348,4 @@ Progenitor is licensed LGPL-2.1-only. A mod that only references Progenitor, wit
 Thunderstore doesn't list mod managers, and managing mods (installing, updating, hot loading, and joining servers with the right mods) is a core part of Progenitor. So Progenitor ships from its GitHub releases, the mods built on it are listed in the [Progenitor Index](https://github.com/VRising-Modders/ProgenitorIndex), and players install them from the Mods menu. Thunderstore is still the place for BepInEx and for mods that don't use Progenitor.
 
 **I want my mod on Thunderstore.**
-Progenitor is licensed under the [LGPL 2.1](../LICENSE) (`LGPL-2.1-only`), so you can use or adapt the parts you need in your own mod and publish it on Thunderstore without Progenitor as a dependency. Code you take from Progenitor stays under the LGPL: keep its notices and share your changes to it. Your mod won't get Progenitor's features, such as hot load and the Mods menu. This is not legal advice.
+Progenitor is licensed under the [LGPL 2.1](../LICENSE) (`LGPL-2.1-only`), so you can use or adapt the parts you need in your own mod and publish it on Thunderstore without Progenitor as a dependency. If your mod includes code copied or adapted from Progenitor, release that mod under the LGPL-2.1, with its source, the license text and Progenitor's copyright notices. Alternatively, keep the adapted code in its own LGPL DLL that your mod references; your mod can then keep its own license. Your mod won't get Progenitor's features, such as hot load and the Mods menu. This is not legal advice.

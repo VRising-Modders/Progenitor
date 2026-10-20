@@ -43,7 +43,9 @@ internal static class PublishChecker
     public const int MaxDescriptionChars = 250;
     public const string BepInExPackPrefix = "BepInEx-BepInExPack_V_Rising-";
 
-    public const string ProgenitorPackageName = "Progenitor";
+    /// <summary>Package names that mean Progenitor itself, compared without case. Neither is a package anywhere a mod can
+    /// depend on: Progenitor ships from its GitHub releases.</summary>
+    public static readonly IReadOnlyList<string> ProgenitorPackageNames = new[] { "Progenitor", "Progenitor_VRising" };
     public const string ProgenitorPluginGuid = "progenitor";
 
     /// <summary>The side words a description starts with, by <c>progenitor.json</c> side.</summary>
@@ -60,7 +62,20 @@ internal static class PublishChecker
     private static readonly Regex NameRule = new("^[A-Za-z0-9_]+$", RegexOptions.CultureInvariant);
     private static readonly Regex PascalRule = new("^[A-Z][A-Za-z0-9]*$", RegexOptions.CultureInvariant);
     private static readonly Regex VersionRule = new(@"^\d+\.\d+\.\d+$", RegexOptions.CultureInvariant);
-    private static readonly Regex DependencyRule = new(@"^([A-Za-z0-9_]+)-([A-Za-z0-9_]+)-(\d+\.\d+\.\d+)$", RegexOptions.CultureInvariant);
+    /// <summary>The Progenitor Index's dependency rule (tools/lib/package.mjs DEP_RE): the owner may hold hyphens (a GitHub
+    /// account such as VRising-Modders); the name is the last segment before the version.</summary>
+    private static readonly Regex DependencyRule = new(@"^([A-Za-z0-9][A-Za-z0-9_-]*)-([A-Za-z0-9_]+)-(\d+\.\d+\.\d+)$", RegexOptions.CultureInvariant);
+
+    /// <summary>The Progenitor Index's rule for <c>progenitor.json</c>'s <c>progenitor</c> range (schema/progenitor.schema.json).</summary>
+    private static readonly Regex IndexRangeRule = new(
+        @"^\s*(\*|(?:(?:>=|<=|>|<|=|\^|~)?\s*\d+(?:\.\d+){0,3})(?:\s*,?\s*(?:>=|<=|>|<|=|\^|~)?\s*\d+(?:\.\d+){0,3})*)\s*$",
+        RegexOptions.CultureInvariant);
+
+    private static readonly Regex MinimumRangeRule = new(@"^\s*>=\s*(\d+(?:\.\d+){0,3})\s*$", RegexOptions.CultureInvariant);
+
+    /// <summary>The <c>progenitor</c> range for an image compiled against Core <paramref name="compiled"/>: that release or newer.</summary>
+    public static string? MinimumProgenitorRange(Version? compiled) =>
+        compiled == null ? null : ">=" + compiled.Major + "." + compiled.Minor + "." + Math.Max(compiled.Build, 0);
     private static readonly Regex AvoidWords = new(@"\b(official|verified|approved)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     private static readonly string[] FrameworkFiles = { "Progenitor.dll", "Progenitor.Bootstrap.dll", "Progenitor.Preloader.dll" };
@@ -316,6 +331,12 @@ internal static class PublishChecker
 
         /// <summary><c>compatibility</c> or <c>compatibility.peers</c> has the wrong JSON type; already reported.</summary>
         public bool PeersInvalid { get; init; }
+
+        /// <summary>The <c>progenitor</c> range the Progenitor Index reads; null when absent.</summary>
+        public string? Progenitor { get; init; }
+
+        /// <summary><c>progenitor</c> is not a string; already reported.</summary>
+        public bool ProgenitorInvalid { get; init; }
     }
 
     private static ProgenitorJsonFacts? ReadProgenitorJson(IReadOnlyDictionary<string, byte[]> files, PublishReport report)
@@ -370,6 +391,18 @@ internal static class PublishChecker
                 }
             }
 
+            string? range = null;
+            bool rangeInvalid = false;
+            if (root.TryGetProperty("progenitor", out var r) && r.ValueKind != JsonValueKind.Null)
+            {
+                if (r.ValueKind == JsonValueKind.String) range = (r.GetString() ?? "").Trim();
+                else
+                {
+                    rangeInvalid = true;
+                    report.Fail("pj.progenitor", "progenitor.json progenitor is " + r.ValueKind.ToString().ToLowerInvariant() + ", not a version range string.");
+                }
+            }
+
             var facts = new ProgenitorJsonFacts
             {
                 Id = Str(root, "id"),
@@ -379,6 +412,8 @@ internal static class PublishChecker
                 HotLoadable = hot,
                 Peers = peers,
                 PeersInvalid = peersInvalid,
+                Progenitor = range,
+                ProgenitorInvalid = rangeInvalid,
             };
 
             var missing = new List<string>();
@@ -446,6 +481,8 @@ internal static class PublishChecker
                 : "compatibility.peers matches the DLL: " + pj.Peers + ".");
         }
 
+        CheckProgenitorRange(pj, images.FirstOrDefault(i => ReferenceEquals(i.Bytes, dll)).Facts?.ProgenitorReference, report);
+
         // The Install tab's own image rule (HotImageCheck, shared with HotLoadTrust), so the two always agree.
         if (pj.HotLoadable == true)
         {
@@ -456,6 +493,49 @@ internal static class PublishChecker
         }
         else if (pj.HotLoadable == false) report.Pass("pj.hotloadable", "hotLoadable is false: every install waits for a game restart.");
     }
+
+    /// <summary>
+    /// <c>progenitor</c> tells the Progenitor Index which Progenitor releases the mod needs; it replaces a manifest
+    /// dependency on a Progenitor package. The generator writes it from the Core version the DLL was compiled against.
+    /// </summary>
+    private static void CheckProgenitorRange(ProgenitorJsonFacts pj, Version? compiled, PublishReport report)
+    {
+        if (pj.ProgenitorInvalid) return;
+        string? expected = MinimumProgenitorRange(compiled);
+        if (string.IsNullOrEmpty(pj.Progenitor))
+        {
+            if (expected != null)
+                report.Warn("pj.progenitor", "progenitor.json has no progenitor range, so the Index allows any Progenitor version. Regenerate it with "
+                    + "tools/publish-check.ps1 -WriteProgenitorJson; for this DLL it writes \"" + expected + "\".");
+            return;
+        }
+
+        if (!IndexRangeRule.IsMatch(pj.Progenitor))
+        {
+            report.Fail("pj.progenitor", "progenitor '" + pj.Progenitor + "' is not a version range the Progenitor Index accepts (for example \">=2026.10.162\").");
+            return;
+        }
+
+        var min = MinimumRangeRule.Match(pj.Progenitor);
+        if (compiled == null || !min.Success || !Version.TryParse(Pad(min.Groups[1].Value), out var declared))
+        {
+            report.Pass("pj.progenitor", "progenitor range '" + pj.Progenitor + "'.");
+            return;
+        }
+
+        var core = new Version(compiled.Major, compiled.Minor, Math.Max(compiled.Build, 0));
+        declared = new Version(declared.Major, declared.Minor, Math.Max(declared.Build, 0));
+        if (declared > core)
+            report.Warn("pj.progenitor", "progenitor is " + pj.Progenitor + " but the DLL was compiled against Progenitor Core " + core
+                + ". Ask for the oldest release that provides the APIs you use; a release whose Core did not change keeps the older Core version.");
+        else if (declared < core)
+            report.Warn("pj.progenitor", "progenitor is " + pj.Progenitor + " but the DLL was compiled against Progenitor Core " + core
+                + ". Make sure every Progenitor API you call exists in " + declared + ", or raise the range.");
+        else
+            report.Pass("pj.progenitor", "progenitor " + pj.Progenitor + " matches the Core the DLL was compiled against.");
+    }
+
+    private static string Pad(string v) => v.Contains('.') ? v : v + ".0";
 
     private static void CheckDescription(string description, string? side, bool requiresProgenitor, PublishReport report)
     {
@@ -486,7 +566,7 @@ internal static class PublishChecker
             foreach (var x in d.EnumerateArray()) if (x.ValueKind == JsonValueKind.String) deps.Add(x.GetString() ?? "");
 
         var bad = deps.Where(x => !DependencyRule.IsMatch(x)).ToList();
-        if (bad.Count > 0) report.Fail("deps.format", "Dependencies must read Owner-Package-1.2.3: " + string.Join(", ", bad) + ".");
+        if (bad.Count > 0) report.Fail("deps.format", "Dependencies must read Owner-Package-1.2.3 (the owner may contain hyphens): " + string.Join(", ", bad) + ".");
 
         if (deps.Any(x => x.StartsWith(BepInExPackPrefix, StringComparison.Ordinal)))
             report.Pass("deps.bepinex", "Depends on BepInExPack_V_Rising.");
@@ -494,11 +574,14 @@ internal static class PublishChecker
             report.Fail("deps.bepinex", "dependencies has no " + BepInExPackPrefix + "<version>.");
 
         // Progenitor is not a package on Thunderstore or the Progenitor Index: players install it from its GitHub releases,
-        // and the README's requirement block says how. A dependency on any *-Progenitor-* package can never resolve.
-        var prog = deps.Where(x => DependencyRule.Match(x) is { Success: true } m && m.Groups[2].Value == ProgenitorPackageName).ToList();
+        // and the README's requirement block says how. A dependency on any *-Progenitor-* package can never resolve; the
+        // minimum Progenitor release goes in progenitor.json's progenitor range instead.
+        var prog = deps.Where(x => DependencyRule.Match(x) is { Success: true } m
+            && ProgenitorPackageNames.Any(n => string.Equals(m.Groups[2].Value, n, StringComparison.OrdinalIgnoreCase))).ToList();
         if (prog.Count > 0)
             report.Fail("deps.progenitor", "Remove " + string.Join(", ", prog) + " from dependencies: Progenitor is not a package on Thunderstore "
-                + "or the Progenitor Index. Players install it from its GitHub releases; the README's requirement block tells them how.");
+                + "or the Progenitor Index. Players install it from its GitHub releases; the README's requirement block tells them how, "
+                + "and progenitor.json's progenitor range says which release the mod needs.");
         else if (requiresProgenitor)
             report.Pass("deps.progenitor", "No Progenitor package dependency; the README tells players to install Progenitor from GitHub.");
     }

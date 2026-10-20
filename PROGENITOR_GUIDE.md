@@ -160,7 +160,7 @@ The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a
 ### Publishing
 
 - Description: `<Side> · Requires Progenitor. <pitch>`; README starts with the requirement block ([publishing §3](docs/publishing.md#3-the-standard-progenitor-message)).
-- Depend on the oldest Progenitor release that has your APIs.
+- The Progenitor releases the mod needs go in `progenitor.json`'s `progenitor` range (`>=` the Core you compiled against; the generator writes it), not in `manifest.json`. Build against the oldest Progenitor release that has your APIs ([publishing §6](docs/publishing.md#6-versions-and-compatibility)).
 - Generate `progenitor.json` from the built DLL; run `tools/publish-check.ps1` until nothing fails.
 - Publish on the [Progenitor Index](https://github.com/VRising-Modders/ProgenitorIndex): a GitHub release with the zip, then a pull request adding the entry. Not on Thunderstore, and no Progenitor package in `dependencies` ([publishing §8](docs/publishing.md#8-publish-a-github-release-and-an-index-entry)).
 - Required mods (never Progenitor itself) go in `manifest.json` dependencies. Recommended mods go in the README and the server join list's `recommended` rows ([join flow](docs/join-flow.md#recommended-rows-the-panel-and-the-overlay)).

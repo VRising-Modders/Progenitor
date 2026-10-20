@@ -291,6 +291,18 @@ function Get-DeclaredPeers([string] $path) {
     return ''
 }
 
+# The Progenitor (Core) assembly version the image references, read from metadata only; $null when it does not
+# reference Core or this PowerShell cannot read references without loading (reflection-only load is Windows PowerShell's).
+function Get-ProgenitorReference([string] $path) {
+    try {
+        $asm = [Reflection.Assembly]::ReflectionOnlyLoadFrom($path)
+        $ref = @($asm.GetReferencedAssemblies() | Where-Object { $_.Name -eq 'Progenitor' })
+        if ($ref.Count -gt 0) { return $ref[0].Version }
+    }
+    catch { Write-Host "progenitor range not written: $($_.Exception.Message)" }
+    return $null
+}
+
 function Get-FileUrl([string] $path) {
     return ([Uri] (Resolve-Path -LiteralPath $path).Path).AbsoluteUri
 }
@@ -559,6 +571,12 @@ try {
     if ($peers) {
         $progenitorFields['compatibility'] = [ordered] @{ peers = $peers }
         Write-Host "compatibility.peers: $peers (from the image's [NetworkCompatibility])"
+    }
+    # The Progenitor Index's range: this Core release or newer (what publish-check -WriteProgenitorJson writes).
+    $coreRef = Get-ProgenitorReference $image.FullName
+    if ($coreRef) {
+        $progenitorFields['progenitor'] = ">=$($coreRef.Major).$($coreRef.Minor).$([Math]::Max($coreRef.Build, 0))"
+        Write-Host "progenitor: $($progenitorFields['progenitor']) (the Core the image was compiled against)"
     }
     if ($PublishFlaws) {
         # Wrong on purpose: another file's hash and a side the image does not declare.

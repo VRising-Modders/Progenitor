@@ -310,7 +310,7 @@
         <dt>Runtime</dt><dd>BepInEx 6 IL2CPP on CoreCLR (.NET 6). Il2CppInterop generates the proxy assemblies. Unmanaged ECS systems and Burst jobs are native code and cannot be patched with Harmony.</dd>
         <dt>Topology</dt><dd>Server-authoritative. Gameplay runs in the server process. Clients render and send input. Most modules are server-first; UI and assets are client-only. There are three ways the server process comes to exist, and Progenitor treats them identically: a headless dedicated server, a private game where the client launches the bundled server as a child process, and single player, which is the same child process with one player.</dd>
         <dt>Licensing</dt><dd>Progenitor is licensed under the GNU Lesser General Public License, version 2.1, and is entirely original code. Existing libraries, MIT or GPL, are read for their mechanisms and mistakes and never copied. This keeps the license clean by construction and avoids inheriting anyone's shortcuts.</dd>
-        <dt>Distribution</dt><dd>Thunderstore under ExampleTeam, plus NuGet for the build-time reference. Other mod sites optional.</dd>
+        <dt>Distribution</dt><dd>Progenitor from its GitHub releases; mods built on it from their authors' GitHub releases, listed on the <a href="https://github.com/VRising-Modders/ProgenitorIndex">Progenitor Index</a> and installed from the Mods menu. Thunderstore does not host either. A NuGet package for the build-time reference is planned.</dd>
         <dt>Hot reload rules</dt><dd>A reloadable plugin keeps all state in its Progenitor-owned context, never in statics. It does not inject IL2CPP types (custom MonoBehaviours). It registers every hook, system, and subscription through Progenitor so unload can reverse them.</dd>
       </dl>
     </section>
@@ -632,7 +632,7 @@ unit.Behaviour.Play(...);</code></pre>
         <li><strong>Saves stay portable.</strong> Mod persistence is keyed to the save it belongs to, wherever that save lives. A hosted world moved to a dedicated server brings its mod data with it.</li>
         <li><strong>Host is admin.</strong> Design: the hosting player is treated as admin for Progenitor commands by default. Not yet a separate hosted policy — <code>ICommandContext.IsAdmin</code> is the game's <code>User</code> admin flag.</li>
         <li><strong>Friends joining.</strong> Someone joining a hosted game gets the same handshake as on a dedicated server: a clear message naming the mod and version they are missing, or a clean connection.</li>
-        <li><strong>Packaging.</strong> One Thunderstore package tagged both Client and Server, one manifest dependency. The mod manager handles the rest.</li>
+        <li><strong>Packaging.</strong> One package for client and server, listed once on the Progenitor Index; its <code>progenitor.json</code> declares the side and the Progenitor range. Install Mods handles the rest.</li>
       </ul>
 
       <h3>Why this also matters for development</h3>

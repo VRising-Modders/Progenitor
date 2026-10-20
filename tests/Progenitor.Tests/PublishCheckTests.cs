@@ -43,7 +43,7 @@ public class PublishCheckTests
         {
             "manifest.bom", "manifest.fields", "manifest.name", "manifest.version", "manifest.website", "manifest.description",
             "manifest.side", "deps.bepinex", "deps.progenitor", "icon", "readme.requirement", "pj.present", "pj.fields", "pj.id",
-            "pj.version", "pj.side", "pj.sha256", "pj.peers", "pj.hotloadable", "dll.layout", "dll.bepindependency", "dll.keys",
+            "pj.version", "pj.side", "pj.sha256", "pj.peers", "pj.progenitor", "pj.hotloadable", "dll.layout", "dll.bepindependency", "dll.keys",
             "dll.config", "files.dev",
         })
             Assert.Equal(CheckStatus.Pass, StatusOf(report, id));
@@ -84,7 +84,7 @@ public class PublishCheckTests
 
         using var generated = JsonDocument.Parse(text!);
         using var shipped = JsonDocument.Parse(files["progenitor.json"]);
-        foreach (var key in new[] { "id", "version", "side", "sha256" })
+        foreach (var key in new[] { "id", "version", "side", "sha256", "progenitor" })
             Assert.Equal(shipped.RootElement.GetProperty(key).GetString(), generated.RootElement.GetProperty(key).GetString());
         Assert.True(generated.RootElement.GetProperty("hotLoadable").GetBoolean());
 
@@ -216,9 +216,69 @@ public class PublishCheckTests
     [Theory]
     [InlineData("VRising_Modders-Progenitor-2026.10.1")]
     [InlineData("SomeoneElse-Progenitor-2026.10.1")]
+    [InlineData("VRising-Modders-Progenitor-2026.10.1")]
+    [InlineData("someone-progenitor-2026.10.1")]
+    [InlineData("SomeTeam-Progenitor_VRising-1.0.0")]
     public void A_dependency_on_a_Progenitor_package_fails(string dependency) =>
         Assert.Equal(CheckStatus.Fail, StatusOf(Mutated(f => EditManifest(f, "dependencies",
             new[] { "BepInEx-BepInExPack_V_Rising-1.733.2", dependency })), "deps.progenitor"));
+
+    [Fact]
+    public void A_mod_whose_name_only_starts_with_Progenitor_is_an_ordinary_dependency()
+    {
+        var report = Mutated(f => EditManifest(f, "dependencies",
+            new[] { "BepInEx-BepInExPack_V_Rising-1.733.2", "SomeTeam-ProgenitorTools-1.0.0" }));
+        Assert.Equal(CheckStatus.Pass, StatusOf(report, "deps.progenitor"));
+        Assert.Null(report.Find("deps.format"));
+    }
+
+    /// <summary>The Progenitor Index's owner rule: a GitHub account such as VRising-Modders holds hyphens; the package name
+    /// is the last segment before the version.</summary>
+    [Theory]
+    [InlineData("VRising-Modders-Autoloot-1.0.0")]
+    [InlineData("a-b-c-Mod_Name-2.3.4")]
+    [InlineData("Team_1-Mod-0.0.1")]
+    public void Owners_with_hyphens_are_valid_dependencies(string dependency) =>
+        Assert.Null(Mutated(f => EditManifest(f, "dependencies",
+            new[] { "BepInEx-BepInExPack_V_Rising-1.733.2", dependency })).Find("deps.format"));
+
+    [Theory]
+    [InlineData("-Leading-1.0.0")]
+    [InlineData("Team-Mod-Name-1.0")]
+    [InlineData("Team-Mod-Na.me-1.0.0")]
+    [InlineData("NoOwner-1.0.0")]
+    public void Malformed_dependencies_fail(string dependency) =>
+        Assert.Equal(CheckStatus.Fail, StatusOf(Mutated(f => EditManifest(f, "dependencies",
+            new[] { "BepInEx-BepInExPack_V_Rising-1.733.2", dependency })), "deps.format"));
+
+    private static void EditProgenitorJson(Dictionary<string, byte[]> files, string key, System.Text.Json.Nodes.JsonNode? value)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(files["progenitor.json"])!.AsObject();
+        if (value == null) node.Remove(key);
+        else node[key] = value;
+        files["progenitor.json"] = Encoding.UTF8.GetBytes(node.ToJsonString());
+    }
+
+    [Fact]
+    public void A_missing_progenitor_range_warns_with_the_value_to_write()
+    {
+        var report = Mutated(f => EditProgenitorJson(f, "progenitor", null));
+        Assert.Equal(CheckStatus.Warn, StatusOf(report, "pj.progenitor"));
+        Assert.Contains(">=2026.10.167", report.Find("pj.progenitor")!.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(">=2026.10", CheckStatus.Warn)]        // older than the Core it was compiled against (2026.10.167)
+    [InlineData(">=2027.1.1", CheckStatus.Warn)]       // newer
+    [InlineData(">=2026.10.167", CheckStatus.Pass)]
+    [InlineData(">=2026.10.0 <2027.0.0", CheckStatus.Pass)]
+    [InlineData("any version", CheckStatus.Fail)]
+    public void The_progenitor_range_is_checked_against_the_Index_rule_and_the_compiled_Core(string range, CheckStatus expected) =>
+        Assert.Equal(expected, StatusOf(Mutated(f => EditProgenitorJson(f, "progenitor", System.Text.Json.Nodes.JsonValue.Create(range))), "pj.progenitor"));
+
+    [Fact]
+    public void A_progenitor_range_that_is_not_a_string_fails() =>
+        Assert.Equal(CheckStatus.Fail, StatusOf(Mutated(f => EditProgenitorJson(f, "progenitor", System.Text.Json.Nodes.JsonValue.Create(2026))), "pj.progenitor"));
 
     [Fact]
     public void A_bundled_library_that_reads_keys_and_binds_config_directly_warns()
