@@ -42,13 +42,48 @@ internal sealed class IndexRevocationSource : IModProblemSource
         catch { return null; }
     }
 
+    /// <summary>What a Disable takedown can do to an installed plugin now (M5).</summary>
+    internal enum TakedownLoadState
+    {
+        /// <summary>A Progenitor plugin the load gate skipped: it is not running.</summary>
+        NotLoaded = 0,
+
+        /// <summary>A Progenitor plugin running now (the takedown arrived after it loaded): it stops at the next start.</summary>
+        Running = 1,
+
+        /// <summary>An ordinary BepInEx plugin: the gate cannot stop it.</summary>
+        Plain = 2,
+    }
+
+    /// <summary>Tests: the plugin's state (null: this Core generation's mod registry).</summary>
+    internal static Func<string, TakedownLoadState>? StateProbe { get; set; }
+
+    private static TakedownLoadState StateOf(string pluginId)
+    {
+        try
+        {
+            if (StateProbe != null) return StateProbe(pluginId);
+            if (!Progenitor.Plugins.ModRegistry.TryGet(pluginId, out var e)) return TakedownLoadState.Plain;
+            return e.Running ? TakedownLoadState.Running : TakedownLoadState.NotLoaded;
+        }
+        catch { return TakedownLoadState.NotLoaded; }
+    }
+
+    /// <summary>The sentence a Disable takedown adds, per case.</summary>
+    internal static string DisableWords(TakedownLoadState state) => state switch
+    {
+        TakedownLoadState.Running => "It stops loading at the next start; nothing is deleted, and it loads again if the takedown is lifted.",
+        TakedownLoadState.Plain => "It is a plain BepInEx plugin, which Progenitor cannot stop from loading.",
+        _ => "Progenitor does not load it. Nothing was deleted: it loads again if the takedown is lifted.",
+    };
+
     /// <summary>The pure rule behind <see cref="DisableReason"/>.</summary>
     internal static string? DisableReasonFor(IndexDocument doc, IEnumerable<Installed> installed, string pluginId)
     {
         foreach (var i in installed)
         {
             if (!string.Equals(i.PluginId, pluginId, StringComparison.OrdinalIgnoreCase)) continue;
-            var r = IndexCatalog.RevocationForInstalled(doc, i.Package, i.Version);
+            var r = IndexCatalog.RevocationForInstalled(doc, i.Package, i.Version, i.FromIndex);
             if (r is { Mode: IndexRevocationMode.Disable })
                 return "taken down from the Progenitor Index" + (r.Reason.Length > 0 ? " (" + r.Reason.TrimEnd('.') + ")" : "");
         }
@@ -86,7 +121,7 @@ internal sealed class IndexRevocationSource : IModProblemSource
         foreach (var i in installed)
         {
             if (i.PluginId.Length == 0 || !seen.Add(i.PluginId)) continue;
-            var r = IndexCatalog.RevocationForInstalled(doc, i.Package, i.Version);
+            var r = IndexCatalog.RevocationForInstalled(doc, i.Package, i.Version, i.FromIndex);
             if (r == null || r.Mode is not (IndexRevocationMode.Warning or IndexRevocationMode.Disable))
             {
                 // Updates stay with their source: a Thunderstore install the Index now lists is moved by hand.
@@ -110,7 +145,7 @@ internal sealed class IndexRevocationSource : IModProblemSource
                 i.PluginId,
                 (down ? "The Progenitor Index took this version down" : "The Progenitor Index warns about this version") + why
                     + (why.EndsWith(".", StringComparison.Ordinal) ? "" : ".")
-                    + (down ? " Progenitor does not load it. Nothing was deleted: it loads again if the takedown is lifted." : ""),
+                    + (down ? " " + DisableWords(StateOf(i.PluginId)) : ""),
                 down ? "Uninstall it." : "Read the warning before you keep using it.",
                 details: i.Package + " " + i.Version + " (" + r.Date + ")",
                 key: i.Package + "@" + i.Version,

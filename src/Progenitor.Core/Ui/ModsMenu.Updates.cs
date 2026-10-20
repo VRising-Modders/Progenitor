@@ -86,6 +86,7 @@ public static partial class ModsMenu
         ClientUpdates.PromptProbe = () => UpdatesPromptSetting;
         ClientUpdates.MajorProbe = () => UpdatesMajorAutomatic;
         ClientUpdates.NsfwProbe = () => ShowNsfwContent;
+        ClientUpdates.ThunderstoreOffProbe = () => !ThunderstoreEnabled;
         ClientUpdates.EntriesProbe = () =>
         {
             var catalog = _catalog;

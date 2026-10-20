@@ -34,6 +34,7 @@ public sealed class ProgenitorIndexSourceRuleTests : IDisposable
         Progenitor.Plugins.ModEnableState.ResetForTests();
         IndexRevocationSource.IndexProbe = null;
         IndexRevocationSource.InstalledProbe = null;
+        IndexRevocationSource.StateProbe = null;
         try { Directory.Delete(Path.GetDirectoryName(_root)!, recursive: true); }
         catch { /* temp */ }
     }
@@ -51,6 +52,7 @@ public sealed class ProgenitorIndexSourceRuleTests : IDisposable
         IndexRevocationSource.InstalledProbe = () => installed;
         IndexRevocationSource.IndexProbe = () => doc;
         Progenitor.Plugins.ModEnableState.TakedownReason = IndexRevocationSource.DisableReason;
+        IndexRevocationSource.StateProbe = _ => IndexRevocationSource.TakedownLoadState.NotLoaded;
 
         // The load gate every Progenitor plugin passes, at a start and at a hot load.
         Assert.Equal("taken down from the Progenitor Index (Sends data away)", Progenitor.Plugins.ModEnableState.OffReason("a.mod", null));
@@ -81,6 +83,7 @@ public sealed class ProgenitorIndexSourceRuleTests : IDisposable
         IndexRevocationSource.InstalledProbe = () => new[] { new IndexRevocationSource.Installed("a.lib", "A-Lib", "1.0.0") };
         IndexRevocationSource.IndexProbe = () => IndexKit.Doc(Array.Empty<IndexPackage>(), new[] { Down("A", "Lib", "*") });
         Progenitor.Plugins.ModEnableState.TakedownReason = IndexRevocationSource.DisableReason;
+        IndexRevocationSource.StateProbe = _ => IndexRevocationSource.TakedownLoadState.NotLoaded;
         Assert.NotNull(Progenitor.Plugins.ModEnableState.OffReason("a.lib", null));
         // A dependant is skipped through the load order's own "skipped now" answer, as for a mod the player turned off.
         Assert.NotNull(Progenitor.Plugins.ModEnableState.OffReason("b.user", new[] { "a.lib" }, id => id == "a.lib"));

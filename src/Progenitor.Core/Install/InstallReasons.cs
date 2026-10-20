@@ -99,6 +99,13 @@ internal static class InstallReasons
     public const string HotLoadIndexOnly =
         "installed from Thunderstore, so it loads at the next start; only mods installed from the Progenitor Index load without a restart";
 
+    /// <summary>INDEX1 (M3): a member of an Index mod's dependencies that the Index pins nowhere.</summary>
+    public static string UnpinnedDependency(string package) =>
+        package + " is not pinned by the Progenitor Index, so this mod cannot be installed from it";
+
+    /// <summary>INDEX1 (L4): a Thunderstore install's update while [Mods] UseThunderstore is off.</summary>
+    public const string UpdateThunderstoreOff = "it was installed from Thunderstore, and Thunderstore is turned off";
+
     /// <summary>INDEX1: updates stay with their source.</summary>
     public const string UpdateIndexGone =
         "it was installed from the Progenitor Index, which no longer lists it; it is not updated from Thunderstore";

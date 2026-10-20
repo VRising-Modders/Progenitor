@@ -59,6 +59,17 @@ internal sealed class IndexRevocation
     public IndexRevocationMode Mode { get; init; }
     public string Date { get; init; } = "";
 
+    /// <summary>
+    /// Optional <c>source</c>: <c>thunderstore</c> names the Thunderstore package of that owner and name, <c>index</c> the
+    /// Index's own entry. Empty: the Index entry when the Index lists one under that owner and name, else Thunderstore's.
+    /// </summary>
+    public string Source { get; init; } = "";
+
+    /// <summary>Optional <c>repo</c>: the takedown covers an Index entry only when it is that repository's.</summary>
+    public string Repo { get; init; } = "";
+
+    public bool NamesThunderstore => string.Equals(Source, IndexPackage.SourceThunderstore, StringComparison.OrdinalIgnoreCase);
+
     public bool Covers(string? owner, string? name, string? version) =>
         string.Equals(Owner, owner ?? "", StringComparison.OrdinalIgnoreCase)
         && string.Equals(Name, name ?? "", StringComparison.OrdinalIgnoreCase)
@@ -148,20 +159,83 @@ internal sealed class IndexDocument
     public IReadOnlyList<IndexPackage> Packages { get; init; } = Array.Empty<IndexPackage>();
     public IReadOnlyList<IndexRevocation> Revoked { get; init; } = Array.Empty<IndexRevocation>();
 
-    /// <summary>The takedown that covers this version, or null.</summary>
-    public IndexRevocation? RevocationOf(string? owner, string? name, string? version)
+    /// <summary>sha256 of the list's text: a different list is a different hash (L5).</summary>
+    public string Sha256 { get; init; } = "";
+
+    /// <summary>
+    /// The entries Core uses: <c>imported: false</c> (decided 2026-10-20: imported Thunderstore entries exist for the Index's
+    /// own review and are not an install source; they are never listed, never shadow Thunderstore and never pin a file).
+    /// </summary>
+    public IEnumerable<IndexPackage> Native
+    {
+        get
+        {
+            foreach (var p in Packages)
+                if (!p.Imported) yield return p;
+        }
+    }
+
+    /// <summary>The native entry of this owner and name (any version), or null.</summary>
+    public IndexPackage? NativeFor(string? owner, string? name)
+    {
+        foreach (var p in Native)
+            if (string.Equals(p.Owner, owner ?? "", StringComparison.OrdinalIgnoreCase) && string.Equals(p.Name, name ?? "", StringComparison.OrdinalIgnoreCase))
+                return p;
+        return null;
+    }
+
+    /// <summary>The native entry of listing key <c>Owner-Name</c> (any version), or null.</summary>
+    public IndexPackage? NativeForKey(string? key)
+    {
+        foreach (var p in Native)
+            if (string.Equals(p.Key, (key ?? "").Trim(), StringComparison.OrdinalIgnoreCase)) return p;
+        return null;
+    }
+
+    /// <summary>The takedown that covers this version of the Index's own entry (<paramref name="repo"/>: the entry's), or null.</summary>
+    public IndexRevocation? RevocationOf(string? owner, string? name, string? version, string? repo = null)
     {
         IndexRevocation? worst = null;
         foreach (var r in Revoked)
-            if (r.Covers(owner, name, version) && (worst == null || r.Mode > worst.Mode)) worst = r;
+        {
+            if (!r.Covers(owner, name, version) || r.NamesThunderstore) continue;
+            if (r.Repo.Length > 0 && repo != null && !string.Equals(r.Repo.TrimEnd('/'), repo.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)) continue;
+            if (worst == null || r.Mode > worst.Mode) worst = r;
+        }
+
         return worst;
     }
 
-    /// <summary>The listed package with this exact id (<c>Owner-Name-Version</c>), or null.</summary>
+    /// <summary>
+    /// The takedown that covers this version of a Thunderstore package: one that names Thunderstore, or one without a source
+    /// whose owner and name the Index has no native entry for (it can only mean the Thunderstore package). A takedown of an
+    /// Index entry never reaches another author's Thunderstore package of the same name.
+    /// </summary>
+    public IndexRevocation? ThunderstoreRevocationOf(string? owner, string? name, string? version)
+    {
+        IndexRevocation? worst = null;
+        bool? native = null;
+        foreach (var r in Revoked)
+        {
+            if (!r.Covers(owner, name, version)) continue;
+            if (!r.NamesThunderstore)
+            {
+                if (r.Source.Length > 0) continue;
+                native ??= NativeFor(owner, name) != null;
+                if (native.Value) continue;
+            }
+
+            if (worst == null || r.Mode > worst.Mode) worst = r;
+        }
+
+        return worst;
+    }
+
+    /// <summary>The native package with this exact id (<c>Owner-Name-Version</c>), or null. Imported entries are not found.</summary>
     public IndexPackage? Find(string? id)
     {
         if (string.IsNullOrWhiteSpace(id)) return null;
-        foreach (var p in Packages)
+        foreach (var p in Native)
             if (string.Equals(p.Id, id!.Trim(), StringComparison.OrdinalIgnoreCase)) return p;
         return null;
     }
@@ -204,6 +278,16 @@ internal static class ProgenitorIndex
     public const string ThunderstoreDownloadPrefix = "https://thunderstore.io/package/download/";
 
     private static readonly JsonDocumentOptions ParseOptions = new() { AllowTrailingCommas = true, MaxDepth = 64 };
+
+    /// <summary>M2: how far ahead of now a list's signed <c>generated</c> time may be before the list is refused.</summary>
+    public static readonly TimeSpan FutureLimit = TimeSpan.FromDays(1);
+
+    /// <summary>M2: the list says it was generated more than <see cref="FutureLimit"/> after <paramref name="nowUtc"/>.</summary>
+    public static bool IsFutureDated(IndexDocument? doc, DateTime nowUtc) =>
+        doc?.Generated is { } g && g > nowUtc + FutureLimit;
+
+    public static string FutureDatedError(IndexDocument doc) =>
+        "the Index is dated " + (doc.Generated?.ToString("o", CultureInfo.InvariantCulture) ?? "?") + ", more than a day ahead of this PC's clock; not used";
 
     // ---- verify ----------------------------------------------------------------------------------------------
 
@@ -275,6 +359,7 @@ internal static class ProgenitorIndex
             {
                 Format = format,
                 Generated = TimeOf(Str(root, "generated")),
+                Sha256 = CatalogFetcher.ToHex(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json))),
                 Packages = packages,
                 Revoked = revoked,
             };
@@ -386,6 +471,8 @@ internal static class ProgenitorIndex
                 _ => IndexRevocationMode.Disable,
             },
             Date = Str(r, "date"),
+            Source = Str(r, "source"),
+            Repo = Str(r, "repo"),
         };
         return true;
     }

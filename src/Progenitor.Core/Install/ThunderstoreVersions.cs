@@ -57,6 +57,31 @@ internal sealed class PackageVersions
     public bool FromIndex { get; }
 
     /// <summary>
+    /// INDEX1 (M1): Thunderstore version lists without the versions a Progenitor Index takedown hides or disables for
+    /// Thunderstore. A package left with no version is removed (not listed); one whose chosen version went loses it.
+    /// </summary>
+    public static void RemoveTakedowns(IDictionary<string, PackageVersions> loaded, IndexDocument? doc,
+        IReadOnlyDictionary<string, Plugins.NetworkVersionRule>? rules = null)
+    {
+        if (loaded == null || doc == null || doc.Revoked.Count == 0) return;
+        foreach (var key in new List<string>(loaded.Keys))
+        {
+            var pv = loaded[key];
+            if (pv.FromIndex || pv.Local) continue;
+            string owner = "", name = pv.Package;
+            int dash = pv.Package.IndexOf('-');
+            if (dash > 0) { owner = pv.Package.Substring(0, dash); name = pv.Package.Substring(dash + 1); }
+            var kept = new List<string>();
+            foreach (var v in pv.Active)
+                if (doc.ThunderstoreRevocationOf(owner, name, v) is not { Mode: IndexRevocationMode.Hidden or IndexRevocationMode.Disable }) kept.Add(v);
+            if (kept.Count == pv.Active.Count) continue;
+            if (kept.Count == 0) { loaded.Remove(key); continue; }
+            bool matchedKept = pv.Matched != null && kept.Contains(pv.Matched);
+            loaded[key] = new PackageVersions(pv.Package, pv.Requested, kept, matchedKept ? pv.Matched : null, matchedKept ? pv.Entry : null, false);
+        }
+    }
+
+    /// <summary>
     /// INDEX1: the version lists of the packages in <paramref name="wanted"/> that the Progenitor Index lists
     /// (<paramref name="indexRows"/>: every listed version, <see cref="IndexCatalog.ToEntries"/> with all versions), added to
     /// <paramref name="into"/> unless a package is already there (the local test source is read first). Each version is
@@ -89,8 +114,12 @@ internal sealed class PackageVersions
             if (rules != null)
                 foreach (var r in rules)
                     if (string.Equals(r.Key, package, StringComparison.OrdinalIgnoreCase)) rule = r.Value;
-            string? matched = ThunderstoreVersions.Resolve(active, kv.Value, rule, out _);
-            CatalogEntry? entry = matched != null && byVersion.TryGetValue(matched, out var e) ? e : null;
+            string requested = (kv.Value ?? "").Trim();
+            string? matched = requested.Length == 0 ? ThunderstoreVersions.Highest(active, _ => true) : ThunderstoreVersions.Resolve(active, requested, rule, out _);
+            // H1: the Index answers only when it has the version asked for (or one the rule accepts); otherwise the package
+            // falls through to Thunderstore, which may still serve an older pinned version.
+            if (matched == null) continue;
+            CatalogEntry? entry = byVersion.TryGetValue(matched, out var e) ? e : null;
             string key = entry?.Key ?? byVersion[active[0]].Key;
             into[key] = new PackageVersions(key, kv.Value ?? "", active, entry == null ? null : matched, entry, local: false, fromIndex: true);
         }

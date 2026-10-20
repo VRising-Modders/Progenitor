@@ -327,6 +327,9 @@ internal static class UpdateDetection
 
     /// <summary>INDEX1: only the other index lists the package; an update never switches the source it was installed from.</summary>
     public const string SkipOtherSource = "not listed by the source it was installed from";
+
+    /// <summary>INDEX1 (L4): installed from Thunderstore, and Thunderstore is turned off.</summary>
+    public const string SkipThunderstoreOff = "installed from Thunderstore, and Thunderstore is turned off";
     public const string SkipDeprecated = "the listing is deprecated";
     public const string SkipNsfw = "the listing is marked NSFW and Show mods with NSFW content is off";
     public const string SkipLoader = "the loader or Progenitor itself (Progenitor's own update is listed on its own)";
@@ -345,7 +348,8 @@ internal static class UpdateDetection
         Func<string, bool>? dependencyPresent,
         bool showNsfw,
         DateTime nowUtc,
-        string indexStamp = "")
+        string indexStamp = "",
+        bool thunderstoreOff = false)
     {
         file ??= new UpdatePins();
         var kept = new List<ManagedPackage>();
@@ -362,7 +366,7 @@ internal static class UpdateDetection
             kept.Add(m);
         }
 
-        var r = Detect(kept, index, file.Pins, dependencyPresent, showNsfw, nowUtc, indexStamp);
+        var r = Detect(kept, index, file.Pins, dependencyPresent, showNsfw, nowUtc, indexStamp, thunderstoreOff);
         foreach (var item in r.Items) UpdatePolicy.Apply(item, global, file, majorsAutomatic);
         if (off.Count == 0) return r;
         var skipped = new List<UpdateSkip>(r.Skipped);
@@ -377,7 +381,8 @@ internal static class UpdateDetection
         Func<string, bool>? dependencyPresent,
         bool showNsfw,
         DateTime nowUtc,
-        string indexStamp = "")
+        string indexStamp = "",
+        bool thunderstoreOff = false)
     {
         var items = new List<UpdateItem>();
         var skipped = new List<UpdateSkip>();
@@ -389,6 +394,14 @@ internal static class UpdateDetection
             count++;
             if (LoaderPackages.IsHiddenPackage(null, null, m.Key)) { skipped.Add(new UpdateSkip(m.Key, SkipLoader)); continue; }
             if (m.Changed) { skipped.Add(new UpdateSkip(m.Key, SkipChanged)); continue; }
+            // L4: a Thunderstore install while Thunderstore is off says so, not "no longer listed".
+            if (thunderstoreOff && !m.FromIndex
+                && (index == null || !index.TryGetValue(m.Key, out var shown) || shown == null || !shown.Local))
+            {
+                skipped.Add(new UpdateSkip(m.Key, SkipThunderstoreOff));
+                continue;
+            }
+
             if (index == null || !index.TryGetValue(m.Key, out var listing) || listing == null)
             {
                 skipped.Add(new UpdateSkip(m.Key, SkipNotListed));

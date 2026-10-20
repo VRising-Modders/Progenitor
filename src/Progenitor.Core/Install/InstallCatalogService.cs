@@ -225,6 +225,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
     {
         var pin = entry?.Pin;
         if (pin == null) return null;
+        if (IndexCatalog.ProgenitorRangeUnreadable(entry)) return IndexCatalog.RangeUnreadable;
         if (IndexCatalog.ProgenitorTooOld(entry, out string needs)) return IndexCatalog.TooOldRefusal(needs);
         if (!string.Equals((entry!.DownloadUrl ?? "").Trim(), pin.Url.Trim(), StringComparison.Ordinal))
             return "the download is not the file the Progenitor Index names";
@@ -1157,6 +1158,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
     {
         bool? fromIndex = InstalledFromIndex(key);
         if (fromIndex == null || IsLocalKey(key)) return null;
+        if (!fromIndex.Value && !ThunderstoreOn()) return InstallReasons.UpdateThunderstoreOff;
         if (!TryGetEntry(key, out var row) || row == null) return InstallReasons.UnknownEntry;
         if (fromIndex.Value)
             return row.FromIndex ? null : InstallReasons.UpdateIndexGone;
@@ -1412,7 +1414,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
             var member = missing[i];
             // INDEX1: a dependency of an Index listing installs the exact file the signed list pins for it (the Index's own
             // entry first, else Thunderstore's download of that version), checked by its sha256.
-            string? pinRefusal = PinDependencyOf(root, member.Package);
+            string? pinRefusal = PinDependencyOf(root, member.Package, member.Version);
             if (pinRefusal != null)
             {
                 ForgetClosureOf(members, root.Key);
@@ -1487,10 +1489,11 @@ internal sealed class InstallCatalogService : IInstallCatalog
     /// INDEX1: put the pinned listing of <paramref name="package"/> in place when <paramref name="root"/> is an Index listing
     /// that pins it. Null when done (or nothing is pinned); the refusal otherwise.
     /// </summary>
-    private string? PinDependencyOf(CatalogEntry root, string package)
+    internal string? PinDependencyOf(CatalogEntry root, string package, string? version = null)
     {
-        var dep = IndexCatalog.DependencyFor(root, package);
-        if (dep == null) return null;
+        // M3: every member of an Index root's closure is pinned: the root's own row, another native entry's row, or the
+        // Index's own entry of that package; an unpinned member refuses the install (never Thunderstore's newest).
+        if (!root.FromIndex) return null;
         CatalogEntry? thunderstore = null;
         IndexDocument? doc;
         string? stamp;
@@ -1502,10 +1505,46 @@ internal sealed class InstallCatalogService : IInstallCatalog
             stamp = _indexStamp;
         }
 
-        var pinned = IndexCatalog.PinDependency(dep, doc, thunderstore, stamp, out string refusal, _indexSource?.PagesRoot ?? ProgenitorIndex.PagesRoot);
+        string pages = _indexSource?.PagesRoot ?? ProgenitorIndex.PagesRoot;
+        var dep = IndexCatalog.PinAnywhere(root, doc, package, version);
+        CatalogEntry? pinned;
+        string refusal = "";
+        if (dep != null) pinned = IndexCatalog.PinDependency(dep, doc, thunderstore, stamp, out refusal, pages);
+        else
+        {
+            // The Index's own entry of that package (the version the closure asks for, else its newest).
+            var native = doc?.NativeForKey(package);
+            IndexPackage? pick = null;
+            if (native != null && doc != null)
+                foreach (var row in IndexCatalog.ToEntries(doc, stamp, allVersions: true, pages))
+                {
+                    if (!string.Equals(row.Key, package, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.IsNullOrWhiteSpace(version) || string.Equals(row.Manifest.Version, version!.Trim(), StringComparison.Ordinal))
+                    {
+                        if (pick == null || UpdateVersions.IsNewer(row.Manifest.Version, pick.Version)) pick = row.Pin!.Package;
+                    }
+                }
+
+            pinned = pick != null ? IndexCatalog.EntryOf(pick, doc, stamp, pages) : null;
+            if (pinned == null) refusal = InstallReasons.UnpinnedDependency(package + (string.IsNullOrWhiteSpace(version) ? "" : " " + version));
+        }
+
         if (pinned == null) return refusal.Length > 0 ? refusal : InstallReasons.PlanBlocked;
         UseVersionEntry(pinned);
         return null;
+    }
+
+    /// <summary>M1: Thunderstore rows minus the versions a takedown hides or disables for Thunderstore.</summary>
+    private IReadOnlyList<CatalogEntry> WithoutTakedownsLocked(IReadOnlyList<CatalogEntry> thunderstore)
+    {
+        IndexDocument? doc;
+        try { doc = _indexSource?.Current; }
+        catch { doc = null; }
+        if (doc == null || doc.Revoked.Count == 0 || thunderstore.Count == 0) return thunderstore;
+        var kept = new List<CatalogEntry>(thunderstore.Count);
+        foreach (var e in thunderstore)
+            if (!IndexCatalog.TakesDownThunderstore(doc, e)) kept.Add(e);
+        return kept;
     }
 
     /// <summary>A refused set leaves no closure behind, on the root or on any member it had planned.</summary>
@@ -1854,7 +1893,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
 
         // INDEX1: local test listings, then the Progenitor Index, then Thunderstore; a mod in the Index and on Thunderstore
         // is its Index row.
-        var merged = IndexCatalog.Merge(local, _indexEntries, ThunderstoreOn() ? _fetchedEntries : Array.Empty<CatalogEntry>(), out _localShadowed, out _indexShadowed);
+        var merged = IndexCatalog.Merge(local, _indexEntries, ThunderstoreOn() ? WithoutTakedownsLocked(_fetchedEntries) : Array.Empty<CatalogEntry>(), out _localShadowed, out _indexShadowed);
         _entries = merged;
         _byKey.Clear();
         for (int i = 0; i < merged.Count; i++)

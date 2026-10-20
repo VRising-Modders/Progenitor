@@ -374,6 +374,8 @@ public sealed class Plugin
         // Ui before Effects: Unwire EventTrigger/Button UnityEvents, then
         // DestroyByPrefix, before any leftover effects GO is torn down. The
         // cascade yields a FrameTicker tick after this Uninstall before ALC.Unload.
+        try { Progenitor.Install.ProgenitorIndexSource.ReleaseShared(); } // INDEX1 (L6)
+        catch (System.Exception e) { Logger?.LogWarning($"ProgenitorIndexSource.ReleaseShared: {e.Message}"); }
         try { Progenitor.Install.SelfUpdatesLive.Uninstall(); }
         catch (System.Exception e) { Logger?.LogWarning($"SelfUpdates.Uninstall: {e.Message}"); }
         try { Progenitor.Install.StopServerEvents.Uninstall(); }

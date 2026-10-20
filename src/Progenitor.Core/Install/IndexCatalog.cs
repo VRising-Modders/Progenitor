@@ -53,9 +53,10 @@ internal static class IndexCatalog
         if (doc == null || doc.Packages.Count == 0) return rows;
         var byKey = new Dictionary<string, List<IndexPackage>>(StringComparer.OrdinalIgnoreCase);
         var order = new List<string>();
-        foreach (var p in doc.Packages)
+        // Imported entries are the Index's own review records, never a listing (decided 2026-10-20).
+        foreach (var p in doc.Native)
         {
-            var revocation = doc.RevocationOf(p.Owner, p.Name, p.Version);
+            var revocation = doc.RevocationOf(p.Owner, p.Name, p.Version, p.Repo);
             if (revocation is { Mode: IndexRevocationMode.Hidden or IndexRevocationMode.Disable }) continue;
             if (!byKey.TryGetValue(p.Key, out var list))
             {
@@ -133,7 +134,7 @@ internal static class IndexCatalog
                 Sha256 = p.Sha256,
                 Size = p.Size,
                 Package = p,
-                Revocation = doc?.RevocationOf(p.Owner, p.Name, p.Version),
+                Revocation = doc?.RevocationOf(p.Owner, p.Name, p.Version, p.Repo),
                 IconUrl = ProgenitorIndex.IconUrlOf(p, pagesRoot),
             },
         };
@@ -192,12 +193,11 @@ internal static class IndexCatalog
         if (dep == null || dep.Key.Length == 0 || dep.Version.Length == 0) { refusal = "the dependency names no exact version"; return null; }
         if (!SelfFeed.IsSha256(dep.Sha256)) { refusal = dep.Id + " has no pinned sha256 in the Progenitor Index"; return null; }
 
-        // 1. The Index: the exact listed version, its own entry.
+        // 1. The Index: the exact version as its own native entry.
         var listed = doc?.Find(dep.Id);
-        if (listed != null || string.Equals(dep.From, IndexDependency.FromIndex, StringComparison.OrdinalIgnoreCase))
+        if (listed != null)
         {
-            if (listed == null) { refusal = dep.Id + " is not in the Progenitor Index"; return null; }
-            var revocation = doc!.RevocationOf(listed.Owner, listed.Name, listed.Version);
+            var revocation = doc!.RevocationOf(listed.Owner, listed.Name, listed.Version, listed.Repo);
             if (revocation is { Mode: IndexRevocationMode.Disable or IndexRevocationMode.Hidden })
             {
                 refusal = dep.Id + " was taken down from the Progenitor Index" + (revocation.Reason.Length > 0 ? ": " + revocation.Reason : "");
@@ -213,16 +213,26 @@ internal static class IndexCatalog
             return EntryOf(listed, doc, stamp, pagesRoot);
         }
 
-        // 2. Thunderstore: that exact version's download link, pinned by the sha256 the Index recorded.
-        if (!ProgenitorIndex.IsAllowedPackageUrl(IndexPackage.SourceThunderstore, null, dep.Package))
+        // 2. Otherwise the file the signed row pins itself: that exact version's Thunderstore download, or a GitHub release
+        // asset (an imported entry's file, which is never a listing of its own), checked by the sha256 the Index recorded.
+        bool thunderstoreUrl = ProgenitorIndex.IsAllowedPackageUrl(IndexPackage.SourceThunderstore, null, dep.Package);
+        string repo = ReleaseRepoOf(dep.Package);
+        if (!thunderstoreUrl && repo.Length == 0)
         {
-            refusal = dep.Id + ": the pinned download is not a Thunderstore link";
+            refusal = dep.Id + ": the pinned download is not a Thunderstore link or a GitHub release";
             return null;
         }
 
         string owner = "", name = dep.Key;
         int dash = dep.Key.IndexOf('-');
         if (dash > 0) { owner = dep.Key.Substring(0, dash); name = dep.Key.Substring(dash + 1); }
+        var down = doc?.ThunderstoreRevocationOf(owner, name, dep.Version);
+        if (down is { Mode: IndexRevocationMode.Disable or IndexRevocationMode.Hidden })
+        {
+            refusal = dep.Id + " was taken down by the Progenitor Index" + (down.Reason.Length > 0 ? ": " + down.Reason : "");
+            return null;
+        }
+
         var t = thunderstoreListing;
         var manifest = new ManifestMod(
             id: t?.Manifest.Id ?? "",
@@ -238,8 +248,8 @@ internal static class IndexCatalog
         return new CatalogEntry(
             manifest,
             CatalogProvenance.AdaptedListing,
-            InstallReasons.SourceThunderstore,
-            InstallReasons.SourceLabelThunderstore,
+            thunderstoreUrl ? InstallReasons.SourceThunderstore : PinnedReleaseSourceId,
+            thunderstoreUrl ? InstallReasons.SourceLabelThunderstore : PinnedReleaseSourceLabel,
             t?.IndexStamp ?? stamp,
             displayName: t?.DisplayName ?? name,
             author: t?.Author ?? owner,
@@ -258,9 +268,59 @@ internal static class IndexCatalog
             categories: t?.Categories,
             hasNsfwContent: t?.HasNsfwContent ?? false)
         {
-            Pin = new IndexPin { Source = IndexPackage.SourceThunderstore, Url = dep.Package, Sha256 = dep.Sha256 },
+            Pin = new IndexPin
+            {
+                Source = thunderstoreUrl ? IndexPackage.SourceThunderstore : IndexPackage.SourceGitHubRelease,
+                Repo = repo,
+                Url = dep.Package,
+                Sha256 = dep.Sha256,
+            },
         };
     }
+
+    /// <summary>The source id of a dependency pinned to a GitHub release asset that is no listing of its own.</summary>
+    public const string PinnedReleaseSourceId = "github-release";
+
+    public const string PinnedReleaseSourceLabel = "GitHub release";
+
+    /// <summary><c>https://github.com/&lt;owner&gt;/&lt;repo&gt;</c> of a release-asset URL, or empty.</summary>
+    internal static string ReleaseRepoOf(string? url)
+    {
+        string u = (url ?? "").Trim();
+        const string root = "https://github.com/";
+        if (!u.StartsWith(root, StringComparison.OrdinalIgnoreCase)) return "";
+        var parts = u.Substring(root.Length).Split('/');
+        if (parts.Length < 5 || parts[0].Length == 0 || parts[1].Length == 0) return "";
+        if (!string.Equals(parts[2], "releases", StringComparison.Ordinal) || !string.Equals(parts[3], "download", StringComparison.Ordinal)) return "";
+        string repo = root + parts[0] + "/" + parts[1];
+        return ProgenitorIndex.IsAllowedPackageUrl(IndexPackage.SourceGitHubRelease, repo, u) ? repo : "";
+    }
+
+    /// <summary>
+    /// M3: the pin of listing <paramref name="key"/> for an Index root's closure: the root's own row, else any native entry's
+    /// row for that key (the version <paramref name="version"/> when one names it). Null when the Index pins it nowhere.
+    /// </summary>
+    public static IndexDependency? PinAnywhere(CatalogEntry? root, IndexDocument? doc, string? key, string? version)
+    {
+        var own = DependencyFor(root, key);
+        if (own != null) return own;
+        if (doc == null || string.IsNullOrWhiteSpace(key)) return null;
+        IndexDependency? any = null;
+        foreach (var p in doc.Native)
+            foreach (var d in p.Dependencies)
+            {
+                if (!string.Equals(d.Key, key!.Trim(), StringComparison.OrdinalIgnoreCase) || !SelfFeed.IsSha256(d.Sha256)) continue;
+                if (!string.IsNullOrWhiteSpace(version) && string.Equals(d.Version, version!.Trim(), StringComparison.Ordinal)) return d;
+                any ??= d;
+            }
+
+        return string.IsNullOrWhiteSpace(version) ? any : null;
+    }
+
+    /// <summary>A Thunderstore row the Index takes down (Hidden or Disable) for Thunderstore: not listed, not installable (M1).</summary>
+    public static bool TakesDownThunderstore(IndexDocument? doc, CatalogEntry? row) =>
+        doc != null && row != null && doc.Revoked.Count > 0
+        && doc.ThunderstoreRevocationOf(row.Owner, row.PackageName, row.Manifest.Version) is { Mode: IndexRevocationMode.Hidden or IndexRevocationMode.Disable };
 
     /// <summary>The root's signed dependency row for listing <paramref name="key"/>, or null.</summary>
     public static IndexDependency? DependencyFor(CatalogEntry? root, string? key)
@@ -275,18 +335,25 @@ internal static class IndexCatalog
     /// The takedown covering an installed version of listing <paramref name="key"/> (<c>Owner-Name</c>), or null. Matches
     /// the revoked row's owner and name against the key, so a mod no longer listed is still found.
     /// </summary>
-    public static IndexRevocation? RevocationForInstalled(IndexDocument? doc, string? key, string? version)
+    public static IndexRevocation? RevocationForInstalled(IndexDocument? doc, string? key, string? version, bool fromIndex)
     {
-        if (doc == null || string.IsNullOrWhiteSpace(key)) return null;
-        IndexRevocation? worst = null;
+        if (doc == null || string.IsNullOrWhiteSpace(key) || doc.Revoked.Count == 0) return null;
+        // L7: an Index install meets the Index entry's takedowns; a Thunderstore install only one that names Thunderstore
+        // (or a name the Index has no native entry for), never another author's Index entry of the same name.
         foreach (var r in doc.Revoked)
         {
             if (!string.Equals(r.Owner + "-" + r.Name, key!.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
-            if (r.Version != "*" && !string.Equals(r.Version, (version ?? "").Trim(), StringComparison.Ordinal)) continue;
-            if (worst == null || r.Mode > worst.Mode) worst = r;
+            string v = (version ?? "").Trim();
+            if (fromIndex)
+            {
+                var native = doc.NativeFor(r.Owner, r.Name);
+                return doc.RevocationOf(r.Owner, r.Name, v, native?.Repo);
+            }
+
+            return doc.ThunderstoreRevocationOf(r.Owner, r.Name, v);
         }
 
-        return worst;
+        return null;
     }
 
     /// <summary>The running Progenitor's version (live: Core's own; tests set it). Null or empty: not known, nothing is refused.</summary>
@@ -322,6 +389,26 @@ internal static class IndexCatalog
         if (plus > 0) run = run.Substring(0, plus);
         if (parsed.Includes(run)) return false;
         needs = "Progenitor " + range + " (this is " + run + ")";
+        return true;
+    }
+
+    /// <summary>L3: the refusal of an entry whose <c>progenitor</c> range does not parse.</summary>
+    public const string RangeUnreadable = "This mod's Progenitor version range can't be read";
+
+    private static readonly HashSet<string> RangeLogged = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// L3: the entry's <c>progenitor</c> range does not parse: it is treated as not satisfiable. Logged once per entry.
+    /// </summary>
+    public static bool ProgenitorRangeUnreadable(CatalogEntry? entry)
+    {
+        var p = entry?.Pin?.Package;
+        string range = (p?.Progenitor ?? "").Trim();
+        if (range.Length == 0 || range == "*") return false;
+        if (Progenitor.Plugins.CompatRange.TryParse(range, out var parsed, out string? error) && parsed != null) return false;
+        bool first;
+        lock (RangeLogged) first = RangeLogged.Add(p!.Id);
+        if (first) InstallLog.Warn("Install: " + p!.Id + " in the Progenitor Index has a Progenitor version range that can't be read (" + range + "): " + (error ?? "?") + "; it is not installed.");
         return true;
     }
 

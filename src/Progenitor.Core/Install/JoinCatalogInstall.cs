@@ -179,6 +179,9 @@ internal sealed class JoinPackageIndex
     /// </summary>
     public Func<CancellationToken, Task<IReadOnlyList<CatalogEntry>>>? IndexRows { get; set; }
 
+    /// <summary>INDEX1 (M1): the Progenitor Index whose takedowns remove Thunderstore versions (null: none).</summary>
+    public Func<IndexDocument?>? Takedowns { get; set; }
+
     /// <summary>INDEX1: <c>[Mods] UseThunderstore</c>; off, the Thunderstore index is not read (the Index still is).</summary>
     public Func<bool> ThunderstoreEnabled { get; set; } = () => true;
 
@@ -284,6 +287,15 @@ internal sealed class JoinPackageIndex
         {
             if (!ThunderstoreVersions.TryLoad(json, stamp, wanted, versions, local: false, rules, out string parseError) && error.Length == 0)
                 error = parseError;
+        }
+
+        // INDEX1 (M1): Thunderstore versions a Progenitor Index takedown hides or disables are never offered.
+        if (Takedowns is { } takedowns)
+        {
+            IndexDocument? doc;
+            try { doc = takedowns(); }
+            catch { doc = null; }
+            PackageVersions.RemoveTakedowns(versions, doc, rules);
         }
 
         // Every package found in the local index: the fetch's failure does not matter.
@@ -465,7 +477,8 @@ internal sealed class JoinCatalogInstaller : IJoinPackageInstaller
         if (exact == null) return Refused(JoinInstallText.VersionGone(request.Package, request.Version, pv.Latest));
         string key = pv.Package;
         if (!catalog.TryGetEntry(key, out var listed) || listed == null) return Refused(JoinInstallText.NotListed(request.Package));
-        if (!string.Equals(listed.Manifest.Version, exact, StringComparison.Ordinal))
+        // H1: the row is the source that answered (an Index row never stands in for a Thunderstore version, or back).
+        if (!string.Equals(listed.Manifest.Version, exact, StringComparison.Ordinal) || listed.FromIndex != pv.FromIndex)
         {
             var entryForVersion = pv.Entry != null && string.Equals(pv.Matched, exact, StringComparison.Ordinal) ? pv.Entry : null;
             if (entryForVersion == null) return Refused(JoinInstallText.VersionGone(request.Package, request.Version, pv.Latest));

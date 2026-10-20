@@ -27,7 +27,7 @@ internal static class ProgenitorIndexConfig
 
     public const string DevUrlDescription =
         "Developer testing only. The index.json URL of a local test Progenitor Index (its signature at the same URL + .sig), "
-        + "used in a developer tree ([Reload] WatchCore = true) or with AllowDevThunderstore = true. https, or http on a "
+        + "used in a developer tree ([Reload] WatchCore = true) or with AllowDevThunderstore = true. An http or https URL on a "
         + "loopback address. Empty (the default) reads the published Index.";
 
     public const string DevKeyDescription =
@@ -80,8 +80,8 @@ internal static class ProgenitorIndexConfig
 
             if (!dev || string.IsNullOrWhiteSpace(text)) return null;
             if (!Uri.TryCreate(text!.Trim(), UriKind.Absolute, out var u)) return null;
-            if (u.Scheme == Uri.UriSchemeHttps) return u;
-            return u.Scheme == Uri.UriSchemeHttp && u.IsLoopback ? u : null;
+            // L1: a loopback address only, like the dev Thunderstore stand-in (http or https).
+            return (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps) && u.IsLoopback ? u : null;
         }
     }
 
@@ -113,6 +113,15 @@ internal static class ProgenitorIndexConfig
             return slash > 0 ? s.Substring(0, slash + 1) : s + "/";
         }
     }
+
+    /// <summary>
+    /// L2: the keys a list from <paramref name="url"/> is verified with. The published URL: the built-in keys only, never the
+    /// dev key. The dev URL: the built-in keys plus the dev key, and only while that URL is the one in effect.
+    /// </summary>
+    public static Func<IReadOnlyList<string>> KeysFor(string url) =>
+        string.Equals(url, ProgenitorIndex.PrimaryUrl, StringComparison.Ordinal)
+            ? () => ProgenitorIndexKeys.Trusted()
+            : () => string.Equals(DevUrl?.AbsoluteUri, url, StringComparison.Ordinal) ? Keys() : ProgenitorIndexKeys.Trusted();
 
     /// <summary>The keys a list is verified with: the built-in ones, plus the dev key while the dev URL is in effect.</summary>
     public static IReadOnlyList<string> Keys()
@@ -202,12 +211,14 @@ internal sealed class ProgenitorIndexFetch
     private readonly Func<IReadOnlyList<string>> _keys;
     private readonly string _url;
     private readonly List<string> _asked = new();
+    private readonly ICatalogClock _clock;
 
     public ProgenitorIndexFetch(TextFetch fetch, IndexDiskCache cache, Func<IReadOnlyList<string>>? keys = null, ICatalogClock? clock = null)
     {
         _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
         _keys = keys ?? (() => ProgenitorIndexKeys.Trusted());
         _url = cache.Url;
+        _clock = clock ?? new SystemCatalogClock();
         Conditional = new ConditionalIndexFetch(ReadSigned, cache, Owner, clock, accept: body => SelfFeed.TrySplit(body, out _, out _), label: "Progenitor Index check");
     }
 
@@ -279,7 +290,10 @@ internal sealed class ProgenitorIndexFetch
 
         // Replay protection: a list signed before the verified copy already cached is refused (a failed check), so an old
         // signed list served again cannot bring back a version that was taken down.
-        if (cachedOk && cached.Generated is { } have && (doc.Generated is not { } got || got < have))
+        // M2: a list dated more than a day ahead is never cached or adopted, and a future-dated cached copy is no replay floor.
+        if (ProgenitorIndex.IsFutureDated(doc, _clock.UtcNow))
+            return new CatalogTextFetchResult(false, ProgenitorIndex.FutureDatedError(doc), null, 0, list.StatusCode);
+        if (cachedOk && !ProgenitorIndex.IsFutureDated(cached, _clock.UtcNow) && cached.Generated is { } have && (doc.Generated is not { } got || got < have))
             return new CatalogTextFetchResult(false, "the Index is older than the one already cached (generated "
                 + (doc.Generated?.ToString("o", CultureInfo.InvariantCulture) ?? "missing") + ", cached "
                 + have.ToString("o", CultureInfo.InvariantCulture) + "); not used", null, 0, list.StatusCode);
@@ -397,7 +411,7 @@ internal sealed class ProgenitorIndexSource
         string error;
         try { doc = _fetch.ReadCache(out error); }
         catch (Exception e) { doc = IndexDocument.Empty; error = e.Message; }
-        if (error.Length > 0) return;
+        if (error.Length > 0 || ProgenitorIndex.IsFutureDated(doc, _clock.UtcNow)) return;
         Adopt(doc, _fetch.Cache.TryReadStamp(out var stamp) ? CatalogFetcher.FormatStamp(stamp) : "cache");
     }
 
@@ -433,6 +447,7 @@ internal sealed class ProgenitorIndexSource
             if (r.Ok && r.Text != null)
             {
                 var doc = ProgenitorIndex.ReadVerified(r.Text, _fetch.TrustedKeys(), out string error);
+                if (error.Length == 0 && ProgenitorIndex.IsFutureDated(doc, _clock.UtcNow)) error = ProgenitorIndex.FutureDatedError(doc);
                 if (error.Length == 0) Adopt(doc, CatalogFetcher.FormatStamp(_clock.UtcNow));
                 else lock (_gate) _lastError = error;
             }
@@ -449,9 +464,8 @@ internal sealed class ProgenitorIndexSource
     {
         lock (_gate)
         {
-            bool same = ReferenceEquals(doc, _current)
-                || (_current.Generated == doc.Generated && _current.Packages.Count == doc.Packages.Count
-                    && _current.Revoked.Count == doc.Revoked.Count && _current.Generated != null);
+            // L5: a different list is a different text hash.
+            bool same = ReferenceEquals(doc, _current) || (doc.Sha256.Length > 0 && string.Equals(doc.Sha256, _current.Sha256, StringComparison.Ordinal));
             _current = doc;
             _stamp = stamp;
             if (!same) _version++;
@@ -462,6 +476,25 @@ internal sealed class ProgenitorIndexSource
 
     private static readonly object SharedGate = new();
     private static readonly Dictionary<string, ProgenitorIndexSource> Shared = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<IDisposable> Leases = new();
+
+    /// <summary>L6: on Core unload, release the HTTP leases <see cref="ForRoot"/> took and forget the shared sources.</summary>
+    public static void ReleaseShared()
+    {
+        List<IDisposable> leases;
+        lock (SharedGate)
+        {
+            leases = new List<IDisposable>(Leases);
+            Leases.Clear();
+            Shared.Clear();
+        }
+
+        foreach (var l in leases)
+        {
+            try { l.Dispose(); }
+            catch { /* tearing down */ }
+        }
+    }
 
     /// <summary>Tests: the source <see cref="ForRoot"/> answers in place of the live one (null: none in tests).</summary>
     internal static Func<string, ProgenitorIndexSource?>? TestFactory { get; set; }
@@ -488,9 +521,10 @@ internal sealed class ProgenitorIndexSource
             var http = SharedCatalogHttp.Acquire();
             var fetcher = new CatalogFetcher(http, CatalogFetchOptions.Default);
             var fetch = new ProgenitorIndexFetch((u, v, max, ct) => fetcher.FetchIndexTextAsync(u, max, v, ct),
-                new IndexDiskCache(bepInExRoot, url), ProgenitorIndexConfig.Keys);
+                new IndexDiskCache(bepInExRoot, url), ProgenitorIndexConfig.KeysFor(url));
             var source = new ProgenitorIndexSource(fetch, () => ProgenitorIndexConfig.Enabled, pagesRoot: ProgenitorIndexConfig.PagesRoot);
             Shared[key] = source;
+            Leases.Add(http);
             return source;
         }
 #endif

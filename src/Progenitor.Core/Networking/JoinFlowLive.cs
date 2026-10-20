@@ -46,6 +46,7 @@ internal static class JoinFlowLive
             // INDEX1: the Progenitor Index answers the packages it lists (checked about every 10 minutes); Thunderstore is
             // read only while [Mods] UseThunderstore is on.
             index.IndexRows = ct => IndexRowsAsync(root, ProgenitorIndexSource.JoinAge, ct);
+            index.Takedowns = () => ProgenitorIndexSource.ForRoot(root)?.Current;
             index.ThunderstoreEnabled = () => OnMain(() => Ui.ModsMenu.ThunderstoreEnabled, true);
             JoinFlowClient.PackageIndex = index;
             // LOCALJOIN1 (debug): the join window's local test source, read at each build (empty: none).
@@ -287,6 +288,7 @@ internal static class JoinFlowLive
             maxAge: JoinPackageIndex.ServerMaxAge);
         // INDEX1: a package the Progenitor Index lists is available from it (checked on the same 30-minute reuse).
         index.IndexRows = ct => IndexRowsAsync(root, JoinPackageIndex.ServerMaxAge, ct);
+        index.Takedowns = () => ProgenitorIndexSource.ForRoot(root)?.Current;
         return new ServerPackageAvailability((wanted, ct) => index.LoadAsync(wanted, ct), null, http);
     }
 

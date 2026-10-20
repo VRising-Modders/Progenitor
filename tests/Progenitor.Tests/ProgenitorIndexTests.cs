@@ -184,6 +184,7 @@ public sealed class ProgenitorIndexTests : IDisposable
         IndexCatalog.RunningProgenitorVersion = () => null;
         IndexRevocationSource.IndexProbe = null;
         IndexRevocationSource.InstalledProbe = null;
+        IndexRevocationSource.StateProbe = null;
         try { Directory.Delete(Path.GetDirectoryName(_root)!, recursive: true); }
         catch { /* temp */ }
     }
@@ -254,7 +255,10 @@ public sealed class ProgenitorIndexTests : IDisposable
         var dep = Assert.Single(hot.Dependencies);
         Assert.Equal("BepInEx-BepInExPack_V_Rising", dep.Key);
         Assert.Equal("1.0.0", dep.Version);
-        var ordinary = doc.Find("Someone-Ordinary-1.4.2")!;
+        // Imported: kept in the list (takedowns name it), never found as an entry Core installs from.
+        Assert.Null(doc.Find("Someone-Ordinary-1.4.2"));
+        var ordinary = doc.Packages.Single(p => p.Id == "Someone-Ordinary-1.4.2");
+        Assert.True(ordinary.Imported);
         Assert.Equal(IndexPackage.SourceThunderstore, ordinary.Source);
         Assert.False(ordinary.HasProgenitorJson);
         var revoked = Assert.Single(doc.Revoked);
@@ -531,9 +535,16 @@ public sealed class ProgenitorIndexTests : IDisposable
         var listedAnyway = new IndexDependency { Id = "B-Lib-2.0.0", From = IndexDependency.FromThunderstore, Package = "https://thunderstore.io/package/download/B/Lib/2.0.0/", Sha256 = lib.Sha256 };
         Assert.True(IndexCatalog.PinDependency(listedAnyway, doc, null, "s", out _)!.FromIndex);
 
-        // Refusals: not listed though it says index, a changed sha256, no sha256, a non-Thunderstore link, a takedown.
-        Assert.Null(IndexCatalog.PinDependency(new IndexDependency { Id = "B-Lib-9.0.0", From = "index", Package = lib.Package, Sha256 = lib.Sha256 }, doc, null, "s", out refusal));
-        Assert.Contains("not in the Progenitor Index", refusal);
+        // A row naming no native entry (an imported one) is a direct pin of its own file: a GitHub release asset here, never
+        // an Index listing (no hot load, no Index origin).
+        var direct = IndexCatalog.PinDependency(new IndexDependency { Id = "B-Lib-9.0.0", From = "index", Package = lib.Package, Sha256 = lib.Sha256 }, doc, null, "s", out refusal);
+        Assert.NotNull(direct);
+        Assert.False(direct!.FromIndex);
+        Assert.Equal(IndexCatalog.PinnedReleaseSourceId, direct.SourceId);
+        Assert.Equal("https://github.com/B/Lib", direct.Pin!.Repo);
+        Assert.Null(InstallCatalogService.PinRefusal(direct));
+
+        // Refusals: a changed sha256, no sha256, a link that is neither Thunderstore's nor a release, a takedown.
         Assert.Null(IndexCatalog.PinDependency(new IndexDependency { Id = "B-Lib-2.0.0", From = "index", Package = lib.Package, Sha256 = IndexKit.Sha("x") }, doc, null, "s", out refusal));
         Assert.Contains("not the listed file", refusal);
         Assert.Null(IndexCatalog.PinDependency(new IndexDependency { Id = "C-Ts-1.1.0", From = "thunderstore", Package = tsDep.Package, Sha256 = "" }, doc, null, "s", out refusal));
@@ -616,9 +627,9 @@ public sealed class ProgenitorIndexTests : IDisposable
         IndexRevocationSource.IndexProbe = () => doc;
         IndexRevocationSource.InstalledProbe = () => new[]
         {
-            new IndexRevocationSource.Installed("a.disabled", "A-Disabled", "1.0.0"),
-            new IndexRevocationSource.Installed("a.warned", "A-Warned", "1.0.0"),
-            new IndexRevocationSource.Installed("a.hidden", "A-Hidden", "1.0.0"),
+            new IndexRevocationSource.Installed("a.disabled", "A-Disabled", "1.0.0", FromIndex: true),
+            new IndexRevocationSource.Installed("a.warned", "A-Warned", "1.0.0", FromIndex: true),
+            new IndexRevocationSource.Installed("a.hidden", "A-Hidden", "1.0.0", FromIndex: true),
             new IndexRevocationSource.Installed("a.partial", "A-Partial", "1.0.0", FromIndex: true),
         };
         var problems = new IndexRevocationSource().Current().ToList();
