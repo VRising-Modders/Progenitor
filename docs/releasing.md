@@ -71,7 +71,10 @@ Installed copies of Progenitor update themselves from a signed list of releases,
 
    It writes the private key (PKCS#8 PEM) to that file and the public key into `src/Progenitor.Core/Install/SelfFeedKeys.cs` (`Current`). The tool refuses a path inside the repository that git does not ignore; `.gitignore` covers `progenitor-release*.key` and `*.pem`. Keep a backup of the private key somewhere safe: a lost key means the next release must ship a new public key, which installed copies learn only by installing that release by hand.
 2. Commit `SelfFeedKeys.cs` through a pull request, so the next release's Core has the key built in. A Core built before that has no key and offers no update of itself.
-3. Add the private key's text as the repository secret **`PROGENITOR_RELEASE_KEY`** (Settings › Secrets and variables › Actions) if the workflow below should sign. Nothing in this repository creates that secret.
+3. If the workflow below should sign, give it the key through a GitHub Environment, not a repository secret. Nothing in this repository creates these:
+   1. Settings › Environments › **New environment** `release-feed`. Under **Deployment branches and tags** allow only `main`; under **Required reviewers** add a maintainer, so every signing run waits for an approval.
+   2. In that environment add the secret **`PROGENITOR_RELEASE_KEY`** with the private key's text (and `PROGENITOR_RELEASE_KEY_NEXT` only while a key is rolled). The workflow passes it only to its signing step.
+   3. Settings › Actions › General › **Workflow permissions**: turn on **Allow GitHub Actions to create and approve pull requests**, so the workflow can open its pull request.
 4. Seed the list: `docs/updates/releases.json` already names 2026.10.162, read from its published asset (`Progenitor-2026.10.162.zip`, sha256 `40bb2aaada1e55643c1e1768129be661e24a2fb2d4deaae6dd2be55ec241b183`, 15,304,177 bytes), but is not signed yet. Sign it once the key exists: `node tools/release-feed/release-feed.mjs sign --key <key file>`, then `verify`, and commit both files.
 
 To roll the key: `keygen --slot next` writes the new public key into `Next`; ship a release with it; sign with both keys (`--key old --key new`, or `PROGENITOR_RELEASE_KEY` and `PROGENITOR_RELEASE_KEY_NEXT`); once most installs run a Core that has it, move it to `Current` and empty `Next`.
@@ -92,4 +95,9 @@ To roll the key: `keygen --slot next` writes the new public key into `Next`; shi
 4. Commit `docs/updates/releases.json` and `releases.json.sig` on a branch and open a pull request (main is protected).
 5. Merge and push main. GitHub Pages publishes the list within minutes; installed copies read it on their next check.
 
-The **release-feed** workflow (`.github/workflows/release-feed.yml`) does steps 3 and 4 when a release is published, and opens the pull request for step 5. It fails at its first step until the `PROGENITOR_RELEASE_KEY` secret exists; until then run the steps by hand.
+`sign` moves the list's `updated` time forward every time it signs, and `add` signs. A copy of Progenitor never takes a list signed earlier than the one it already has, so an old list served again cannot hide a release; it also means the list on main must always be the latest one signed.
+
+The **release-feed** workflow (`.github/workflows/release-feed.yml`) does steps 3 and 4 when a release is published (never for a prerelease; a manual run names its tag), and opens the pull request for step 5. It runs in the `release-feed` environment, one run at a time, with its actions pinned by commit. It fails at its first step until the environment's `PROGENITOR_RELEASE_KEY` secret exists; until then run the steps by hand.
+
+- A pull request opened with `GITHUB_TOKEN` does not start the **tests** workflow. Re-run the checks (or push an empty commit to the branch as the maintainer) before merging.
+- If two release-list pull requests are open and one merges first, the other conflicts. Rebase it on main taking main's `releases.json` and `releases.json.sig`, then run `add` for its release again (which signs), so the list and its signature cover both releases. Never merge the two lists by hand: that breaks the signature.

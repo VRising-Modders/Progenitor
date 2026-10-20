@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ASSET_PREFIX, addRelease, compareVersions, emptyFeed, feedBytes, generateKey, readPackage, readProtocol, readSourceKeys,
-  readZip, sign, verify, writeSourceKey, writeZip,
+  readZip, sign, touchFeed, verify, writeSourceKey, writeZip,
 } from '../lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -28,6 +28,16 @@ test('the list stays newest first and refuses a duplicate unless replaced', () =
   assert.throws(() => addRelease(feed, { version: '2026.11.3' }), /already has/);
   assert.equal(addRelease(feed, { version: '2026.11.3', url: 'x' }, { replace: true }).releases[0].url, 'x');
   assert.ok(compareVersions('2026.10.162', '2026.10.20') > 0);
+});
+
+test('each signing moves updated forward, even within the same second', () => {
+  const now = new Date('2026-11-02T10:00:00.500Z');
+  const a = touchFeed(emptyFeed(), now);
+  assert.equal(a.updated, '2026-11-02T10:00:00Z');
+  const b = touchFeed(a, now);
+  assert.equal(b.updated, '2026-11-02T10:00:01Z');
+  assert.equal(touchFeed(b, new Date('2026-11-03T00:00:00Z')).updated, '2026-11-03T00:00:00Z');
+  assert.deepEqual(Object.keys(b), Object.keys(emptyFeed()));
 });
 
 test('signatures verify with the signing key, rolled keys and nothing else', () => {

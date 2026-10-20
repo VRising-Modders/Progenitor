@@ -130,18 +130,18 @@ function metadata(image) {
   const opt = coff + 20;
   const magic = image.readUInt16LE(opt);
   const dirs = opt + (magic === 0x20b ? 112 : 96);
-  const cliRva = image.readUInt32LE(dirs + 14 * 8);
-  if (!cliRva) throw new Error('not a managed image');
+  const cliAddress = image.readUInt32LE(dirs + 14 * 8);
+  if (!cliAddress) throw new Error('not a managed image');
   const secTable = opt + optSize;
-  const toOffset = (rva) => {
+  const toOffset = (address) => {
     for (let s = 0; s < sections; s++) {
       const h = secTable + s * 40;
       const va = image.readUInt32LE(h + 12), size = Math.max(image.readUInt32LE(h + 8), image.readUInt32LE(h + 16));
-      if (rva >= va && rva < va + size) return rva - va + image.readUInt32LE(h + 20);
+      if (address >= va && address < va + size) return address - va + image.readUInt32LE(h + 20);
     }
-    throw new Error('RVA outside every section');
+    throw new Error('an address outside every section');
   };
-  const cli = toOffset(cliRva);
+  const cli = toOffset(cliAddress);
   const root = toOffset(image.readUInt32LE(cli + 8));
   if (image.readUInt32LE(root) !== 0x424a5342) throw new Error('no metadata root');
   const verLen = image.readUInt32LE(root + 12);
@@ -296,8 +296,18 @@ export function addRelease(feed, entry, { replace = false, now = new Date() } = 
   if (at >= 0) out.releases.splice(at, 1);
   out.releases.push(entry);
   out.releases.sort((x, y) => compareVersions(y.version, x.version));
-  out.updated = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
-  return out;
+  return touchFeed(out, now);
+}
+
+/**
+ * The list with `updated` moved to now, and always later than before (a client refuses a list signed earlier than the one
+ * it has cached, so each signing must move it forward).
+ */
+export function touchFeed(feed, now = new Date()) {
+  const prev = Date.parse(feed.updated || '');
+  let t = Math.floor(now.getTime() / 1000) * 1000;
+  if (!Number.isNaN(prev) && t <= prev) t = prev + 1000;
+  return { ...feed, updated: new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z') };
 }
 
 /** The list's exact bytes: two-space JSON, LF, one trailing newline (the signature covers these bytes). */

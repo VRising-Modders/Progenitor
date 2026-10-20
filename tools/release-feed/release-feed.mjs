@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   ASSET_PREFIX, CHANNEL, RELEASE_PAGE_PREFIX, addRelease, emptyFeed, feedBytes, generateKey, privateKey, readPackage,
-  readSourceKeys, sign, signatureBytes, verify, writeSourceKey,
+  readSourceKeys, sign, signatureBytes, touchFeed, verify, writeSourceKey,
 } from './lib.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -166,7 +166,8 @@ function add() {
 function signCmd() {
   const file = feedPath();
   if (!fs.existsSync(file)) throw new Error(file + ' does not exist');
-  writeSigned(file, readFeed(file), true);
+  // Every signing moves `updated`: a client refuses a list signed earlier than the one it has (replay protection).
+  writeSigned(file, touchFeed(readFeed(file)), true);
   return 0;
 }
 

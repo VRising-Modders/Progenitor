@@ -5,7 +5,7 @@ namespace Progenitor.Install;
 /// release list (<see cref="SelfFeed"/>). A feed is accepted when one of its signatures verifies with <see cref="Current"/>
 /// or <see cref="Next"/>, so the key can be rolled: put the new key in <see cref="Next"/>, ship a release, sign with both,
 /// then move it to <see cref="Current"/>.
-/// <para><c>node tools/release-feed.mjs keygen</c> writes these lines; the private keys never enter the repository
+/// <para><c>node tools/release-feed/release-feed.mjs keygen</c> writes these lines; the private keys never enter the repository
 /// (docs/releasing.md). An empty slot is no key; with both empty no release list verifies and Progenitor offers no update
 /// of itself.</para>
 /// </summary>

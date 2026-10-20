@@ -1,12 +1,14 @@
 name: release-feed
 
 # Adds a published GitHub release to Progenitor's signed release list (docs/updates/releases.json) and opens a pull
-# request with it (docs/releasing.md, "Release list"). Progenitor reads the list from GitHub Pages once it is on main.
+# request with it (docs/releasing.md, "The release list"). Progenitor reads the list from GitHub Pages once it is on main.
 #
-# Needs the repository secret PROGENITOR_RELEASE_KEY (the private release key, from
-# `node tools/release-feed/release-feed.mjs keygen`); until it is added this workflow fails at its first step and the
-# maintainer runs the same steps by hand. While a key is rolled, PROGENITOR_RELEASE_KEY_NEXT signs too.
-# main is protected, so the list arrives as a pull request; merge it locally like every other (CLAUDE.md).
+# The private release key is the secret PROGENITOR_RELEASE_KEY of the GitHub Environment `release-feed` (limited to main,
+# with a required reviewer; docs/releasing.md). It is passed only to the signing step. Until the environment and its
+# secret exist this workflow fails at its first step and the maintainer runs the same steps by hand. While a key is rolled,
+# PROGENITOR_RELEASE_KEY_NEXT signs too.
+# main is protected, so the list arrives as a pull request; merge it locally like every other (CLAUDE.md). A pull request
+# opened with GITHUB_TOKEN does not start the tests workflow: re-run its checks before merging.
 
 on:
   release:
@@ -21,27 +23,37 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: release-feed
+  cancel-in-progress: false
+
 jobs:
   feed:
+    # A prerelease is never listed; a manual run names its tag on purpose.
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
     runs-on: ubuntu-latest
+    environment: release-feed
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       GH_TOKEN: ${{ github.token }}
-      PROGENITOR_RELEASE_KEY: ${{ secrets.PROGENITOR_RELEASE_KEY }}
-      PROGENITOR_RELEASE_KEY_NEXT: ${{ secrets.PROGENITOR_RELEASE_KEY_NEXT }}
     steps:
       - name: The release key is set
+        env:
+          HAS_KEY: ${{ secrets.PROGENITOR_RELEASE_KEY != '' }}
         run: |
-          if [ -z "$PROGENITOR_RELEASE_KEY" ]; then
-            echo "::error::Add the PROGENITOR_RELEASE_KEY secret (docs/releasing.md) or run tools/release-feed by hand."
+          if [ "$HAS_KEY" != "true" ]; then
+            echo "::error::Add the PROGENITOR_RELEASE_KEY secret to the release-feed environment (docs/releasing.md) or run tools/release-feed by hand."
             exit 1
           fi
 
-      - uses: actions/checkout@v4
+      # actions/checkout v4.2.2, pinned by commit.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: main
+          persist-credentials: true
 
-      - uses: actions/setup-node@v4
+      # actions/setup-node v4.4.0, pinned by commit.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
 
@@ -52,6 +64,9 @@ jobs:
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Progenitor-$VERSION.zip" --dir "$RUNNER_TEMP/release"
 
       - name: Add it to the release list and sign
+        env:
+          PROGENITOR_RELEASE_KEY: ${{ secrets.PROGENITOR_RELEASE_KEY }}
+          PROGENITOR_RELEASE_KEY_NEXT: ${{ secrets.PROGENITOR_RELEASE_KEY_NEXT }}
         run: |
           VERSION="${TAG#v}"
           PUBLISHED="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)"
@@ -59,7 +74,9 @@ jobs:
             --package "$RUNNER_TEMP/release/Progenitor-$VERSION.zip" \
             --release "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
             --published "$PUBLISHED"
-          node tools/release-feed/release-feed.mjs verify
+
+      - name: Verify with the built-in keys
+        run: node tools/release-feed/release-feed.mjs verify
 
       - name: Open a pull request with the list
         run: |
@@ -71,4 +88,4 @@ jobs:
           git commit -m "Release list: add Progenitor ${TAG#v}"
           git push origin "$BRANCH"
           gh pr create --base main --head "$BRANCH" --title "Release list: add Progenitor ${TAG#v}" \
-            --body "Adds ${TAG} to docs/updates/releases.json and signs it (written by the release-feed workflow). Progenitor installs read it from GitHub Pages once this is on main."
+            --body "Adds ${TAG} to docs/updates/releases.json and signs it (written by the release-feed workflow). Progenitor installs read it from GitHub Pages once this is on main. Opened with GITHUB_TOKEN, so the tests workflow did not run: re-run the checks before merging. If another release-list PR merged first, rebase and run add and sign again."

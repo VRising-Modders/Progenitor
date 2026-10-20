@@ -323,6 +323,8 @@ internal static class SelfDetection
         {
             if (r == null || !r.Active || r.Deprecated || r.Version.Length == 0) continue;
             if (!string.Equals(r.Channel, SelfFeed.Channel, StringComparison.OrdinalIgnoreCase)) continue;
+            // A development build (a sub-release version) is never offered, even when a list names one.
+            if (IsSubRelease(r.Version)) continue;
             if (!UpdateVersions.IsNewer(r.Version, installed)) continue;
             if (facts.State.IsFailed(r.Version))
             {

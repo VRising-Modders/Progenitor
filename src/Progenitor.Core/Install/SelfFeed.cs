@@ -114,6 +114,25 @@ internal static class SelfFeed
         return list;
     }
 
+    /// <summary>
+    /// The list's signed <c>updated</c> time (UTC), or null when it has none or cannot be read. The release tool sets it each
+    /// time it signs; a client never takes a list older than its cached one (replay protection).
+    /// </summary>
+    public static DateTime? UpdatedOf(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true });
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+            string s = SelfState.Str(doc.RootElement, "updated");
+            return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var t)
+                ? DateTime.SpecifyKind(t, DateTimeKind.Utc)
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
     private static long Int64(JsonElement e, string name) =>
         e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out long n) ? n : 0;
 
@@ -298,7 +317,11 @@ internal static class SelfFeedCadence
         if (lastCheckUtc is not { } last)
         {
             bool fresh = cacheStampUtc is { } stamp && nowUtc >= stamp && nowUtc - stamp < StartMaxAge;
-            return fresh ? "" : "start";
+            if (!fresh) return "start";
+            // The copy was fresh at start, so nothing was asked yet: an index read still checks, at most every 10 minutes
+            // after the copy was last fetched or confirmed.
+            var since = nowUtc - cacheStampUtc!.Value;
+            return indexReadSinceLast && since >= MinInterval ? "index read" : "";
         }
 
         if (indexReadSinceLast && (nowUtc - last >= MinInterval || nowUtc < last)) return "index read";
@@ -337,16 +360,51 @@ internal sealed class SelfFeedFetch
     public IndexDiskCache Cache => _conditional.Cache;
     public ConditionalIndexFetch Conditional => _conditional;
 
-    /// <summary>The URLs asked so far (tests).</summary>
-    public List<string> Asked { get; } = new();
+    /// <summary>How many of the last URLs <see cref="Asked"/> keeps.</summary>
+    public const int AskedKept = 16;
+
+    private readonly List<string> _asked = new();
+
+    /// <summary>The last <see cref="AskedKept"/> URLs asked (tests and the readback), oldest first.</summary>
+    public List<string> Asked
+    {
+        get { lock (_asked) return new List<string>(_asked); }
+    }
+
+    private void NoteAsked(string url)
+    {
+        lock (_asked)
+        {
+            _asked.Add(url);
+            if (_asked.Count > AskedKept) _asked.RemoveAt(0);
+        }
+    }
 
     public Task<CatalogTextFetchResult> FetchAsync(CancellationToken ct, bool force = false) => _conditional.FetchAsync(ct, force);
 
+    /// <summary>
+    /// Whether the cached copy verifies with the trusted keys, and the <c>updated</c> time it was signed with (null when there
+    /// is no verified copy).
+    /// </summary>
+    private bool CachedVerified(out DateTime? updated)
+    {
+        updated = null;
+        if (!Cache.TryRead(CatalogFetcher.IndexMaxBytes, out string body, out _)) return false;
+        if (!SelfFeed.TrySplit(body, out string sig, out string feed)) return false;
+        if (!SelfFeed.Verify(Encoding.UTF8.GetBytes(feed), sig, _keys(), out _)) return false;
+        updated = SelfFeed.UpdatedOf(feed);
+        return true;
+    }
+
     private async Task<CatalogTextFetchResult> FetchBoth(IndexValidators validators, CancellationToken ct)
     {
-        var first = await ReadSigned(_primary, validators, ct).ConfigureAwait(false);
+        bool cachedOk = CachedVerified(out DateTime? cachedUpdated);
+        // A cached copy that no longer verifies (the keys were rolled, or it was changed) is never revalidated with a 304: the
+        // list and its signature are fetched again, so a list re-signed with the new key is picked up.
+        if (!cachedOk && !validators.IsEmpty) validators = IndexValidators.None;
+        var first = Fresh(await ReadSigned(_primary, validators, ct).ConfigureAwait(false), cachedUpdated);
         if (first.Ok || ct.IsCancellationRequested || _fallback.Length == 0 || string.Equals(_fallback, _primary, StringComparison.Ordinal)) return first;
-        var second = await ReadSigned(_fallback, IndexValidators.None, ct).ConfigureAwait(false);
+        var second = Fresh(await ReadSigned(_fallback, IndexValidators.None, ct).ConfigureAwait(false), cachedUpdated);
         if (second.Ok)
         {
             InstallLog.Info("Release list: " + _primary + " failed (" + first.Error + "); read " + _fallback + " instead.");
@@ -361,10 +419,24 @@ internal sealed class SelfFeedFetch
         return new CatalogTextFetchResult(false, first.Error + "; fallback: " + second.Error, null, 0, first.StatusCode) { FailureCause = first.FailureCause };
     }
 
+    /// <summary>
+    /// Replay protection: a verified list signed earlier than the verified copy already cached (its <c>updated</c> time) is
+    /// refused, so an old signed list served again cannot hide newer releases. It counts as a failed check.
+    /// </summary>
+    private static CatalogTextFetchResult Fresh(CatalogTextFetchResult r, DateTime? cachedUpdated)
+    {
+        if (!r.Ok || r.NotModified || r.Text == null || cachedUpdated is not { } cached) return r;
+        if (!SelfFeed.TrySplit(r.Text, out _, out string feed)) return r;
+        if (SelfFeed.UpdatedOf(feed) is { } got && got >= cached) return r;
+        return new CatalogTextFetchResult(false, "the release list is older than the one already cached (updated "
+            + (SelfFeed.UpdatedOf(feed)?.ToString("o", CultureInfo.InvariantCulture) ?? "missing") + ", cached "
+            + cached.ToString("o", CultureInfo.InvariantCulture) + "); not used", null, 0, r.StatusCode);
+    }
+
     /// <summary>The list and its signature from one place; a 304 passes through; a 200 comes back as the cached form.</summary>
     private async Task<CatalogTextFetchResult> ReadSigned(string url, IndexValidators validators, CancellationToken ct)
     {
-        lock (Asked) Asked.Add(url);
+        NoteAsked(url);
         CatalogTextFetchResult feed;
         try { feed = await _fetch(url, validators, SelfFeed.MaxFeedBytes, ct).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -372,7 +444,7 @@ internal sealed class SelfFeedFetch
         if (feed == null) return new CatalogTextFetchResult(false, InstallReasons.FetchTransport, null, 0, 0);
         if (!feed.Ok || feed.NotModified || feed.Text == null) return feed;
         CatalogTextFetchResult sig;
-        lock (Asked) Asked.Add(url + SelfFeed.SignatureSuffix);
+        NoteAsked(url + SelfFeed.SignatureSuffix);
         try { sig = await _fetch(url + SelfFeed.SignatureSuffix, IndexValidators.None, SelfFeed.MaxSignatureBytes, ct).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
         catch (Exception e) { return new CatalogTextFetchResult(false, "the signature could not be read: " + e.Message, null, 0, 0); }

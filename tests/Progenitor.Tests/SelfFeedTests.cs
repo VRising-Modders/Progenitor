@@ -31,7 +31,7 @@ internal static class SelfFeedKit
     /// The list's text. A release without a sha256 or size takes those of <paramref name="package"/> (the package the test
     /// downloads), or a placeholder when there is none.
     /// </summary>
-    public static string FeedJson(IEnumerable<SelfRelease> releases, byte[]? package = null)
+    public static string FeedJson(IEnumerable<SelfRelease> releases, byte[]? package = null, string? updated = null)
     {
         using var ms = new MemoryStream();
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
@@ -39,6 +39,7 @@ internal static class SelfFeedKit
             w.WriteStartObject();
             w.WriteNumber("schema", SelfFeed.Schema);
             w.WriteString("package", SelfFeed.Package);
+            if (updated != null) w.WriteString("updated", updated);
             w.WriteStartArray("releases");
             foreach (var r in releases)
             {
@@ -611,6 +612,91 @@ public sealed class SelfFeedTests : IDisposable
         Assert.True(SelfFeed.SamePackage(SelfFeed.Package, "Progenitor-Progenitor"));
         Assert.True(SelfFeed.SamePackage("", SelfFeed.Package));
         Assert.False(SelfFeed.SamePackage(SelfFeed.Package, "Someone-ProgenitorExtras"));
+    }
+
+    // ---- review fixes: replay, a cached copy that no longer verifies, development versions, the bound ----------------
+
+    [Fact]
+    public async Task A_verified_list_signed_earlier_than_the_cached_one_is_refused_as_a_replay()
+    {
+        string newer = SelfFeedKit.FeedJson(new[] { Rel("2026.11.5"), Rel("2026.11.3") }, updated: "2026-11-05T10:00:00Z");
+        string older = SelfFeedKit.FeedJson(new[] { Rel("2026.11.3") }, updated: "2026-11-02T10:00:00Z");
+        var server = new FakeFeedServer();
+        server.Serve(Primary, newer, SelfFeedKit.Signature(newer, SelfFeedKit.Key), etag: "\"new\"");
+        var fetch = new SelfFeedFetch(server.Fetch, new IndexDiskCache(_root, Primary), () => Trust(SelfFeedKit.Key), Fallback);
+        Assert.True((await fetch.FetchAsync(CancellationToken.None)).Ok);
+        Assert.Equal(new DateTime(2026, 11, 5, 10, 0, 0, DateTimeKind.Utc), SelfFeed.UpdatedOf(newer));
+
+        // An attacker serves the older, validly signed list (here: on both URLs).
+        server.Serve(Primary, older, SelfFeedKit.Signature(older, SelfFeedKit.Key), etag: "\"old\"");
+        server.Serve(Fallback, older, SelfFeedKit.Signature(older, SelfFeedKit.Key), etag: "\"old\"");
+        var replay = await fetch.FetchAsync(CancellationToken.None);
+        Assert.False(replay.Ok);
+        Assert.Contains("older than the one already cached", replay.Error);
+        Assert.Equal(1, fetch.Conditional.ConsecutiveFailures);
+        // The cache keeps the newer list.
+        Assert.True(fetch.Cache.TryRead(0, out string cached, out _));
+        Assert.Equal(2, SelfFeed.ReadVerified(cached, Trust(SelfFeedKit.Key), out _).Count);
+
+        // A later list (as the tool's sign writes it) is taken.
+        string later = SelfFeedKit.FeedJson(new[] { Rel("2026.11.7") }, updated: "2026-11-07T10:00:00Z");
+        server.Serve(Primary, later, SelfFeedKit.Signature(later, SelfFeedKit.Key), etag: "\"later\"");
+        Assert.True((await fetch.FetchAsync(CancellationToken.None)).Ok);
+    }
+
+    [Fact]
+    public async Task A_cached_list_that_no_longer_verifies_is_fetched_again_not_revalidated()
+    {
+        string feed = SelfFeedKit.FeedJson(new[] { Rel("2026.11.3") });
+        var server = new FakeFeedServer();
+        server.Serve(Primary, feed, SelfFeedKit.Signature(feed, SelfFeedKit.Key));
+        var trusted = new[] { SelfFeedKit.Key.SpkiBase64 };
+        var fetch = new SelfFeedFetch(server.Fetch, new IndexDiskCache(_root, Primary), () => trusted, Fallback);
+        Assert.True((await fetch.FetchAsync(CancellationToken.None)).Ok);
+
+        // The key is rolled: this Progenitor now trusts only the new key, and the list was re-signed with it. The file's
+        // ETag did not change (only the signature did), so a revalidation would answer 304 and keep the old signature.
+        trusted = new[] { SelfFeedKit.Other.SpkiBase64 };
+        server.Routes[Primary + SelfFeed.SignatureSuffix] = _ =>
+        {
+            string s = SelfFeedKit.Signature(feed, SelfFeedKit.Other);
+            return new CatalogTextFetchResult(true, null, s, s.Length, 200);
+        };
+        server.Asked.Clear();
+        var again = await fetch.FetchAsync(CancellationToken.None);
+        Assert.True(again.Ok, again.Error);
+        Assert.False(again.NotModified);
+        Assert.Contains(Primary + SelfFeed.SignatureSuffix, server.Asked);
+        Assert.True(fetch.Cache.TryRead(0, out string cached, out _));
+        Assert.Single(SelfFeed.ReadVerified(cached, trusted, out _));
+    }
+
+    [Fact]
+    public void A_development_version_in_the_list_is_never_offered()
+    {
+        var offer = SelfDetection.Detect(Managed("2026.10.162"), new[] { Rel("2026.11.3.4"), Rel("2026.11.1") });
+        Assert.Equal("2026.11.1", offer.Release!.Version);
+        Assert.False(SelfDetection.Detect(Managed("2026.10.162"), new[] { Rel("2026.11.3.4") }).Available);
+    }
+
+    [Fact]
+    public void An_index_read_checks_even_when_the_copy_was_fresh_at_start()
+    {
+        var now = new DateTime(2026, 10, 20, 12, 0, 0, DateTimeKind.Utc);
+        // Fresh at start (1 h old): nothing asked. Then the mod index is read: checked, as the docs say.
+        Assert.Equal("", SelfFeedCadence.Due(false, now, null, now.AddHours(-1), false, 6));
+        Assert.Equal("index read", SelfFeedCadence.Due(false, now, null, now.AddHours(-1), true, 6));
+        // ... but at most every 10 minutes after the copy was last fetched or confirmed.
+        Assert.Equal("", SelfFeedCadence.Due(false, now, null, now.AddMinutes(-3), true, 6));
+    }
+
+    [Fact]
+    public async Task The_asked_list_is_bounded()
+    {
+        var server = new FakeFeedServer();
+        var fetch = new SelfFeedFetch(server.Fetch, new IndexDiskCache(_root, Primary), () => Trust(SelfFeedKit.Key), Fallback);
+        for (int i = 0; i < SelfFeedFetch.AskedKept; i++) await fetch.FetchAsync(CancellationToken.None, force: true);
+        Assert.Equal(SelfFeedFetch.AskedKept, fetch.Asked.Count);
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------------
