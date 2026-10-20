@@ -98,7 +98,7 @@ public sealed class InstallScriptTests
             Assert.Equal("```", lines[i + 1].Trim());
         }
 
-        Assert.True(commands >= 2, file + " shows no installer command");
+        Assert.True(commands >= 1, file + " shows no installer command");
     }
 
     [Fact]
@@ -502,6 +502,157 @@ public sealed class InstallScriptTests
         Assert.Contains("-GamePath", missing.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>A fake Steam folder whose second library holds the game and, when asked, the dedicated server.</summary>
+    private static (string Steam, string Client, string Server) FakeSteam(Fixture fx, bool server)
+    {
+        string steam = Path.Combine(fx.Root, "Steam");
+        string lib = Path.Combine(fx.Root, "Library Two");
+        string client = Path.Combine(lib, "steamapps", "common", "VRising");
+        string srv = Path.Combine(lib, "steamapps", "common", "VRisingDedicatedServer");
+        Directory.CreateDirectory(Path.Combine(steam, "steamapps"));
+        Directory.CreateDirectory(client);
+        File.WriteAllText(Path.Combine(client, "VRising.exe"), "");
+        if (server)
+        {
+            Directory.CreateDirectory(srv);
+            File.WriteAllText(Path.Combine(srv, "VRisingServer.exe"), "");
+        }
+        File.WriteAllText(Path.Combine(steam, "steamapps", "libraryfolders.vdf"),
+            "\"libraryfolders\"\n{\n\t\"0\"\n\t{\n\t\t\"path\"\t\t\"" + steam.Replace("\\", "\\\\") + "\"\n\t}\n\t\"1\"\n\t{\n\t\t\"path\"\t\t\"" + lib.Replace("\\", "\\\\") + "\"\n\t}\n}\n");
+        return (steam, client, srv);
+    }
+
+    private static Dictionary<string, string> Answers(params string[] answers) => new() { ["PROGENITOR_ANSWERS"] = string.Join("|", answers) };
+
+    [Fact]
+    public void Asks_where_to_install_offers_the_game_and_the_server_and_takes_a_number()
+    {
+        foreach (string shell in Shells())
+        {
+            using var fx = new Fixture();
+            var (steam, client, srv) = FakeSteam(fx, server: true);
+
+            // "2" picks the server; no second question follows.
+            var r = Run(shell, "install.ps1", Answers("2"), "-SteamPath", steam, "-OfflinePackage", fx.Package(PackageVersion), "-OfflineBepInEx", fx.BepInExPack());
+            Assert.True(r.Exit == 0, r.Output);
+            Assert.Contains("Install Progenitor into:", r.Output, StringComparison.Ordinal);
+            Assert.Contains("1) the game  " + client, r.Output, StringComparison.Ordinal);
+            Assert.Contains("2) your dedicated server  " + srv, r.Output, StringComparison.Ordinal);
+            Assert.Contains("Press Enter for 1, type a number, or paste a folder: 2", r.Output, StringComparison.Ordinal);
+            Assert.Contains("Target: " + srv + " (VRisingServer.exe)", r.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("[Y/n]", r.Output, StringComparison.Ordinal);
+            Assert.True(File.Exists(Path.Combine(srv, "BepInEx", "progenitor-core", "Progenitor.dll")));
+            Assert.False(Directory.Exists(Path.Combine(client, "BepInEx")));
+
+            // Enter on its own picks the game.
+            var enter = Run(shell, "install.ps1", Answers("", ""), "-SteamPath", steam, "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion), "-OfflineBepInEx", fx.BepInExPack());
+            Assert.True(enter.Exit == 0, enter.Output);
+            Assert.Contains("Target: " + client + " (VRising.exe)", enter.Output, StringComparison.Ordinal);
+
+            // The uninstaller asks the same way.
+            var un = Run(shell, "uninstall.ps1", Answers("2"), "-SteamPath", steam);
+            Assert.True(un.Exit == 0, un.Output);
+            Assert.Contains("Remove Progenitor from:", un.Output, StringComparison.Ordinal);
+            Assert.Contains("2) your dedicated server  " + srv, un.Output, StringComparison.Ordinal);
+            Assert.Contains("Progenitor is removed.", un.Output, StringComparison.Ordinal);
+            Assert.False(File.Exists(Path.Combine(srv, "BepInEx", "progenitor-core", "Progenitor.dll")));
+        }
+    }
+
+    [Fact]
+    public void Asks_once_when_only_the_game_is_found_and_takes_a_pasted_quoted_folder_and_re_asks_a_bad_one()
+    {
+        string shell = Shells().FirstOrDefault()!;
+        if (shell == null) return;
+        using var fx = new Fixture();
+        var (steam, client, _) = FakeSteam(fx, server: false);
+        string other = Path.Combine(fx.Root, "My Server");
+        Directory.CreateDirectory(other);
+        File.WriteAllText(Path.Combine(other, "VRisingServer.exe"), "");
+
+        // One place found: one question, Enter installs there.
+        var enter = Run(shell, "install.ps1", Answers("", ""), "-SteamPath", steam, "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion));
+        Assert.True(enter.Exit == 0, enter.Output);
+        Assert.Contains("Install Progenitor into " + client + "? Press Enter to install, or paste a different folder: ", enter.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("1)", enter.Output, StringComparison.Ordinal);
+        Assert.Contains("Target: " + client + " (VRising.exe)", enter.Output, StringComparison.Ordinal);
+
+        // A pasted folder in quotes, with spaces around it: the side comes from the executable it holds.
+        var pasted = Run(shell, "install.ps1", Answers("  \"" + other + "\"  "), "-SteamPath", steam, "-OfflinePackage", fx.Package(PackageVersion), "-OfflineBepInEx", fx.BepInExPack());
+        Assert.True(pasted.Exit == 0, pasted.Output);
+        Assert.Contains("Target: " + other + " (VRisingServer.exe)", pasted.Output, StringComparison.Ordinal);
+        Assert.Contains("Next: start the server.", pasted.Output, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(other, "BepInEx", "progenitor-core", "Progenitor.dll")));
+
+        // A bad folder is asked again; a folder without the game in it too.
+        string nowhere = Path.Combine(fx.Root, "nowhere");
+        var retry = Run(shell, "install.ps1", Answers(nowhere, fx.Root, "'" + other + "'"), "-SteamPath", steam, "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion));
+        Assert.True(retry.Exit == 0, retry.Output);
+        Assert.Contains("There is no folder at " + nowhere, retry.Output, StringComparison.Ordinal);
+        Assert.Contains("That folder has no VRising.exe or VRisingServer.exe: " + fx.Root, retry.Output, StringComparison.Ordinal);
+        Assert.Contains("Target: " + other + " (VRisingServer.exe)", retry.Output, StringComparison.Ordinal);
+
+        // Three bad answers end it cleanly.
+        var fail =Run(shell, "install.ps1", Answers(nowhere, nowhere, nowhere), "-SteamPath", steam, "-OfflinePackage", fx.Package(PackageVersion));
+        Assert.True(fail.Exit == 1, fail.Output);
+        Assert.Contains("No game or server folder was given.", fail.Output, StringComparison.Ordinal);
+        Assert.Contains("Nothing was changed.", fail.Output, StringComparison.Ordinal);
+
+        // A folder with both executables asks which one.
+        string both = Path.Combine(fx.Root, "Both");
+        Directory.CreateDirectory(both);
+        File.WriteAllText(Path.Combine(both, "VRising.exe"), "");
+        File.WriteAllText(Path.Combine(both, "VRisingServer.exe"), "");
+        var two = Run(shell, "install.ps1", Answers(both, "2"), "-SteamPath", steam, "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion));
+        Assert.True(two.Exit == 0, two.Output);
+        Assert.Contains("Target: " + both + " (VRisingServer.exe)", two.Output, StringComparison.Ordinal);
+
+        // Nothing found: straight to the folder.
+        string empty = Path.Combine(fx.Root, "Empty Steam");
+        Directory.CreateDirectory(empty);
+        var none = Run(shell, "uninstall.ps1", Answers(other), "-SteamPath", empty, "-WhatIf");
+        Assert.True(none.Exit == 0, none.Output);
+        Assert.Contains("V Rising was not found through Steam.", none.Output, StringComparison.Ordinal);
+        Assert.Contains("Paste the folder that holds VRising.exe or VRisingServer.exe: " + other, none.Output, StringComparison.Ordinal);
+        Assert.Contains("Target: " + other + " (VRisingServer.exe)", none.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Without_a_person_to_ask_the_steam_game_is_the_default_and_nothing_is_asked()
+    {
+        string shell = Shells().FirstOrDefault()!;
+        if (shell == null) return;
+        using var fx = new Fixture();
+        var (steam, client, srv) = FakeSteam(fx, server: true);
+
+        // -NonInteractive (every run here): the game, no question.
+        var plain = Run(shell, "install.ps1", null, "-SteamPath", steam, "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion));
+        Assert.True(plain.Exit == 0, plain.Output);
+        Assert.Contains("Target: " + client + " (VRising.exe)", plain.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Press Enter", plain.Output, StringComparison.Ordinal);
+
+        // -NoPrompt and PROGENITOR_NO_PROMPT=1 win over answers; -Server and -GamePath never ask.
+        foreach (var (env, args) in new (Dictionary<string, string>, string[])[]
+                 {
+                     (Answers("2"), new[] { "-NoPrompt" }),
+                     (new() { ["PROGENITOR_ANSWERS"] = "2", ["PROGENITOR_NO_PROMPT"] = "1" }, Array.Empty<string>()),
+                 })
+        {
+            var r = Run(shell, "install.ps1", env, new[] { "-SteamPath", steam, "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion) }.Concat(args).ToArray());
+            Assert.True(r.Exit == 0, r.Output);
+            Assert.Contains("Target: " + client + " (VRising.exe)", r.Output, StringComparison.Ordinal);
+            Assert.DoesNotContain("Press Enter", r.Output, StringComparison.Ordinal);
+        }
+        var server = Run(shell, "install.ps1", Answers("1"), "-SteamPath", steam, "-Server", "-WhatIf", "-OfflinePackage", fx.Package(PackageVersion));
+        Assert.True(server.Exit == 0, server.Output);
+        Assert.Contains("Target: " + srv + " (VRisingServer.exe)", server.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Press Enter", server.Output, StringComparison.Ordinal);
+        var un = Run(shell, "uninstall.ps1", Answers("2"), "-GamePath", client, "-WhatIf");
+        Assert.True(un.Exit == 0, un.Output);
+        Assert.Contains("Target: " + client + " (VRising.exe)", un.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Remove Progenitor from", un.Output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Options_reach_the_script_through_irm_iex_environment_variables_and_the_scriptblock_form()
     {
@@ -865,7 +1016,8 @@ public sealed class InstallScriptTests
             CreateNoWindow = true,
         };
         foreach (string key in new[] { "PROGENITOR_GAME_PATH", "PROGENITOR_SERVER", "PROGENITOR_WHATIF", "PROGENITOR_OFFLINE_PACKAGE", "PROGENITOR_OFFLINE_BEPINEX",
-                     "PROGENITOR_STEAM_PATH", "PROGENITOR_FEED_URL", "PROGENITOR_KEEP_SETTINGS", "PROGENITOR_REMOVE_BEPINEX", "PROGENITOR_INSTALL_FAIL_AFTER" })
+                     "PROGENITOR_STEAM_PATH", "PROGENITOR_FEED_URL", "PROGENITOR_KEEP_SETTINGS", "PROGENITOR_REMOVE_BEPINEX", "PROGENITOR_INSTALL_FAIL_AFTER",
+                     "PROGENITOR_ANSWERS", "PROGENITOR_NO_PROMPT", "PROGENITOR_FORCE", "PROGENITOR_LATEST_BEPINEX" })
             psi.Environment.Remove(key);
         if (env != null)
             foreach (var kv in env) psi.Environment[kv.Key] = kv.Value;

@@ -147,27 +147,13 @@ Every command sits alone in its own code block, never inside a sentence, list it
 
 **Installing Progenitor** ([step by step](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html#players/install)):
 
-**With the installer.** Quit the game, open **PowerShell** from the Start menu, paste this line and press Enter:
+**With the installer.** Quit the game or stop your server, open **PowerShell** from the Start menu, paste this line and press Enter:
 
 ```
 irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
 ```
 
-It finds the game through Steam and installs BepInEx too when it is missing. The script is public; [read it first](https://vrising-modders.github.io/Progenitor/install.ps1).
-
-For a dedicated server, stop the server and use this line instead:
-
-```
-& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server
-```
-
-That line finds a server Steam installed (the V Rising Dedicated Server app). If your server isn't installed through Steam, use this line instead, with the folder that holds `VRisingServer.exe` in the quotes:
-
-```
-& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server -GamePath "D:\Servers\VRising"
-```
-
-On a rented server you can't run PowerShell on, use the by-hand steps.
+It asks where to install: press Enter for the place it found, or paste the folder that holds `VRising.exe` or `VRisingServer.exe` ([the script is public](https://vrising-modders.github.io/Progenitor/install.ps1)).
 
 **By hand.** Install [BepInExPack V Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/), then download `Progenitor-<version>.zip` from the [latest release](https://github.com/VRising-Modders/Progenitor/releases/latest) and extract it into the folder that holds `VRising.exe`. For a dedicated server, extract the same zip into the folder that holds `VRisingServer.exe`.
 ````

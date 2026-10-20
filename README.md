@@ -26,42 +26,39 @@ For mod authors:
 
 Progenitor ships from [GitHub releases](https://github.com/VRising-Modders/Progenitor/releases/latest). It needs [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/); the installer adds it when it is missing. The release zip never changes BepInEx's own files. The [Help Guide](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html#players/install) walks through both ways.
 
-**The installer.** Quit the game, open PowerShell and run:
+**The installer.** Quit the game or stop your server, open PowerShell and run:
 
 ```powershell
 irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
 ```
 
-It finds V Rising through Steam, refuses while the game runs, installs BepInEx when it is missing or incomplete (a pinned, reviewed BepInExPack_V_Rising checked by sha256; files a repair replaces go to the backup, and BepInEx settings are always kept), checks the Progenitor download against its published sha256 and installs the latest Progenitor. Files it replaces are moved to `BepInEx/progenitor-backups/install-<time>/` first, and a failure part way puts them back. Run it again to update or repair. It does not install an older release over a newer Progenitor (a development build, say) unless you add `-Force`. The script is public; read it first at <https://vrising-modders.github.io/Progenitor/install.ps1>.
+It asks where to install: press Enter for the place it found through Steam, pick the game or your dedicated server when it found both, or paste the folder that holds `VRising.exe` or `VRisingServer.exe`. The same line works for the game and for a server.
 
-For a dedicated server, stop the server and use this line instead:
+It refuses while the game or server runs, installs BepInEx when it is missing or incomplete (a pinned, reviewed BepInExPack_V_Rising checked by sha256; files a repair replaces go to the backup, and BepInEx settings are always kept), checks the Progenitor download against its published sha256 and installs the latest Progenitor. Files it replaces are moved to `BepInEx/progenitor-backups/install-<time>/` first, and a failure part way puts them back; the last three install backups are kept. Run it again to update or repair. It does not install an older release over a newer Progenitor (a development build, say) unless you add `-Force`. The script is public; read it first at <https://vrising-modders.github.io/Progenitor/install.ps1>.
+
+**Options, for scripts and advanced use.** Players don't need these. Options go through the scriptblock form, or a downloaded copy run with `-File`:
 
 ```powershell
-& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server
+& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server -WhatIf
 ```
 
-Options work with that scriptblock form, for example a game folder Steam doesn't know:
-
 ```powershell
-& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -GamePath "D:\Games\VRising"
-```
-
-or on a downloaded copy:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1 -Server -GamePath "D:\Servers\VRising"
+powershell -ExecutionPolicy Bypass -File install.ps1 -GamePath "D:\Servers\VRising"
 ```
 
 | Option | What it does |
 |---|---|
-| `-GamePath <folder>` | The folder that holds `VRising.exe` or `VRisingServer.exe`, when it is not where Steam installed it. |
-| `-Server` | The dedicated server: Steam's **V Rising Dedicated Server**, or `-GamePath`. |
+| `-GamePath <folder>` | The folder that holds `VRising.exe` or `VRisingServer.exe`. Nothing is asked. |
+| `-Server` | The dedicated server: Steam's **V Rising Dedicated Server**, or `-GamePath`. Nothing is asked. |
+| `-NoPrompt` | Never ask where to install: take `-GamePath`, `-Server` or the Steam game. |
 | `-WhatIf` | Print the plan and change nothing. |
 | `-OfflinePackage <zip>`, `-OfflineBepInEx <zip>` | Install from zips you already downloaded. A `SHA256SUMS` beside the Progenitor zip is checked. |
 | `-LatestBepInEx` | Install the newest BepInExPack_V_Rising on Thunderstore instead of the pinned, reviewed version (checked for completeness only). |
 | `-Force` | Go on when a V Rising process is running whose folder Windows does not name (only when it runs from another folder), and install an older release over a newer Progenitor. |
 
-`irm … | iex` cannot pass options; set them as environment variables first instead: `$env:PROGENITOR_GAME_PATH = "D:\Games\VRising"`, `PROGENITOR_SERVER=1`, `PROGENITOR_WHATIF=1`, `PROGENITOR_FORCE=1`, `PROGENITOR_OFFLINE_PACKAGE`, `PROGENITOR_OFFLINE_BEPINEX`, `PROGENITOR_LATEST_BEPINEX=1`, `PROGENITOR_STEAM_PATH`, `PROGENITOR_FEED_URL`. The installer keeps the last three install backups.
+`irm … | iex` cannot pass options; set them as environment variables first instead: `$env:PROGENITOR_GAME_PATH = "D:\Games\VRising"`, `PROGENITOR_SERVER=1`, `PROGENITOR_NO_PROMPT=1`, `PROGENITOR_WHATIF=1`, `PROGENITOR_FORCE=1`, `PROGENITOR_OFFLINE_PACKAGE`, `PROGENITOR_OFFLINE_BEPINEX`, `PROGENITOR_LATEST_BEPINEX=1`, `PROGENITOR_STEAM_PATH`, `PROGENITOR_FEED_URL`.
+
+The installer never asks anything when a folder or `-Server` is given, with `-NoPrompt`, in CI (`CI`, `GITHUB_ACTIONS`, `TF_BUILD`), in a PowerShell started with `-NonInteractive`, or when its input is redirected. Then it installs into the Steam game, as it always has.
 
 **By hand.**
 
@@ -73,13 +70,13 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Server -GamePath "D:\Serve
 
 The same zip works for the game and for a dedicated server. It adds `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll`, the `BepInEx/progenitor-core/` folder and `BepInEx/progenitor-self-install.json`, the record that lets Progenitor update itself from GitHub releases ([auto-update](docs/auto-update.md#release-list-github)). Each release also carries a mod-manager layout, `Progenitor-<version>-thunderstore.zip`: it packs the `progenitor-core` folder as `BepInEx/patchers/progenitor-files.zip`, which the preloader unpacks at the first start, because mod managers only place files in `plugins` and `patchers`. A copy installed that way tells you about new versions instead of updating itself.
 
-**Removing it.** Use **Remove Progenitor from this PC** in the Mods menu (it leaves the small preloader in `BepInEx/patchers`, which you can delete while the game is closed), or quit the game and run the remover:
+**Removing it.** Use **Remove Progenitor from this PC** in the Mods menu (it leaves the small preloader in `BepInEx/patchers`, which you can delete while the game is closed), or quit the game (or stop your server) and run the remover:
 
 ```powershell
 irm https://vrising-modders.github.io/Progenitor/uninstall.ps1 | iex
 ```
 
-It moves Progenitor, its settings, the mods it installed and every mod in `BepInEx/progenitor-reload` (also ones copied there by hand) to `BepInEx/progenitor-backups/uninstall-<time>/`, and never touches saves. `-KeepSettings` keeps Progenitor's settings; `-RemoveBepInEx` also removes BepInEx, and every other BepInEx mod stops loading with it. It takes the same `-GamePath`, `-Server` and `-WhatIf` options.
+It moves Progenitor, its settings, the mods it installed and every mod in `BepInEx/progenitor-reload` (also ones copied there by hand) to `BepInEx/progenitor-backups/uninstall-<time>/`, and never touches saves. `-KeepSettings` keeps Progenitor's settings; `-RemoveBepInEx` also removes BepInEx, and every other BepInEx mod stops loading with it. It asks which install to remove Progenitor from the same way, and takes the same `-GamePath`, `-Server`, `-NoPrompt` and `-WhatIf` options (and `PROGENITOR_KEEP_SETTINGS=1`, `PROGENITOR_REMOVE_BEPINEX=1`).
 
 **Never put `Progenitor.Dev.dll` on a public server.** It is the development bridge, and release packages don't include it.
 
