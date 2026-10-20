@@ -14,10 +14,14 @@
   Read this script before you run it:
     https://vrising-modders.github.io/Progenitor/uninstall.ps1
 
-  One line, in PowerShell:
+  One line, in PowerShell, for the game and for a dedicated server:
     irm https://vrising-modders.github.io/Progenitor/uninstall.ps1 | iex
 
-  With options:
+  It asks which install to remove Progenitor from, the same way the installer asks where to install. It asks
+  nothing when a folder or -Server is given, with -NoPrompt (PROGENITOR_NO_PROMPT=1), in CI, under
+  -NonInteractive or with redirected input: then it takes the Steam game, as before.
+
+  For scripts and advanced use, with options:
     & ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/uninstall.ps1))) -GamePath "D:\Games\VRising" -KeepSettings
 
   Downloaded:
@@ -25,7 +29,7 @@
 
   With "irm | iex" no options can be passed; set them as environment variables first instead:
     PROGENITOR_GAME_PATH, PROGENITOR_SERVER=1, PROGENITOR_WHATIF=1, PROGENITOR_FORCE=1,
-    PROGENITOR_KEEP_SETTINGS=1, PROGENITOR_REMOVE_BEPINEX=1, PROGENITOR_STEAM_PATH.
+    PROGENITOR_KEEP_SETTINGS=1, PROGENITOR_REMOVE_BEPINEX=1, PROGENITOR_STEAM_PATH, PROGENITOR_NO_PROMPT=1.
 
 .PARAMETER GamePath
   The folder that holds VRising.exe or VRisingServer.exe. Default: V Rising in your Steam libraries.
@@ -48,6 +52,9 @@
 
 .PARAMETER SteamPath
   Look for the game in this Steam folder instead of the one Windows has registered.
+
+.PARAMETER NoPrompt
+  Never ask which install: take -GamePath, -Server or the Steam game.
 #>
 [CmdletBinding()]
 param(
@@ -57,7 +64,8 @@ param(
   [switch]$Force = ($env:PROGENITOR_FORCE -match '^(1|true|yes)$'),
   [switch]$KeepSettings = ($env:PROGENITOR_KEEP_SETTINGS -match '^(1|true|yes)$'),
   [switch]$RemoveBepInEx = ($env:PROGENITOR_REMOVE_BEPINEX -match '^(1|true|yes)$'),
-  [string]$SteamPath = $env:PROGENITOR_STEAM_PATH
+  [string]$SteamPath = $env:PROGENITOR_STEAM_PATH,
+  [switch]$NoPrompt = ($env:PROGENITOR_NO_PROMPT -match '^(1|true|yes)$')
 )
 
 #region shared (install.ps1 and uninstall.ps1 carry the same copy of this region)
@@ -161,6 +169,108 @@ function Resolve-PgTarget([string]$GamePath, [bool]$Server, [string]$SteamPath) 
     return [pscustomobject]@{ Path = $path; Exe = $serverExe; Side = 'server'; Name = 'the V Rising dedicated server' }
   }
   return [pscustomobject]@{ Path = $path; Exe = $clientExe; Side = 'client'; Name = 'V Rising' }
+}
+
+# Whether this run may ask questions. Never with -NoPrompt (PROGENITOR_NO_PROMPT=1), in CI, in a PowerShell started
+# with -NonInteractive, without a desktop session or with redirected input. PROGENITOR_ANSWERS (answers separated by |)
+# stands in for the person at the keyboard; tests use it.
+function New-PgPrompter([bool]$NoPrompt) {
+  $answers = $null
+  if ($env:PROGENITOR_ANSWERS) {
+    $answers = New-Object System.Collections.Generic.Queue[string]
+    foreach ($a in ($env:PROGENITOR_ANSWERS -split '\|')) { $answers.Enqueue($a) }
+  }
+  $can = $true
+  if ($NoPrompt) { $can = $false }
+  elseif ($null -ne $answers) { $can = $true }
+  elseif (($env:CI -match '^(1|true)$') -or ($env:GITHUB_ACTIONS -eq 'true') -or $env:TF_BUILD) { $can = $false }
+  elseif (-not [Environment]::UserInteractive) { $can = $false }
+  else {
+    foreach ($arg in [Environment]::GetCommandLineArgs()) {
+      if ($arg -notmatch '^(--|-|/)([A-Za-z]+)$') { continue }
+      $word = $Matches[2].ToLowerInvariant()
+      if ($word.Length -ge 4 -and 'noninteractive'.StartsWith($word, [System.StringComparison]::Ordinal)) { $can = $false; break }
+    }
+    if ($can) {
+      try { if ([Console]::IsInputRedirected) { $can = $false } } catch { }
+    }
+  }
+  return [pscustomobject]@{ Enabled = $can; Answers = $answers }
+}
+
+# One answer, trimmed. A fed answer is echoed so the output reads like the conversation.
+function Read-PgAnswer($Io, [string]$Prompt) {
+  $a = ''
+  if ($null -ne $Io.Answers) {
+    if ($Io.Answers.Count -gt 0) { $a = $Io.Answers.Dequeue() }
+    Write-PgLine ($Prompt + ': ' + $a)
+  }
+  else {
+    try { $a = Read-Host $Prompt }
+    catch [System.Management.Automation.PipelineStoppedException] { throw }
+    catch { throw 'This window cannot ask questions. Set PROGENITOR_GAME_PATH to the game or server folder first.' }
+  }
+  if ($null -eq $a) { return '' }
+  return ([string]$a).Trim()
+}
+
+# The target for a folder the person pasted, or $null (with the reason shown) when it is not one.
+function Get-PgPastedTarget($Io, [string]$Text, [string]$SteamPath) {
+  $p = $Text.Trim('"', "'", ' ')
+  if (-not $p) { return $null }
+  $path = $null
+  try { $path = Get-PgFullPath $p } catch { $path = $null }
+  if (-not $path) { Write-PgLine ('That is not a folder: ' + $p) 'Yellow'; return $null }
+  if (Test-Path -LiteralPath $path -PathType Leaf) { $path = Split-Path -Parent $path }
+  if (-not (Test-Path -LiteralPath $path -PathType Container)) { Write-PgLine ('There is no folder at ' + $path) 'Yellow'; return $null }
+  $hasClient = Test-Path -LiteralPath (Join-Path $path 'VRising.exe') -PathType Leaf
+  $hasServer = Test-Path -LiteralPath (Join-Path $path 'VRisingServer.exe') -PathType Leaf
+  if (-not $hasClient -and -not $hasServer) { Write-PgLine ('That folder has no VRising.exe or VRisingServer.exe: ' + $path) 'Yellow'; return $null }
+  $asServer = $hasServer -and -not $hasClient
+  if ($hasClient -and $hasServer) {
+    $a = Read-PgAnswer $Io 'That folder has both the game and the server. Press Enter for the game, or type 2 for the server'
+    $asServer = ($a -eq '2')
+  }
+  return (Resolve-PgTarget $path $asServer $SteamPath)
+}
+
+# Which install to change. With -GamePath or -Server (or their environment variables), or when this run cannot ask
+# questions, it is Resolve-PgTarget: the Steam game unless told otherwise. Otherwise one question: Enter takes what
+# Steam has (the game first), a number picks, and a pasted folder is used instead.
+function Select-PgTarget([string]$GamePath, [bool]$Server, [string]$SteamPath, $Io, [string]$Action) {
+  if ($GamePath -or $Server -or -not $Io.Enabled) { return (Resolve-PgTarget $GamePath $Server $SteamPath) }
+  $found = New-Object System.Collections.Generic.List[object]
+  $c = Find-PgSteamApp $SteamPath '1604030' 'VRising'
+  if ($c -and (Test-Path -LiteralPath (Join-Path $c 'VRising.exe') -PathType Leaf)) { $found.Add([pscustomobject]@{ Path = $c; Server = $false; Label = 'the game' }) }
+  $s = Find-PgSteamApp $SteamPath '1829350' 'VRisingDedicatedServer'
+  if ($s -and (Test-Path -LiteralPath (Join-Path $s 'VRisingServer.exe') -PathType Leaf)) { $found.Add([pscustomobject]@{ Path = $s; Server = $true; Label = 'your dedicated server' }) }
+
+  $verb = 'Install Progenitor into'
+  $enter = 'install'
+  if ($Action -eq 'uninstall') { $verb = 'Remove Progenitor from'; $enter = 'remove' }
+  $question = 'Paste the folder that holds VRising.exe or VRisingServer.exe'
+  if ($found.Count -eq 0) { Write-PgLine 'V Rising was not found through Steam.' }
+  elseif ($found.Count -eq 1) { $question = $verb + ' ' + $found[0].Path + '? Press Enter to ' + $enter + ', or paste a different folder' }
+  elseif ($found.Count -gt 1) {
+    Write-PgLine ($verb + ':')
+    for ($i = 0; $i -lt $found.Count; $i++) { Write-PgLine ('  ' + ($i + 1) + ') ' + $found[$i].Label + '  ' + $found[$i].Path) }
+    $question = 'Press Enter for 1, type a number, or paste a folder'
+  }
+  for ($try = 1; $try -le 3; $try++) {
+    $a = Read-PgAnswer $Io $question
+    $pick = $null
+    if ($found.Count -gt 0 -and $a -eq '') { $pick = $found[0] }
+    elseif ($found.Count -gt 1 -and $a -match '^\d{1,3}$') {
+      if ([int]$a -ge 1 -and [int]$a -le $found.Count) { $pick = $found[[int]$a - 1] }
+      else { Write-PgLine ('Type 1 to ' + $found.Count + ', or paste a folder.') 'Yellow' }
+    }
+    elseif ($a -ne '') {
+      $t = Get-PgPastedTarget $Io $a $SteamPath
+      if ($t) { return $t }
+    }
+    if ($pick) { return (Resolve-PgTarget $pick.Path $pick.Server $SteamPath) }
+  }
+  throw 'No game or server folder was given.'
 }
 
 # Every running process whose executable is inside the target folder (matched by full path, never by name), plus the
@@ -427,7 +537,7 @@ function Invoke-PgUninstall {
     if ($dry) { Write-PgLine 'Progenitor uninstaller: dry run (-WhatIf). Nothing is changed.' 'Cyan' }
     else { Write-PgLine 'Progenitor uninstaller' 'Cyan' }
 
-    $target = Resolve-PgTarget $GamePath ([bool]$Server) $SteamPath
+    $target = Select-PgTarget $GamePath ([bool]$Server) $SteamPath (New-PgPrompter ([bool]$NoPrompt)) 'uninstall'
     $game = $target.Path
     $bep = Join-Path $game 'BepInEx'
     Write-PgLine ("Target: " + $game + " (" + $target.Exe + ")")
