@@ -62,15 +62,18 @@ public sealed class InstallScriptTests
         Assert.DoesNotMatch(new Regex(@"\?\?|\?\.|\s&&\s|\s\|\|\s|-AsHashtable|\bclean\s*\{"), text);
     }
 
-    /// <summary>Thunderstore shows no copy button: every installer command is a line of its own in a powershell block.</summary>
+    /// <summary>Thunderstore shows no copy button: every installer command is a line of its own in a code block. Text meant for
+    /// a Thunderstore README uses a plain fence, because Thunderstore prints a fence's language label ("powershell") inside the
+    /// block, where players copy it with the command and the command then fails.</summary>
     [Theory]
-    [InlineData("README.md")]
-    [InlineData("docs/publishing.md")]
-    [InlineData("templates/progenitor-mod/README.md")]
-    public void Every_installer_command_in_the_markdown_docs_sits_alone_in_a_powershell_block(string file)
+    [InlineData("README.md", "powershell")]
+    [InlineData("docs/publishing.md", "")]
+    [InlineData("templates/progenitor-mod/README.md", "")]
+    public void Every_installer_command_in_the_markdown_docs_sits_alone_in_a_code_block(string file, string label)
     {
         string[] lines = File.ReadAllLines(Path.Combine(RepoRoot(), file));
-        string? fence = null;
+        // Open fences, innermost last: a ````markdown example can hold ``` blocks of its own.
+        var fences = new List<(int Ticks, string Label)>();
         int commands = 0;
         for (int i = 0; i < lines.Length; i++)
         {
@@ -78,15 +81,18 @@ public sealed class InstallScriptTests
             var open = Regex.Match(t, @"^(`{3,})(\w*)$");
             if (open.Success)
             {
-                if (fence == null) fence = open.Groups[2].Value;
-                else if (open.Groups[2].Value.Length == 0) fence = null;
-                else fence = open.Groups[2].Value; // a block inside a ````markdown example
+                int ticks = open.Groups[1].Value.Length;
+                string tag = open.Groups[2].Value;
+                if (fences.Count > 0 && tag.Length == 0 && fences[^1].Ticks == ticks) fences.RemoveAt(fences.Count - 1);
+                else fences.Add((ticks, tag));
                 continue;
             }
 
+            string? fence = fences.Count > 0 ? fences[^1].Label : null;
+
             if (!t.Contains("irm https://", StringComparison.Ordinal)) continue;
             commands++;
-            Assert.True(fence == "powershell", file + ":" + (i + 1) + " has an installer command outside a powershell block");
+            Assert.True(fence == label, file + ":" + (i + 1) + " has an installer command outside a " + (label.Length == 0 ? "plain" : label) + " code block");
             Assert.Matches(@"^(irm |& \(\[scriptblock\]::Create\(\(irm )", t);
             Assert.Matches(@"^```", lines[i - 1].Trim());
             Assert.Equal("```", lines[i + 1].Trim());
