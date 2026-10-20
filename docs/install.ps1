@@ -746,7 +746,7 @@ function Invoke-PgInstall {
       if ($Force) { Write-PgLine ('Note: ' + $downgrade + ' Installing the older ' + $incoming + ' because of -Force.') 'Yellow' }
       elseif (-not $dry) { throw ($downgrade + ' The installer does not replace a newer Progenitor with an older one. To install ' + $incoming + ' anyway, run this again with -Force (or set PROGENITOR_FORCE=1).') }
     }
-    $backup =New-PgBackupPath (Join-Path $bep 'progenitor-backups') 'install'
+    $backup = New-PgBackupPath (Join-Path $bep 'progenitor-backups') 'install'
 
     # What the new files replace, and the staged copies a start would otherwise apply over them.
     $units = New-Object System.Collections.Generic.List[string]
