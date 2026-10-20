@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "package": "VRising_Modders-Progenitor",
+  "updated": "2026-10-20T08:28:51Z",
+  "releases": [
+    {
+      "version": "2026.10.162",
+      "published": "2026-10-19T16:22:32Z",
+      "channel": "release",
+      "url": "https://github.com/VRising-Modders/Progenitor/releases/download/v2026.10.162/Progenitor-2026.10.162.zip",
+      "size": 15304177,
+      "sha256": "40bb2aaada1e55643c1e1768129be661e24a2fb2d4deaae6dd2be55ec241b183",
+      "coreSha256": "1469dd7cd4c6c8f771c033d7ddcb5513cfe24ea080e5e4970ce8f648152ca247",
+      "bootstrapSha256": "044542ad33bff6ca68a13b760c313eb8702e24f928c8e66c1d1f565033db513b",
+      "bootstrapProtocol": 5,
+      "coreProtocol": 5,
+      "handshakeProtocol": 2,
+      "notes": "https://github.com/VRising-Modders/Progenitor/releases/tag/v2026.10.162"
+    }
+  ]
+}

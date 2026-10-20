@@ -177,6 +177,8 @@ internal sealed class CatalogFetcher
                             return Fail(reason == InstallReasons.FetchNotHttps
                                 ? InstallReasons.FetchRedirectInsecure
                                 : reason, lastStatus, stamp);
+                        if (_options.RedirectAllowed != null && !_options.RedirectAllowed(uri))
+                            return Fail(InstallReasons.FetchRedirectHost, lastStatus, stamp);
                         continue;
                     }
 
@@ -340,6 +342,8 @@ internal sealed class CatalogFetcher
                             return BytesFail(reason == InstallReasons.FetchNotHttps
                                 ? InstallReasons.FetchRedirectInsecure
                                 : reason, lastStatus);
+                        if (_options.RedirectAllowed != null && !_options.RedirectAllowed(uri))
+                            return BytesFail(InstallReasons.FetchRedirectHost, lastStatus);
                         continue;
                     }
 
@@ -700,6 +704,12 @@ internal sealed class CatalogFetchOptions
     /// False everywhere else, so nothing but HTTPS is fetched from the real catalog.
     /// </summary>
     public bool AllowFileUrls { get; init; }
+
+    /// <summary>
+    /// Where a redirect may lead (checked after the HTTPS rule), or null for any host. Progenitor's own release download
+    /// allows only GitHub's release-asset hosts (<see cref="SelfFeed.IsAllowedRedirect"/>).
+    /// </summary>
+    public Func<Uri, bool>? RedirectAllowed { get; init; }
 }
 
 /// <summary>An in-memory binary body from <see cref="CatalogFetcher.FetchBytesAsync"/> (LIST1: listing icons).</summary>

@@ -22,6 +22,7 @@ internal static class SelfUpdatesLive
     private static double _next;
     private static ConfigEntry<string>? _mode;
     private static ConfigEntry<bool>? _devOverride;
+    private static ConfigEntry<string>? _devKey;
     private static bool _bindTried;
     private static byte[]? _shaBytes;
     private static string _coreSha = "";
@@ -44,6 +45,7 @@ internal static class SelfUpdatesLive
         _frame = null;
         _mode = null;
         _devOverride = null;
+        _devKey = null;
         _bindTried = false;
         _shaBytes = null;
         _check = null;
@@ -71,11 +73,15 @@ internal static class SelfUpdatesLive
         SelfUpdates.RootProbe = () => Paths.BepInExRootPath;
         SelfUpdates.IsServerProbe = () => Plugin.IsServerProcess;
         SelfUpdates.FactsProbe = ReadFacts;
-        // A client reads the index its Install tab and join screens cache; a server the one its auto-updater (phase 3) caches on
-        // its CheckHours cadence, for the remote installer's Thunderstore base.
-        SelfUpdates.IndexPathProbe = () => new IndexDiskCache(Paths.BepInExRootPath, IndexUrl()).IndexPath;
+        // Both sides read Progenitor's signed release list (GitHub Pages; jsDelivr when that fails) into its own cache; a
+        // client asks when it reads the mod index anyway, a server on its CheckHours cadence (SelfUpdates.Feed.cs).
+        SelfUpdates.IndexPathProbe = () => FeedCache().IndexPath;
+        SelfUpdates.KeysProbe = Keys;
+        SelfUpdates.FeedStampProbe = () => FeedCache().TryReadStamp(out var stamp) ? stamp : null;
+        SelfUpdates.IndexReadProbe = Plugin.IsServerProcess ? null : ModIndexStamp;
+        SelfUpdates.CheckHoursProbe = () => Plugin.IsServerProcess ? ServerAutoUpdateLive.ReadSettings().CheckHours : ServerUpdateSettings.DefaultCheckHours;
         SelfUpdates.Download = DownloadAsync;
-        SelfUpdates.CheckIndex = Plugin.IsServerProcess ? ServerCheckIndex : CheckIndexAsync;
+        SelfUpdates.CheckIndex = CheckFeedAsync;
         SelfUpdates.RequestSwap = RequestSwap;
         SelfUpdates.ReloadStatus = ReadReloadStatus;
         SelfUpdates.WindowClosed = Plugin.IsServerProcess ? ServerWindow : ClientWindow;
@@ -124,6 +130,8 @@ internal static class SelfUpdatesLive
                 Plugin.IsServerProcess ? SelfUpdateSettings.ServerHelp : "Automatic, Notify or Off. " + SelfUpdateSettings.Help);
             _devOverride = Progenitor.Config.ConfigHelper.Bind(file, SelfUpdateSettings.Section, SelfUpdateSettings.DevOverrideKey, false,
                 SelfUpdateSettings.DevOverrideHelp);
+            _devKey = Progenitor.Config.ConfigHelper.Bind(file, SelfUpdateSettings.Section, SelfUpdateSettings.DevKeyKey, "",
+                SelfUpdateSettings.DevKeyHelp);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning(SelfUpdates.LogPrefix + "binding [AutoUpdate] Progenitor threw: " + e.Message); }
     }
@@ -269,40 +277,68 @@ internal static class SelfUpdatesLive
 
     // ---- download, swap, status -----------------------------------------------------------------------------
 
-    /// <summary>The index URL this process's index reads cache (client: the Install tab's; server: the remote installer's base).</summary>
-    private static string IndexUrl() =>
-        Plugin.IsServerProcess ? RemoteInstallEvents.CurrentSettings.IndexUrl : CatalogFetchOptions.Default.IndexUrl;
+    // ---- the release list ----------------------------------------------------------------------------------
 
     /// <summary>
-    /// A server's Check now is phase 3's: one conditional request by the server's auto-updater (owner <c>auto-update</c>, its
-    /// backoff), which leaves the body in the cache detection reads.
+    /// Developer testing only: while the dev Thunderstore stand-in is active (<c>[Install] DevThunderstoreUrl</c>), the release
+    /// list and its packages come from the stand-in's <c>/progenitor/updates/</c> (tools/local-thunderstore), with no
+    /// fallback, and <c>[AutoUpdate] SelfUpdateDevKey</c> (an SPKI base64 public key) is trusted beside the built-in keys.
     /// </summary>
-    private static Task<string> ServerCheckIndex(CancellationToken ct) =>
-        Task.FromResult("the server's update check: " + ServerAutoUpdate.BeginCheck(true, "progenitor self-update check"));
+    private static string? DevOrigin()
+    {
+        try { return ThunderstoreMirror.Base is { } b ? b.GetLeftPart(UriPartial.Authority) : null; }
+        catch { return null; }
+    }
 
-    private static ConditionalIndexFetch? _check;
+    private static string FeedUrl() => DevOrigin() is { } dev ? dev + "/progenitor/updates/releases.json" : SelfFeed.PrimaryUrl;
+
+    private static IndexDiskCache FeedCache() => new(Paths.BepInExRootPath, FeedUrl());
+
+    private static System.Collections.Generic.IReadOnlyList<string> Keys()
+    {
+        var keys = new System.Collections.Generic.List<string>(SelfFeedKeys.Trusted());
+        if (DevOrigin() != null && (_devKey?.Value ?? "").Trim() is { Length: > 0 } dev) keys.Add(dev);
+        return keys;
+    }
+
+    /// <summary>The mod index's stamp (it moves when the Install tab or the join screens read the index).</summary>
+    private static string ModIndexStamp()
+    {
+        try
+        {
+            string? p = new IndexDiskCache(Paths.BepInExRootPath, CatalogFetchOptions.Default.IndexUrl).StampPath;
+            return p != null && File.Exists(p) ? File.GetLastWriteTimeUtc(p).Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) : "";
+        }
+        catch { return ""; }
+    }
+
+    private static SelfFeedFetch? _check;
     private static string _checkUrl = "";
 
-    /// <summary>One conditional request (owner <c>auto-update</c>) over this process's cached copy of the index it reads.</summary>
-    private static async Task<string> CheckIndexAsync(CancellationToken ct)
+    /// <summary>One conditional request for the release list (owner <c>self-update</c>, its backoff), the fallback only on failure.</summary>
+    private static async Task<string> CheckFeedAsync(CancellationToken ct)
     {
-        var options = CatalogFetchOptions.Default;
-        if (_check == null || !string.Equals(_checkUrl, options.IndexUrl, StringComparison.Ordinal))
+        string url = FeedUrl();
+        if (_check == null || !string.Equals(_checkUrl, url, StringComparison.Ordinal))
         {
             var http = SharedCatalogHttp.Acquire();
-            _check = ConditionalIndexFetch.Over(new CatalogFetcher(http, options), options.IndexUrl, new IndexDiskCache(Paths.BepInExRootPath, options.IndexUrl), "auto-update");
-            _checkUrl = options.IndexUrl;
+            var fetcher = new CatalogFetcher(http, CatalogFetchOptions.Default);
+            _check = new SelfFeedFetch((u, validators, max, token) => fetcher.FetchIndexTextAsync(u, max, validators, token),
+                new IndexDiskCache(Paths.BepInExRootPath, url), Keys, DevOrigin() != null ? null : SelfFeed.FallbackUrl);
+            _checkUrl = url;
         }
 
         var r = await _check.FetchAsync(ct).ConfigureAwait(false);
-        return r.Ok ? (r.NotModified ? "304, the cached index is current (" + options.IndexUrl + ")" : "200, the index was fetched (" + options.IndexUrl + ")") : "failed: " + r.Error;
+        return r.Ok ? (r.NotModified ? "304, the cached release list is current (" + url + ")" : "200, the release list was read and verified (" + url + ")") : "failed: " + r.Error;
     }
 
+    /// <summary>A release package: only its GitHub release asset (redirects only to GitHub's asset hosts), within the bound.</summary>
     private static async Task<(byte[]? Bytes, string Error)> DownloadAsync(string url, long max, CancellationToken ct)
     {
-        if (!JoinCatalogInstaller.IsThunderstoreUrl(url)) return (null, "its download is not on Thunderstore (" + url + ")");
+        string? dev = DevOrigin();
+        if (!SelfFeed.IsAssetUrl(url, dev)) return (null, "its download is not a Progenitor release on GitHub (" + url + ")");
         using var http = SharedCatalogHttp.Acquire();
-        var fetcher = new CatalogFetcher(http, CatalogFetchOptions.Default);
+        var fetcher = new CatalogFetcher(http, new CatalogFetchOptions { RedirectAllowed = u => SelfFeed.IsAllowedRedirect(u, dev) });
         var r = await fetcher.FetchBytesAsync(url, max, ct).ConfigureAwait(false);
         return r.Ok && r.Bytes != null ? (r.Bytes, "") : (null, r.Error ?? ("status " + r.StatusCode));
     }

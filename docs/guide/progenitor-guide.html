@@ -377,6 +377,7 @@ window.HELP = {
 <li>Download <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases">release page</a>.</li>
 <li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
 <li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
+<p>Progenitor updates itself from GitHub from then on, at the title screen. See <a href="#menu/updates">Updates</a>.</p>
 <p>To update by hand, extract the new zip the same way and let it replace the files. It never changes BepInEx's own files or settings.</p>` },
         { id: "open", title: "Open the Mods menu", shot: { src: "img/players-open-title.webp", alt: "The V Rising title screen with Mods above Continue", caption: "<strong>Mods</strong> on the title screen." },
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
@@ -406,7 +407,8 @@ window.HELP = {
 <li><strong>Install N mods</strong> gets them from Thunderstore, then join or restart and rejoin.</li></ul>` },
         { id: "updates", title: "Updates",
           html: `<p><strong>Preferences &rsaquo; Updates</strong>:</p>
-<ul><li><strong>Update mods</strong>: Automatic (default), Notify or Off.</li><li><strong>Offer updates before joining a server</strong>: on by default.</li><li>Per mod, on its page: a different mode, or keep one version.</li></ul>` },
+<ul><li><strong>Update mods</strong>: Automatic (default), Notify or Off.</li><li><strong>Offer updates before joining a server</strong>: on by default.</li><li>Per mod, on its page: a different mode, or keep one version.</li>
+<li><strong>Update Progenitor</strong>: Automatic (default). Progenitor updates itself from GitHub.</li></ul>` },
         { id: "help", title: "When something goes wrong",
           html: `<ol><li>Crashed? Start the game again; the last three sessions' logs are kept.</li>
 <li>Collect logs: <strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong>. If the game crashes when you join, use the zip icon at the bottom left of the title screen. A zip lands on your Desktop.</li>
@@ -555,8 +557,12 @@ window.HELP = {
 <tr><td>Update mods</td><td>Automatic</td><td>Automatic, Notify or Off, for mods Progenitor installed.</td></tr>
 <tr><td>Major versions</td><td>Notify</td><td>Whether Automatic also takes 2.0 over 1.x.</td></tr>
 <tr><td>Offer updates before joining a server</td><td>On</td><td>Asks <strong>Update first</strong>, <strong>Join anyway</strong> or <strong>Cancel</strong>.</td></tr>
-<tr><td>Update Progenitor</td><td>Automatic</td><td>Progenitor's own updates.</td></tr></tbody></table>
-<ul><li>Per mod: its page, <strong>Updates</strong>: Default, Automatic, Notify, Off or <strong>Keep &lt;version&gt;</strong>.</li><li>Old versions are kept; a failed update rolls back. The title screen says <em>N mods updated</em>.</li></ul>` }
+<tr><td>Update Progenitor</td><td>Automatic</td><td>Progenitor updates itself from GitHub.</td></tr></tbody></table>
+<ul><li>Per mod: its page, <strong>Updates</strong>: Default, Automatic, Notify, Off or <strong>Keep &lt;version&gt;</strong>.</li><li>Old versions are kept; a failed update rolls back. The title screen says <em>N mods updated</em>.</li></ul>
+<p><strong>Progenitor's own updates.</strong> Progenitor installed from its release zip updates itself at the title screen. Some updates load at the next start. An update that needs both sides to match waits for you: click <strong>Update</strong> on its row in <strong>Install Mods</strong>.</p>
+<ul><li>Installed with a mod manager, or with changed files: you're told about new versions; update the way you installed it.</li>
+<li>No automatic updates yet? Click <strong>Update</strong> on the Progenitor row once; it updates itself after that.</li>
+<li>On 2026.10.162? Install the next release by hand once, as on <a href="#players/install">Install Progenitor</a>. Progenitor updates itself from then on.</li></ul>` }
       ]
     },
 
@@ -720,7 +726,7 @@ window.HELP = {
       id: "admins", role: "admins", title: "Getting Started", pages: [
         { id: "install", title: "Install on a server",
           html: `<ol><li>Copy everything inside <code>BepInExPack_V_Rising</code> into the server folder, next to <code>VRisingServer.exe</code>.</li>
-<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server; update the same way.</li>
+<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server. Progenitor then tells you about its own updates from GitHub (<a href="#admins/mods/updates">Server updates</a>); to update by hand, extract the new zip the same way.</li>
 <li>Start the server once; the first start is slow while BepInEx generates its files.</li></ol>
 <p>A private game hosted from a client loads the client's mods; no separate install.</p>`,
           callout: { title: "Never on a public server", warn: true, text: "Don't put <code>Progenitor.Dev.dll</code> (the [[dev-bridge|dev bridge]]) on a public server. Release packages don't include it." } },
@@ -899,7 +905,8 @@ LockedInGame = server-rules, updates` } }
 <tr><td>Empty for</td><td class="num">5</td><td>Minutes nobody may be on first.</td></tr>
 <tr><td>Back up the world before updating</td><td>Off</td><td>One backup per update batch.</td></tr>
 <tr><td>Keep backups made before an update</td><td class="num">2</td><td>1 to 20.</td></tr>
-<tr><td>Skip when a backup is newer than</td><td class="num">6</td><td>Hours; 0 always backs up.</td></tr></tbody></table>` },
+<tr><td>Skip when a backup is newer than</td><td class="num">6</td><td>Hours; 0 always backs up.</td></tr></tbody></table>
+<p><strong>Progenitor's own updates</strong> come from GitHub. The server tells you about them (<code>[AutoUpdate] Progenitor = Notify</code>, the default). Set it to <code>Automatic</code> to update Progenitor while nobody is on; a new Bootstrap applies at the next restart. An update that needs players to update too never installs by itself.</p>` },
         { id: "update-status", title: "Update status",
           html: `<ul><li><strong>Status</strong>: the last check, what applied, what waits. <strong>Waiting</strong> and <strong>Recent</strong> list the details.</li>
 <li><strong>Look for updates now</strong> (<strong>Check now</strong>). Otherwise every 6 hours (<code>[AutoUpdate] CheckHours</code>).</li>
@@ -1208,7 +1215,7 @@ My question:` } },
     { id: "castle-heart", term: "Castle heart", def: "The structure that claims a territory and keeps a castle running." },
     { id: "world-epoch", term: "World epoch", def: "A stamp of the current world load; keep it beside any held entity and check <code>ctx.WorldState.IsStale</code>." },
     { id: "mod-link", term: "Mod link", def: "A chat token such as <code>[mod:Namespace-Name]</code> that opens a mod's page or Install Mods listing when clicked, and never installs anything." },
-    { id: "thunderstore", term: "Thunderstore", def: "The mod site the Install Mods tab installs from; Progenitor publishes there as <code>VRising_Modders-Progenitor</code>." },
+    { id: "thunderstore", term: "Thunderstore", def: "The mod site the Install Mods tab installs mods from. Progenitor itself comes from its GitHub releases." },
     { id: "stamp", term: "Progenitor stamp", def: "An optional corner mark on a mod's icon showing it runs on Progenitor; it is not an endorsement." },
     { id: "dev-bridge", term: "Dev bridge", def: "<code>Progenitor.Dev</code>: a local-only bridge and MCP server for building, reloading and testing in a test game; never on a public server." },
     { id: "game-free-test", term: "Game-free test", def: "A test that runs with <code>dotnet test</code> and no game install, as CI does." }

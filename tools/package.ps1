@@ -21,6 +21,9 @@
     BepInEx/plugins/Progenitor.Bootstrap.dll
     BepInEx/patchers/Progenitor.Preloader.dll
     BepInEx/progenitor-core/Progenitor.dll
+    BepInEx/progenitor-self-install.json   the self-install record (New-SelfInstallRecord): this release's
+                                           version and the sha256 of its Core and Bootstrap, so an unmodified
+                                           extract updates itself from GitHub from its first start
 
   The Thunderstore zip carries the first two and, instead of BepInEx/progenitor-core/, the archive
   BepInEx/patchers/progenitor-files.zip (entries relative to BepInEx/). V Rising's Thunderstore
@@ -281,6 +284,41 @@ function New-GameFolderZip {
   } finally {
     $check.Dispose()
   }
+}
+
+function New-SelfInstallRecord {
+  <#
+    The self-install record the manual zip carries: BepInEx/progenitor-self-install.json (SelfUpdate/SelfUpdateFiles.cs,
+    SelfInstallRecord), naming this release and the sha256 of its Core and Bootstrap exactly as staged. An unmodified
+    release extracted into the game folder matches it at its first start, so Progenitor updates itself from GitHub from then
+    on (docs/auto-update.md, Progenitor itself). Changed files no longer match it and only notify. Not written into the
+    Thunderstore zip: mod managers place only plugins and patchers, and a mod-manager install only notifies.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Stage,
+    [Parameter(Mandatory = $true)][string]$Version,
+    [Parameter(Mandatory = $true)][string]$Package
+  )
+  $core = Join-Path $Stage "BepInEx\progenitor-core\Progenitor.dll"
+  $boot = Join-Path $Stage "BepInEx\plugins\Progenitor.Bootstrap.dll"
+  foreach ($p in @($core, $boot)) {
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "packaging assertion failed: the staged tree has no $p for the self-install record" }
+  }
+  $coreSha = (Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash.ToLowerInvariant()
+  $bootSha = (Get-FileHash -LiteralPath $boot -Algorithm SHA256).Hash.ToLowerInvariant()
+  $utc = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", [System.Globalization.CultureInfo]::InvariantCulture)
+  $json = "{`n" +
+    "  `"schema`": 1,`n" +
+    "  `"package`": `"$Package`",`n" +
+    "  `"version`": `"$Version`",`n" +
+    "  `"coreSha256`": `"$coreSha`",`n" +
+    "  `"bootstrapSha256`": `"$bootSha`",`n" +
+    "  `"installedUtc`": `"$utc`",`n" +
+    "  `"source`": `"package`"`n" +
+    "}`n"
+  $path = Join-Path $Stage "BepInEx\progenitor-self-install.json"
+  [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))
+  return $path
 }
 
 function New-ThunderstoreZip {
@@ -659,7 +697,10 @@ try {
 # The manual-install zip (one copy into the game folder): the same staged BepInEx/ tree, already asserted above, and
 # nothing else at its root, and Core's folder as real files. Thunderstore needs manifest.json, README.md and
 # icon.png at the root, which a player extracting into the game folder should not get.
-$requiredEntries = @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll")
+# The manual zip also carries the self-install record (New-SelfInstallRecord), written after the Thunderstore zip was sealed
+# so that package never has it.
+[void](New-SelfInstallRecord -Stage $stage -Version $version -Package "VRising_Modders-Progenitor")
+$requiredEntries = @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll", "BepInEx/progenitor-self-install.json")
 New-GameFolderZip -Stage $stage -ZipPath $manualZipPath -Required $requiredEntries
 
 Remove-Item -LiteralPath $stage -Recurse -Force

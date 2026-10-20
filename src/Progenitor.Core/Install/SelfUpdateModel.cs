@@ -38,6 +38,12 @@ internal static class SelfUpdateSettings
         "Developer testing only. Lets a development build, or a process with the Dev bridge loaded, update Progenitor itself "
         + "(normally they only report). Off by default.";
 
+    public const string DevKeyKey = "SelfUpdateDevKey";
+
+    public const string DevKeyHelp =
+        "Developer testing only. A public key (SPKI, base64) whose signature on a release list is trusted while the dev "
+        + "Thunderstore stand-in is active ([Install] DevThunderstoreUrl). Empty by default; never set on a player's install.";
+
     public static string DefaultFor(bool server) => server ? ServerDefault : ClientDefault;
 
     /// <summary>This process's default (a server binds Notify even when the Preferences bindings are made there).</summary>
@@ -49,82 +55,73 @@ internal static class SelfUpdateSettings
 #endif
 }
 
-/// <summary>AUTOUPDATE5: one version of Progenitor's own package in the index.</summary>
+/// <summary>
+/// AUTOUPDATE5: one Progenitor release, as the signed release list names it (<see cref="SelfFeed"/>; decided 2026-10-20:
+/// Progenitor ships from GitHub Releases, so its own releases no longer come from the Thunderstore index).
+/// </summary>
 internal sealed class SelfRelease
 {
     public string Package { get; set; } = "";
     public string Version { get; set; } = "";
+
+    /// <summary>The package zip on the GitHub release.</summary>
     public string DownloadUrl { get; set; } = "";
     public long Size { get; set; }
+
+    /// <summary>The package zip's sha256 (lowercase hex); a download that differs is not used.</summary>
+    public string Sha256 { get; set; } = "";
+
+    /// <summary>The sha256 of the Core and Bootstrap images inside it, when the list names them.</summary>
+    public string CoreSha { get; set; } = "";
+    public string BootstrapSha { get; set; } = "";
+
+    /// <summary>The release's protocols, when the list names them (0: unknown until its images are read).</summary>
+    public int BootstrapProtocol { get; set; }
+    public int CoreProtocol { get; set; }
+    public int HandshakeProtocol { get; set; }
+
+    /// <summary><c>release</c>; only releases on this channel are offered.</summary>
+    public string Channel { get; set; } = SelfFeed.Channel;
+    public string Published { get; set; } = "";
+    public string NotesUrl { get; set; } = "";
     public bool Active { get; set; } = true;
     public bool Deprecated { get; set; }
+
+    /// <summary>The list names the protocols, so a protocol change is known before any download.</summary>
+    public bool ProtocolsKnown => BootstrapProtocol > 0 && CoreProtocol > 0 && HandshakeProtocol > 0;
 
     public Dictionary<string, object?> Describe() => new()
     {
         ["package"] = Package,
         ["version"] = Version,
+        ["channel"] = Channel,
+        ["published"] = Published,
         ["downloadUrl"] = DownloadUrl,
         ["size"] = Size,
+        ["sha256"] = Sha256,
+        ["coreSha256"] = CoreSha,
+        ["bootstrapSha256"] = BootstrapSha,
+        ["protocols"] = new Dictionary<string, object?> { ["bootstrap"] = BootstrapProtocol, ["core"] = CoreProtocol, ["handshake"] = HandshakeProtocol },
+        ["notes"] = NotesUrl,
         ["active"] = Active,
         ["deprecated"] = Deprecated,
     };
 }
 
-/// <summary>
-/// AUTOUPDATE5: Progenitor's own versions from the Thunderstore v1 index body this process already read (the cached
-/// <c>progenitor-cache</c> copy). No request of its own. Only the packages <see cref="LoaderPackages.IsProgenitorPackage"/>
-/// names count.
-/// </summary>
-internal static class SelfIndex
-{
-    public static List<SelfRelease> Parse(string? json)
-    {
-        var list = new List<SelfRelease>();
-        if (string.IsNullOrWhiteSpace(json)) return list;
-        try
-        {
-            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowTrailingCommas = true });
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return list;
-            foreach (var p in doc.RootElement.EnumerateArray())
-            {
-                if (p.ValueKind != JsonValueKind.Object) continue;
-                string owner = SelfState.Str(p, "owner");
-                string name = SelfState.Str(p, "name");
-                string full = SelfState.Str(p, "full_name");
-                if (!LoaderPackages.IsProgenitorPackage(owner, name, full)) continue;
-                string key = full.Length > 0 ? full : owner + "-" + name;
-                bool deprecated = p.TryGetProperty("is_deprecated", out var d) && d.ValueKind == JsonValueKind.True;
-                if (!p.TryGetProperty("versions", out var versions) || versions.ValueKind != JsonValueKind.Array) continue;
-                foreach (var v in versions.EnumerateArray())
-                {
-                    if (v.ValueKind != JsonValueKind.Object) continue;
-                    string version = SelfState.Str(v, "version_number");
-                    if (version.Length == 0) continue;
-                    list.Add(new SelfRelease
-                    {
-                        Package = key,
-                        Version = version,
-                        DownloadUrl = SelfState.Str(v, "download_url"),
-                        Size = v.TryGetProperty("file_size", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt64(out long n) ? n : 0,
-                        Active = !(v.TryGetProperty("is_active", out var a) && a.ValueKind == JsonValueKind.False),
-                        Deprecated = deprecated,
-                    });
-                }
-            }
-        }
-        catch (JsonException) { return new List<SelfRelease>(); }
-
-        return list;
-    }
-}
-
 /// <summary>AUTOUPDATE5: how this Progenitor was installed, as far as updating itself is concerned.</summary>
 internal enum SelfInstallKind
 {
-    /// <summary>Its files match the self-install record (or a ledger <c>framework</c> row): it may update itself.</summary>
+    /// <summary>
+    /// Its files match the self-install record (or a ledger <c>framework</c> row): it may update itself. A release zip carries
+    /// its record (<c>tools/package.ps1</c>), so an unmodified release extracted into the game folder is managed from its
+    /// first start.
+    /// </summary>
     Managed,
 
-    /// <summary>No record: installed by hand. Notify; the Install tab's <b>Update</b> installs a release and records it.</summary>
+    /// <summary>
+    /// No record (a zip from before releases carried one, 2026.10.162): notify; the Install tab's <b>Update</b> installs a
+    /// release and records it, and the copy is managed from then on.
+    /// </summary>
     Hand,
 
     /// <summary>A mod manager installed it. Notify only: update it where it was installed.</summary>
@@ -238,7 +235,7 @@ internal static class SelfDetection
     public const string WhyDev = "this is a development build of Progenitor; it never updates itself";
     public const string WhyBridge = "the Dev bridge is loaded; a test process never updates itself";
     public const string WhyModManager = "a mod manager installed Progenitor here; update it where you installed it";
-    public const string WhyHand = "Progenitor was installed by hand; Update installs the release and records it";
+    public const string WhyHand = "this copy of Progenitor has no install record (an older release zip); Update installs the release, and Progenitor updates itself from then on";
     public const string WhyChanged = "Progenitor's files changed since Progenitor installed them";
     public const string WhyProtocol = "it changes a protocol; it is never applied without a click";
 
@@ -325,6 +322,7 @@ internal static class SelfDetection
         foreach (var r in releases ?? Array.Empty<SelfRelease>())
         {
             if (r == null || !r.Active || r.Deprecated || r.Version.Length == 0) continue;
+            if (!string.Equals(r.Channel, SelfFeed.Channel, StringComparison.OrdinalIgnoreCase)) continue;
             if (!UpdateVersions.IsNewer(r.Version, installed)) continue;
             if (facts.State.IsFailed(r.Version))
             {

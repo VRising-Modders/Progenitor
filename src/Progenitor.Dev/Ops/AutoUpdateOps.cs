@@ -89,7 +89,7 @@ internal static class AutoUpdateOps
 
     private static Dictionary<string, object?> CallServer(string method, params object?[] args) => CallType(ServerBridgeType, method, args);
 
-    /// <summary>AUTOUPDATE5: <c>self_status</c>, <c>self_check</c> (optional <c>fetch</c>: one conditional index request first), <c>self_apply</c>, <c>self_select</c> (<c>version</c>, optional <c>sha256</c>), <c>self_clear_failed</c>, <c>self_forget_attempts</c>.</summary>
+    /// <summary>AUTOUPDATE5: <c>self_status</c>, <c>self_check</c> (optional <c>fetch</c>: one conditional release-list request first), <c>self_apply</c>, <c>self_select</c> (<c>version</c>, optional <c>sha256</c>), <c>self_clear_failed</c>, <c>self_forget_attempts</c>.</summary>
     private static Dictionary<string, object?> RunSelf(string action, JsonElement args) => action switch
     {
         "self_status" => Call("SelfStatus"),

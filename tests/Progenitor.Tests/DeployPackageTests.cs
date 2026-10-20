@@ -292,6 +292,46 @@ public sealed class DeployPackageTests
         }
     }
 
+    /// <summary>
+    /// The manual zip carries its self-install record: <c>New-SelfInstallRecord</c> names the release and the sha256 of the
+    /// staged Core and Bootstrap, in the format Core reads (<see cref="Progenitor.SelfUpdate.SelfInstallRecord"/>), so an
+    /// unmodified extract is managed from its first start. Run through <c>package.ps1</c>'s own function.
+    /// </summary>
+    [Fact]
+    public void ManualZipCarriesASelfInstallRecordNamingItsOwnImages()
+    {
+        string shell = RequirePowerShell();
+        string stage = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (string f in ManualRequired) Seed(stage, f);
+            string fn = ExtractPowerShellFunction(ReadRepoFile("tools", "package.ps1"), "New-SelfInstallRecord");
+            string script = "$ErrorActionPreference = 'Stop'\n" + fn + "\n[void](New-SelfInstallRecord -Stage $args[0] -Version '2026.11.3' -Package 'VRising_Modders-Progenitor')\n";
+            var (exit, _, stderr) = RunPowerShellScript(shell, script, stage);
+            Assert.True(exit == 0, "New-SelfInstallRecord failed: " + stderr);
+
+            string json = File.ReadAllText(Path.Combine(stage, "BepInEx", "progenitor-self-install.json"));
+            var record = Progenitor.SelfUpdate.SelfInstallRecord.Parse(json);
+            Assert.NotNull(record);
+            Assert.Equal("2026.11.3", record!.Version);
+            Assert.Equal("VRising_Modders-Progenitor", record.Package);
+            Assert.Equal("package", record.Source);
+            string core = Progenitor.SelfUpdate.SelfFiles.Sha256File(Path.Combine(stage, "BepInEx", "progenitor-core", "Progenitor.dll"));
+            string boot = Progenitor.SelfUpdate.SelfFiles.Sha256File(Path.Combine(stage, "BepInEx", "plugins", "Progenitor.Bootstrap.dll"));
+            Assert.True(record.Matches(core, boot));
+
+            // Written after the Thunderstore zip was sealed, and required in the manual zip.
+            string s = ReadRepoFile("tools", "package.ps1");
+            Assert.True(s.IndexOf("New-ThunderstoreZip -Stage $stage", StringComparison.Ordinal)
+                        < s.IndexOf("New-SelfInstallRecord -Stage $stage", StringComparison.Ordinal));
+            Assert.Contains("\"BepInEx/progenitor-self-install.json\")", s);
+        }
+        finally
+        {
+            try { Directory.Delete(stage, true); } catch { /* temp */ }
+        }
+    }
+
     /// <summary>A staged tree that lacks one of the three DLLs is refused, so a manual zip can never ship half an install.</summary>
     [Theory]
     [InlineData("BepInEx/plugins/Progenitor.Bootstrap.dll")]

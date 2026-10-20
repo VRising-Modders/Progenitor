@@ -1,0 +1,74 @@
+name: release-feed
+
+# Adds a published GitHub release to Progenitor's signed release list (docs/updates/releases.json) and opens a pull
+# request with it (docs/releasing.md, "Release list"). Progenitor reads the list from GitHub Pages once it is on main.
+#
+# Needs the repository secret PROGENITOR_RELEASE_KEY (the private release key, from
+# `node tools/release-feed/release-feed.mjs keygen`); until it is added this workflow fails at its first step and the
+# maintainer runs the same steps by hand. While a key is rolled, PROGENITOR_RELEASE_KEY_NEXT signs too.
+# main is protected, so the list arrives as a pull request; merge it locally like every other (CLAUDE.md).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to add (v<version>)"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      PROGENITOR_RELEASE_KEY: ${{ secrets.PROGENITOR_RELEASE_KEY }}
+      PROGENITOR_RELEASE_KEY_NEXT: ${{ secrets.PROGENITOR_RELEASE_KEY_NEXT }}
+    steps:
+      - name: The release key is set
+        run: |
+          if [ -z "$PROGENITOR_RELEASE_KEY" ]; then
+            echo "::error::Add the PROGENITOR_RELEASE_KEY secret (docs/releasing.md) or run tools/release-feed by hand."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download the release package
+        run: |
+          VERSION="${TAG#v}"
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Progenitor-$VERSION.zip" --dir "$RUNNER_TEMP/release"
+
+      - name: Add it to the release list and sign
+        run: |
+          VERSION="${TAG#v}"
+          PUBLISHED="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json publishedAt --jq .publishedAt)"
+          node tools/release-feed/release-feed.mjs add \
+            --package "$RUNNER_TEMP/release/Progenitor-$VERSION.zip" \
+            --release "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            --published "$PUBLISHED"
+          node tools/release-feed/release-feed.mjs verify
+
+      - name: Open a pull request with the list
+        run: |
+          BRANCH="release-feed/$TAG"
+          git config user.name Progenitor
+          git config user.email progenitor@users.noreply.github.com
+          git switch -c "$BRANCH"
+          git add docs/updates/releases.json docs/updates/releases.json.sig
+          git commit -m "Release list: add Progenitor ${TAG#v}"
+          git push origin "$BRANCH"
+          gh pr create --base main --head "$BRANCH" --title "Release list: add Progenitor ${TAG#v}" \
+            --body "Adds ${TAG} to docs/updates/releases.json and signs it (written by the release-feed workflow). Progenitor installs read it from GitHub Pages once this is on main."

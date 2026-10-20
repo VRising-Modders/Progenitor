@@ -18,6 +18,8 @@
 //   GET /icons/<owner>-<name>-<version>.png                the package icon
 //   GET /api/experimental/package/<o>/<n>/<v>/readme/      {"markdown": README.md}
 //   GET /api/experimental/package/<o>/<n>/<v>/changelog/   {"markdown": CHANGELOG.md}
+//   GET /progenitor/updates/<file>                        Progenitor's release list, its signature and packages
+//                                                         (<data>/progenitor-updates/, written by tools/release-feed.mjs)
 //   GET /status                                           what is published, and the index's Last-Modified
 // State lives in <data>/state.json and <data>/packages/; publish works while the server runs (each request re-reads it).
 // No dependency beyond Node itself.
@@ -305,6 +307,13 @@ function serve(data, port) {
         res.end(body);
         log(200);
         return;
+      }
+      // Progenitor's own release list and packages for a self-update test (docs/auto-update.md, Release list): files in
+      // <data>/progenitor-updates/, written by tools/release-feed.mjs.
+      m = /^\/progenitor\/updates\/([A-Za-z0-9._-]+)$/.exec(p);
+      if (m) {
+        const type = m[1].endsWith('.zip') ? 'application/zip' : 'application/json';
+        return sendFile(res, path.join(data, 'progenitor-updates', m[1]), type, log);
       }
       if (p === '/status') {
         const body = Buffer.from(JSON.stringify({

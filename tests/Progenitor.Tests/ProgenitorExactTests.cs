@@ -113,17 +113,17 @@ public sealed class ProgenitorExactTests : IDisposable
 
         var hand = ProgenitorExact.StatusOf(VersionMatchingMode.Exact, ServerFacts(record: false), Listed(Release));
         Assert.False(hand.Enforced);
-        Assert.Contains("was not installed from Thunderstore by Progenitor", hand.Why);
+        Assert.Contains("has no install record from a published release", hand.Why);
 
         var gone = ProgenitorExact.StatusOf(VersionMatchingMode.Exact, ServerFacts(), Listed("2026.10.160"));
-        Assert.Equal("Exact is not enforced for Progenitor: 2026.10.159 is not published on Thunderstore", gone.NotEnforcedLine);
+        Assert.Equal("Exact is not enforced for Progenitor: 2026.10.159 is not in Progenitor's release list", gone.NotEnforcedLine);
 
         var inactive = Listed(Release);
         inactive[0].Active = false;
         Assert.False(ProgenitorExact.StatusOf(VersionMatchingMode.Exact, ServerFacts(), inactive).Enforced);
 
         var unread = ProgenitorExact.StatusOf(VersionMatchingMode.Exact, ServerFacts(), new List<SelfRelease>());
-        Assert.Contains("has not read the Thunderstore index yet", unread.Why);
+        Assert.Contains("has not read Progenitor's release list yet", unread.Why);
 
         var unknownSha = ServerFacts();
         unknownSha.CoreSha = "";
@@ -317,8 +317,8 @@ public sealed class ProgenitorExactTests : IDisposable
         mode = VersionMatchingMode.Exact;
         ProgenitorExactSource.Releases = () => Listed("2026.10.160");
         Assert.False(ProgenitorExact.ServerStatus().Enforced);
-        Assert.Equal("VersionMatching: Exact is not enforced for Progenitor: 2026.10.159 is not published on Thunderstore", logs.Last());
-        Assert.Equal("Exact is not enforced for Progenitor: 2026.10.159 is not published on Thunderstore", ProgenitorExactSource.LineIfExact());
+        Assert.Equal("VersionMatching: Exact is not enforced for Progenitor: 2026.10.159 is not in Progenitor's release list", logs.Last());
+        Assert.Equal("Exact is not enforced for Progenitor: 2026.10.159 is not in Progenitor's release list", ProgenitorExactSource.LineIfExact());
 
         ProgenitorExactSource.Uninstall();
         Assert.Null(ProgenitorExact.StatusSource);
@@ -546,7 +546,7 @@ public sealed class ProgenitorExactTests : IDisposable
 
         var nowhere = ProgenitorExact.Decide(req, Own("2026.10.160", OtherSha, source: ProgenitorExact.FixSource.None));
         Assert.Equal(JoinRowAction.TellAdmin, nowhere.Action);
-        Assert.Equal("Progenitor 2026.10.159 is not on Thunderstore here", nowhere.Note);
+        Assert.Equal("Progenitor 2026.10.159 is not in the release list here", nowhere.Note);
 
         var placing = Own("2026.10.158", OtherSha);
         placing.Placing = Release;

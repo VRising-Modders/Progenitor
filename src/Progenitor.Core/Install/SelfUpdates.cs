@@ -9,8 +9,10 @@ using Progenitor.SelfUpdate;
 namespace Progenitor.Install;
 
 /// <summary>
-/// AUTOUPDATE5 (M6.5): Progenitor updates itself. Detection reads Progenitor's own versions from the index body this process
-/// already cached (<see cref="SelfIndex"/>; no request of its own). A release is applied through the version store for
+/// AUTOUPDATE5 (M6.5): Progenitor updates itself. Detection reads Progenitor's own versions from its signed release list on
+/// GitHub Pages (<see cref="SelfFeed"/>), cached and verified again on every read; the list is requested on the cadence in
+/// <c>SelfUpdates.Feed.cs</c>. A release is downloaded from its GitHub release asset and checked against the list's size and
+/// sha256. A release is applied through the version store for
 /// Progenitor (<see cref="SelfStore"/>): the running copy and the new release are kept, then
 /// <list type="bullet">
 /// <item>a Core-only release whose protocol matches the running Bootstrap is staged as <c>progenitor-core/Progenitor.dll.next</c>
@@ -78,12 +80,21 @@ internal static partial class SelfUpdates
     /// <summary>The running copy's facts (versions, image shas, record, ledger, flags, mode); the state file is read here.</summary>
     internal static Func<SelfFacts>? FactsProbe { get; set; }
 
-    /// <summary>The cached index body's path (the index URL this process reads), or null.</summary>
+    /// <summary>The cached release list's path (<see cref="SelfFeed"/>, its cached form), or null.</summary>
     internal static Func<string?>? IndexPathProbe { get; set; }
 
+    /// <summary>The keys a release list may be signed with (live: <see cref="SelfFeedKeys.Trusted"/>).</summary>
+    internal static Func<IReadOnlyList<string>> KeysProbe { get; set; } = () => SelfFeedKeys.Trusted();
+
+    private static IReadOnlyList<string> Keys()
+    {
+        try { return KeysProbe() ?? Array.Empty<string>(); }
+        catch { return Array.Empty<string>(); }
+    }
+
     /// <summary>
-    /// <b>Check now</b> (the bridge's <c>self_check</c> with <c>fetch</c>): one conditional index request of this process's own
-    /// (owner <c>auto-update</c>, its failure backoff respected), then detection. Returns what happened.
+    /// <b>Check now</b> (the bridge's <c>self_check</c> with <c>fetch</c>) and the release list's cadence: one conditional request
+    /// for the release list (owner <c>self-update</c>, its failure backoff respected), then detection. Returns what happened.
     /// </summary>
     internal static Func<CancellationToken, Task<string>>? CheckIndex { get; set; }
 
@@ -108,7 +119,7 @@ internal static partial class SelfUpdates
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
-    /// <summary>Download a release (https on Thunderstore's hosts, or the dev stand-in), at most the given bytes.</summary>
+    /// <summary>Download a release (its GitHub release asset, or the dev stand-in), at most the given bytes.</summary>
     internal static Func<string, long, CancellationToken, Task<(byte[]? Bytes, string Error)>>? Download { get; set; }
 
     /// <summary>Ask Bootstrap for a Core swap (reason); returns its answer (<c>scheduled …</c> or a refusal).</summary>
@@ -249,6 +260,25 @@ internal static partial class SelfUpdates
         if (!string.IsNullOrEmpty(root) && releases.Count > 0)
             foreach (var kv in SelfHeldStore.Read(root!).Changes(releases, BootstrapLinkProtocol(), HandshakeProtocol(), SafeUtcNow()))
                 if (!changes.ContainsKey(kv.Key)) changes[kv.Key] = kv.Value;
+        // The release list names each release's protocols, so a protocol change is notify only before any download (its
+        // images are still read and judged when it is installed).
+        if (releases.Count > 0)
+        {
+            int boot = BootstrapLinkProtocol(), hs = HandshakeProtocol();
+            if (boot > 0)
+                foreach (var r in releases)
+                {
+                    if (r == null || !r.ProtocolsKnown || changes.ContainsKey(r.Version)) continue;
+                    string change = SelfProtocols.ChangeOf(new SelfImage
+                    {
+                        BootstrapProtocol = r.BootstrapProtocol,
+                        CoreProtocol = r.CoreProtocol,
+                        HandshakeProtocol = r.HandshakeProtocol,
+                    }, boot, hs);
+                    if (change.Length > 0) changes[r.Version] = change;
+                }
+        }
+
         f.ProtocolChanges = changes;
         return f;
     }
@@ -294,6 +324,8 @@ internal static partial class SelfUpdates
             CheckStaged(root!, j);
         }
 
+        try { FeedTick(); }
+        catch (Exception e) { Write("op=feed result=\"threw: " + e.Message + "\""); }
         DetectIfChanged(now);
         // Mod compatibility C4: a build placed for a server (client only): commit a prepared placement, notice that it
         // loaded, put the player's own copy back after the join it was for.
@@ -426,7 +458,10 @@ internal static partial class SelfUpdates
             task = RunOff(() =>
             {
                 if (string.IsNullOrEmpty(p) || !File.Exists(p)) return new List<SelfRelease>();
-                return SelfIndex.Parse(File.ReadAllText(p!));
+                // The cached release list is verified again on every read; one that does not verify lists nothing.
+                var read = SelfFeed.ReadVerified(File.ReadAllText(p!), Keys(), out string feedError);
+                if (feedError.Length > 0) Write("op=feed result=\"not used: " + feedError + "\"");
+                return read;
             });
         }
         catch (Exception e) { task = Task.FromException<List<SelfRelease>>(e); }
@@ -586,9 +621,12 @@ internal static partial class SelfUpdates
             string error = "";
             if (t.Status != TaskStatus.RanToCompletion) error = DownloadError + (t.Exception?.GetBaseException().Message ?? "failed");
             else if (t.Result.Bytes == null) error = DownloadError + (t.Result.Error.Length > 0 ? t.Result.Error : "failed");
-            else if (release.Size > 0 && t.Result.Bytes.LongLength != release.Size) error = "the download is " + t.Result.Bytes.LongLength + " bytes, the listing says " + release.Size;
+            // The size and sha256 the signed release list names; a download that differs is tried again next session.
+            else if (SelfFeed.CheckDownload(release, t.Result.Bytes) is { Length: > 0 } bad) error = DownloadError + bad;
             image = error.Length > 0 ? new SelfImage { Error = error } : SelfImageReader.Read(t.Result.Bytes!);
             if (error.Length == 0) image.PackageSha = SelfFiles.Sha256(t.Result.Bytes!);
+            // The images inside must be the ones the list names (a list and a package that disagree: a failed version).
+            if (error.Length == 0 && SelfFeed.CheckImages(release, image) is { Length: > 0 } mismatch) image.Error = mismatch;
             if (token.IsCancellationRequested) return; // Core is unloading: nothing is written by this generation
             PostMain(() => Commit(release, image, origin, byClick));
         }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -665,7 +703,7 @@ internal static partial class SelfUpdates
             CoreSha = image.CoreSha,
             BootstrapSha = image.BootstrapSha,
             Protocol = image.CoreProtocol,
-            Source = "thunderstore",
+            Source = SelfFeed.KeptSource,
         }, image.Core, image.Bootstrap, image.Tables, out string newError);
         if (newDir.Length == 0) return "failed: the release could not be kept (" + newError + "); nothing was changed";
 
@@ -804,7 +842,7 @@ internal static partial class SelfUpdates
             CoreSha = facts.CoreSha,
             BootstrapSha = boot.Length > 0 ? facts.BootstrapSha : "",
             Protocol = BootstrapLinkProtocol(),
-            Source = facts.Record != null && facts.Record.Matches(facts.CoreSha, facts.BootstrapSha) ? "thunderstore" : "installed",
+            Source = facts.Record != null && facts.Record.Matches(facts.CoreSha, facts.BootstrapSha) ? SelfFeed.KeptSource : "installed",
         }, core, boot, SelfStore.LiveTables(root), out error);
     }
 
@@ -857,7 +895,7 @@ internal static partial class SelfUpdates
             CoreSha = image.CoreSha,
             BootstrapSha = image.BootstrapSha,
             InstalledUtc = DateTime.UtcNow,
-            Source = "thunderstore",
+            Source = SelfFeed.RecordSource,
         }, out _);
 
     // ---- after the swap, after a start ----------------------------------------------------------------------
@@ -966,7 +1004,7 @@ internal static partial class SelfUpdates
             CoreSha = facts.CoreSha,
             BootstrapSha = facts.BootstrapSha,
             InstalledUtc = DateTime.UtcNow,
-            Source = "thunderstore",
+            Source = SelfFeed.RecordSource,
         }, out _);
         // C4: the copy a build placed for a server will give back is never pruned.
         var protect = new List<string> { j.NewDir, j.PrevDir };
@@ -1132,8 +1170,10 @@ internal static partial class SelfUpdates
             _place = null;
             _restoreTriedThisVisit = false;
             IndexAsked.Clear();
+            ResetFeed();
         }
 
+        KeysProbe = () => SelfFeedKeys.Trusted();
         ConnectedRequirement = null;
         ReleasesRead = null;
         RootProbe = null;

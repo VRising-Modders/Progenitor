@@ -244,14 +244,19 @@ internal sealed class ConditionalIndexFetch
         IndexDiskCache cache,
         string owner,
         ICatalogClock? clock = null,
-        Func<string, bool>? accept = null)
+        Func<string, bool>? accept = null,
+        string? label = null)
     {
         _fetch = fetch ?? throw new ArgumentNullException(nameof(fetch));
         Cache = cache ?? throw new ArgumentNullException(nameof(cache));
         Owner = string.IsNullOrWhiteSpace(owner) ? "index" : owner.Trim();
         _clock = clock ?? new SystemCatalogClock();
         _accept = accept ?? LooksLikeIndex;
+        _label = string.IsNullOrWhiteSpace(label) ? "Thunderstore: index check" : label!.Trim();
     }
+
+    /// <summary>The log lines' subject (default <c>Thunderstore: index check</c>; the release list names itself).</summary>
+    private readonly string _label;
 
     /// <summary>The usual wiring: <paramref name="fetcher"/>'s conditional index request on <paramref name="url"/>.</summary>
     public static ConditionalIndexFetch Over(CatalogFetcher fetcher, string url, IndexDiskCache cache, string owner, ICatalogClock? clock = null)
@@ -314,9 +319,9 @@ internal sealed class ConditionalIndexFetch
 
             if (until > now)
             {
-                string why = "Thunderstore index checks paused after " + failures + " failures in a row; the next automatic check is after "
+                string why = (_label == "Thunderstore: index check" ? "Thunderstore index check" : _label) + "s paused after " + failures + " failures in a row; the next automatic check is after "
                     + until.ToString("HH:mm", CultureInfo.InvariantCulture) + " UTC";
-                InstallLog.Info("Thunderstore: index check (" + Owner + ") skipped: " + why + ".");
+                InstallLog.Info(_label + " (" + Owner + ") skipped: " + why + ".");
                 return new CatalogTextFetchResult(false, why, null, 0, 0) { Paused = true };
             }
         }
@@ -352,13 +357,13 @@ internal sealed class ConditionalIndexFetch
             {
                 // Cannot happen (no validators without a body); never hand back an empty index.
                 NoteFailure(now);
-                InstallLog.Warn("Thunderstore: index check (" + Owner + ") HTTP 304 without a cached copy; ignored.");
+                InstallLog.Warn(_label + " (" + Owner + ") HTTP 304 without a cached copy; ignored.");
                 return new CatalogTextFetchResult(false, "HTTP 304 without a cached copy", null, 0, 304);
             }
 
             Cache.Touch(now);
             NoteSuccess();
-            InstallLog.Info("Thunderstore: index check (" + Owner + ", " + conditional + ") HTTP 304 not modified, 0 body bytes; reused the cached copy ("
+            InstallLog.Info(_label + " (" + Owner + ", " + conditional + ") HTTP 304 not modified, 0 body bytes; reused the cached copy ("
                 + body.Length.ToString(CultureInfo.InvariantCulture) + " chars).");
             return new CatalogTextFetchResult(true, null, body, Encoding.UTF8.GetByteCount(body), 304)
             {
@@ -372,7 +377,7 @@ internal sealed class ConditionalIndexFetch
         {
             NoteSuccess();
             bool stored = _accept(fetched.Text) && Cache.Write(fetched.Text, new IndexValidators(fetched.LastModified, fetched.ETag), now);
-            InstallLog.Info("Thunderstore: index check (" + Owner + ", " + conditional + ") HTTP " + fetched.StatusCode.ToString(CultureInfo.InvariantCulture)
+            InstallLog.Info(_label + " (" + Owner + ", " + conditional + ") HTTP " + fetched.StatusCode.ToString(CultureInfo.InvariantCulture)
                 + ", " + fetched.WireBytes.ToString(CultureInfo.InvariantCulture) + " bytes on the wire ("
                 + (fetched.ContentEncoding ?? "identity") + "), " + fetched.ByteCount.ToString(CultureInfo.InvariantCulture) + " decoded; "
                 + (stored ? "cached" : "not cached")
@@ -383,12 +388,12 @@ internal sealed class ConditionalIndexFetch
 
         if (string.Equals(fetched.Error, InstallReasons.FetchCancelled, StringComparison.Ordinal) || cancellationToken.IsCancellationRequested)
         {
-            InstallLog.Info("Thunderstore: index check (" + Owner + ") canceled.");
+            InstallLog.Info(_label + " (" + Owner + ") canceled.");
             return fetched;
         }
 
         int inRow = NoteFailure(now);
-        InstallLog.Warn("Thunderstore: index check (" + Owner + ", " + conditional + ") failed"
+        InstallLog.Warn(_label + " (" + Owner + ", " + conditional + ") failed"
             + (fetched.StatusCode > 0 ? " (HTTP " + fetched.StatusCode.ToString(CultureInfo.InvariantCulture) + ")" : "")
             + ": " + (fetched.Error ?? InstallReasons.FetchTransport) + "; " + inRow + " in a row"
             + (PausedUntilUtc is { } paused ? "; automatic checks paused until " + paused.ToString("HH:mm", CultureInfo.InvariantCulture) + " UTC" : "") + ".");

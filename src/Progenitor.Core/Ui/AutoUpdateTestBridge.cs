@@ -54,8 +54,8 @@ internal static class AutoUpdateTestBridge
     public static Dictionary<string, object?> SelfStatus() => Progenitor.Install.SelfUpdates.Describe();
 
     /// <summary>
-    /// <c>self_check</c>: read the cached index again (no request) and recompute the offer; with <c>fetch</c> true, first one
-    /// conditional index request (Check now, owner <c>auto-update</c>).
+    /// <c>self_check</c>: read the cached release list again (no request) and recompute the offer; with <c>fetch</c> true, first one
+    /// conditional request for the release list (Check now, owner <c>self-update</c>).
     /// </summary>
     public static Dictionary<string, object?> SelfCheck(bool fetch)
     {
