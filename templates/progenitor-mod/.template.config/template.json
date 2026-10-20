@@ -23,7 +23,7 @@
       "type": "parameter",
       "datatype": "string",
       "defaultValue": "YourTeam",
-      "description": "Your Thunderstore team name. Lower-cased, it is the first part of the plugin id (yourteam.mymod).",
+      "description": "The GitHub account that owns the mod's repository; the Progenitor Index lists the mod under it. Lower-cased, it is the first part of the plugin id (yourteam.mymod).",
       "replaces": "YourTeam"
     },
     "authorLower": {

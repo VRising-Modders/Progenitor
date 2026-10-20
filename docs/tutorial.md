@@ -36,8 +36,8 @@ than something the Sample compiles today it is marked **not verified** and says 
 Each lettered subsection covers one module the numbered spine does not, and says whether the Sample
 already compiles an example of it.
 
-When the mod is ready to share, [publishing.md](publishing.md) covers the Thunderstore package, its
-`progenitor.json`, dependencies, the settings and keybind declarations players rely on, and
+When the mod is ready to share, [publishing.md](publishing.md) covers the package, its
+`progenitor.json`, dependencies, the GitHub release and the Progenitor Index entry, the settings and keybind declarations players rely on, and
 `tools/publish-check.ps1`.
 
 ---

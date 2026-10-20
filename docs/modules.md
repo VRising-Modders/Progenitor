@@ -8,7 +8,7 @@ Use `Progenitor.Plugins.ProgenitorPlugin<TContext>` with `TContext : PluginConte
 
 Implement `OnLoad(TContext ctx)`. `Load` and `Unload` are sealed; the base class owns registration cleanup. Keep the context constructor empty: its logger and API wrappers are attached after construction, before `OnLoad`. Put mutable plugin state in the context.
 
-To publish a mod on Thunderstore (package layout, `progenitor.json`, dependencies, the pre-publish checker), follow [publishing.md](publishing.md).
+To publish a mod (package layout, `progenitor.json`, dependencies, the pre-publish checker, the GitHub release and the Progenitor Index entry), follow [publishing.md](publishing.md).
 
 `[ProgenitorSide(Side)]` selects the process role. `Side.Server = 1`, `Side.Client = 2`, and `Side.Both = Server | Client`; an omitted attribute means `Both`. A mismatch leaves the plugin dormant without creating a context. `ctx.Side` is always `Server` or `Client`. Dedicated and hosted servers use the same server APIs. The server's signed mod catalog lists a `Side.Server` plugin as server-only, and clients never offer to install it. Handshake requirements are unaffected; see [server-only plugins](mod-manifest.md#server-only-plugins).
 

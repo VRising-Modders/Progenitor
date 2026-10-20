@@ -50,10 +50,10 @@
 
   -Publishable (Progenitor kind) shapes the package the way docs/publishing.md asks a mod author to:
   <Out>/<Owner>-<Package>-<Version>.zip with a side-prefixed description that says "Requires
-  Progenitor.", a website_url, the BepInExPack and VRising_Modders-Progenitor-<ProgenitorVersion>
-  dependencies, the README requirement block, CHANGELOG.md and LICENSE. -PublishFlaws builds the same
-  package with deliberate faults for tools/publish-check.ps1's tests: a BOM in manifest.json, no side
-  prefix, no BepInExPack dependency, a 128x128 icon, no README requirement block, a progenitor.json
+  Progenitor.", a website_url, the BepInExPack dependency only (Progenitor is not a package), the
+  README requirement block, CHANGELOG.md and LICENSE. -PublishFlaws builds the same package with
+  deliberate faults for tools/publish-check.ps1's tests: a BOM in manifest.json, no side prefix, no
+  BepInExPack dependency but a forbidden VRising_Modders-Progenitor-<ProgenitorVersion> one, a 128x128 icon, no README requirement block, a progenitor.json
   whose sha256 and side are wrong, and a stray dev bridge token.
 
   Both write <Out>/index.json listing every package built (with -Append, merged into an existing
@@ -147,7 +147,7 @@ param(
     # Progenitor kind: a -Publishable package with deliberate faults, for the publish checker's tests.
     [switch] $PublishFlaws,
 
-    # -Publishable: the Progenitor release the manifest depends on.
+    # -PublishFlaws: the version in the Progenitor package dependency it plants as a fault.
     [string] $ProgenitorVersion = '2026.10.1'
 )
 
@@ -289,6 +289,18 @@ function Get-DeclaredPeers([string] $path) {
     }
     if ($distinct.Count -eq 1) { return $distinct[0] }
     return ''
+}
+
+# The Progenitor (Core) assembly version the image references, read from metadata only; $null when it does not
+# reference Core or this PowerShell cannot read references without loading (reflection-only load is Windows PowerShell's).
+function Get-ProgenitorReference([string] $path) {
+    try {
+        $asm = [Reflection.Assembly]::ReflectionOnlyLoadFrom($path)
+        $ref = @($asm.GetReferencedAssemblies() | Where-Object { $_.Name -eq 'Progenitor' })
+        if ($ref.Count -gt 0) { return $ref[0].Version }
+    }
+    catch { Write-Host "progenitor range not written: $($_.Exception.Message)" }
+    return $null
 }
 
 function Get-FileUrl([string] $path) {
@@ -560,6 +572,12 @@ try {
         $progenitorFields['compatibility'] = [ordered] @{ peers = $peers }
         Write-Host "compatibility.peers: $peers (from the image's [NetworkCompatibility])"
     }
+    # The Progenitor Index's range: this Core release or newer (what publish-check -WriteProgenitorJson writes).
+    $coreRef = Get-ProgenitorReference $image.FullName
+    if ($coreRef) {
+        $progenitorFields['progenitor'] = ">=$($coreRef.Major).$($coreRef.Minor).$([Math]::Max($coreRef.Build, 0))"
+        Write-Host "progenitor: $($progenitorFields['progenitor']) (the Core the image was compiled against)"
+    }
     if ($PublishFlaws) {
         # Wrong on purpose: another file's hash and a side the image does not declare.
         $progenitorFields['sha256'] = ('0' * 64)
@@ -572,11 +590,11 @@ try {
     $readmeExtra = ''
     if ($Publishable) {
         $description = "$sideLabel $([char]0x00B7) Requires Progenitor. The $Sample sample, packaged the way docs/publishing.md asks."
-        $dependencies = @('BepInEx-BepInExPack_V_Rising-1.733.2', "VRising_Modders-Progenitor-$ProgenitorVersion")
+        $dependencies = @('BepInEx-BepInExPack_V_Rising-1.733.2')
         $website = 'https://example.com/progenitor-sample'
         $readmeExtra = @"
 
-> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
+> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first, then install this mod from Progenitor's Mods menu.
 "@
         if ($PublishFlaws) {
             $description = "The $Sample sample with deliberate packaging faults."

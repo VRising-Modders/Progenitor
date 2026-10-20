@@ -1,6 +1,6 @@
 # Progenitor Mod Display Name
 
-> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
+> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first, then install this mod from Progenitor's Mods menu.
 
 **Installing Progenitor** ([step by step](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html#players/install)):
 
@@ -13,6 +13,8 @@ irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
 It asks where to install: press Enter for the place it found, or paste the folder that holds `VRising.exe` or `VRisingServer.exe` ([the script is public](https://vrising-modders.github.io/Progenitor/install.ps1)).
 
 **By hand.** Install [BepInExPack V Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/), then download `Progenitor-<version>.zip` from the [latest release](https://github.com/VRising-Modders/Progenitor/releases/latest) and extract it into the folder that holds `VRising.exe`. For a dedicated server, extract the same zip into the folder that holds `VRisingServer.exe`.
+
+**Installing Progenitor Mod Display Name.** Start the game, open **Mods**, then **Install Mods**, search for Progenitor Mod Display Name and click **Install**.
 
 Asks the server for its greeting and shows it in a window and a notice.
 

@@ -99,7 +99,7 @@ A world saved with a content mod normally won't load once that mod is removed, a
 1. Read the [tutorial](docs/tutorial.md): a progressive guide from a first item and command to keybinds, UI, units, patches and the hot-reload loop.
 2. Start from the [minimal reload example](samples/Progenitor.ReloadExample/README.md), then the larger [`samples/Progenitor.Sample`](samples/Progenitor.Sample).
 3. Look up each facade in the [module reference](docs/modules.md) and its status in [`docs/api.md`](docs/api.md).
-4. When the mod is ready, follow [publishing a mod on Thunderstore](docs/publishing.md) and check the package with `tools/publish-check.ps1`.
+4. When the mod is ready, follow [publishing a mod](docs/publishing.md): check the package with `tools/publish-check.ps1`, attach it to a GitHub release and list it on the [Progenitor Index](https://github.com/VRising-Modders/ProgenitorIndex), where players find it in Install Mods. [Why not Thunderstore?](docs/publishing.md#10-faq)
 
 A plugin references `progenitor` at runtime (`[BepInDependency]`) and `Progenitor.Core` at compile time (a project reference to `src/Progenitor.Core`; there is no NuGet package yet). Subclass `ProgenitorPlugin<TContext>`, keep the context constructor empty, and register work in `OnLoad`:
 

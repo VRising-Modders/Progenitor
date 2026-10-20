@@ -40,7 +40,7 @@ Starter prompt ([docs/ai-starter-prompt.md](docs/ai-starter-prompt.md)):
 | Game-free tests | `Progenitor.Testing`: `ExchangeCompat`, `MessageCompat` | [testing across versions](docs/modules.md#testing-your-mod-across-versions-mod-compatibility-c5), [tutorial 6c](docs/tutorial.md#6c-make-your-mod-work-across-versions) | [template tests](templates/progenitor-mod/ProgenitorMod.Tests/ModRulesTests.cs), [samples' tests](tests/Progenitor.Testing.Tests/Samples) |
 | Live checks without taking focus | Dev bridge and MCP tools, `keybind_press`, captures | [bridge](docs/bridge.md), [MCP](docs/mcp.md), [capture](docs/observe-capture.md) | [tutorial 8](docs/tutorial.md#8-testing-with-the-dev-bridge) |
 | Controller and keyboard | Kit controls only; nothing extra | [navigation](docs/ui.md#controller-and-keyboard-navigation-nav1), [ui-style §6](docs/ui-style.md#6-input-keys-and-controllers) | [ControlsSample](samples/Progenitor.ControlsSample/README.md) |
-| Publish on Thunderstore | Package layout, `progenitor.json`, `tools/publish-check.ps1` | [publishing](docs/publishing.md) | [template `thunderstore/`](templates/progenitor-mod/thunderstore/manifest.json) |
+| Publish (GitHub release + Progenitor Index entry) | Package layout, `progenitor.json`, `tools/publish-check.ps1` | [publishing](docs/publishing.md) | [template `package/`](templates/progenitor-mod/package/manifest.json) |
 | Versions and changelog | `<Version>` = manifest `version_number`; `CHANGELOG.md` | [publishing §6](docs/publishing.md#6-versions-and-compatibility) | [template](templates/progenitor-mod/CHANGELOG.md) |
 | License and credits | SPDX header; a `LICENSE`; credit forks | [publishing §9](docs/publishing.md#9-license), [NOTICE](NOTICE) | template headers |
 
@@ -71,7 +71,7 @@ Or install the pack: `dotnet pack templates/Progenitor.Templates.csproj -o out`,
 
 Install the template from the same checkout the mod builds against (`--progenitor-repo`, `ProgenitorRepo` or `PROGENITOR_REPO`) and update the two together. The template records the Progenitor version it came from (`ProgenitorMinimumVersion` in the mod's `Directory.Build.props`); before compiling, the build reads the checkout's version from git and stops with one error when the checkout is older ([template DEVELOPING.md](templates/progenitor-mod/DEVELOPING.md#keep-the-template-and-progenitor-together)). In this repository, a template change that starts using new API raises `ProgenitorMinimumVersion` in `templates/progenitor-mod/Directory.Build.props` to the current main release plus `.1` (main at `2026.10.139` gives `2026.10.139.1`; on main, `dotnet msbuild tools/version/ProgenitorVersion.targets -nologo -t:ProgenitorComputeVersion -getProperty:ProgenitorVersion` prints the release): that means "newer than release 139", which the merge satisfies. A test fails if it is newer than the checkout.
 
-The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a player and a server setting, a `Ctrl+F8` opener, a Basic window, a notice, a request with quiet retries, an embedded README and help page, `[ModAbout]`, `[NetworkCompatibility]`, `[Counterpart]`, SPDX headers, Thunderstore files and a game-free test project.
+The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a player and a server setting, a `Ctrl+F8` opener, a Basic window, a notice, a request with quiet retries, an embedded README and help page, `[ModAbout]`, `[NetworkCompatibility]`, `[Counterpart]`, SPDX headers, package files and a game-free test project.
 
 ## Rules
 
@@ -153,16 +153,17 @@ The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a
 
 ### Versions, changelog, license
 
-- One `major.minor.patch` in `<Version>`, `thunderstore/manifest.json` and `progenitor.json`.
+- One `major.minor.patch` in `<Version>`, `package/manifest.json` and `progenitor.json`.
 - Add a `CHANGELOG.md` section per release, newest first.
 - SPDX header in every source file; ship a `LICENSE`; credit forked work in the README.
 
 ### Publishing
 
 - Description: `<Side> · Requires Progenitor. <pitch>`; README starts with the requirement block ([publishing §3](docs/publishing.md#3-the-standard-progenitor-message)).
-- Depend on the oldest Progenitor release that has your APIs.
+- The Progenitor releases the mod needs go in `progenitor.json`'s `progenitor` range (`>=` the Core you compiled against; the generator writes it), not in `manifest.json`. Build against the oldest Progenitor release that has your APIs ([publishing §6](docs/publishing.md#6-versions-and-compatibility)).
 - Generate `progenitor.json` from the built DLL; run `tools/publish-check.ps1` until nothing fails.
-- Required mods go in `manifest.json` dependencies. Recommended mods go in the README and the server join list's `recommended` rows ([join flow](docs/join-flow.md#recommended-rows-the-panel-and-the-overlay)).
+- Publish on the [Progenitor Index](https://github.com/VRising-Modders/ProgenitorIndex): a GitHub release with the zip, then a pull request adding the entry. Not on Thunderstore, and no Progenitor package in `dependencies` ([publishing §8](docs/publishing.md#8-publish-a-github-release-and-an-index-entry)).
+- Required mods (never Progenitor itself) go in `manifest.json` dependencies. Recommended mods go in the README and the server join list's `recommended` rows ([join flow](docs/join-flow.md#recommended-rows-the-panel-and-the-overlay)).
 - The Progenitor stamp on the icon is optional ([publishing §4](docs/publishing.md#4-the-progenitor-stamp-optional)).
 - Never write "official", "verified" or "approved" next to Progenitor.
 - Help AI assistants find your docs: set `website_url` in `manifest.json` to your repository, and ship an `llms.txt` at its root (or a README section) with what the mod does, its settings, keys and commands, and where to report bugs. Players' log zips list that link in `mods.md`.

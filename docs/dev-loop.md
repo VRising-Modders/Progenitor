@@ -155,7 +155,7 @@ not have, so both name their bytes in the log and both can be gated. Full refere
 
 ## Publish check
 
-`tools/publish-check.ps1 -Package <zip or folder>` checks a built mod package before it is uploaded to Thunderstore and prints one `PASS` / `WARN` / `FAIL` line per check (`-Json` for JSON; exit code 1 when a check failed). `tools/publish-check.ps1 -Dll <plugin.dll> -WriteProgenitorJson <path> [-HotLoadable]` writes a package's `progenitor.json` from the DLL's attributes and hash. Both build and run `tools/publishcheck`, a game-free .NET 8 tool that reads files and metadata only and contacts nothing. The checks are listed in [publishing.md](publishing.md#7-check-the-package-toolspublish-checkps1). Tests: `PublishCheckTests`, over two fixtures from `tools/make-dummy-package.ps1 -Publishable` and `-PublishFlaws`. Run with Windows PowerShell 5.1 on 2026-10-10 against both fixtures and the HotDemo build.
+`tools/publish-check.ps1 -Package <zip or folder>` checks a built mod package before it is released and listed on the Progenitor Index, and prints one `PASS` / `WARN` / `FAIL` line per check (`-Json` for JSON; exit code 1 when a check failed). `tools/publish-check.ps1 -Dll <plugin.dll> -WriteProgenitorJson <path> [-HotLoadable]` writes a package's `progenitor.json` from the DLL's attributes and hash. Both build and run `tools/publishcheck`, a game-free .NET 8 tool that reads files and metadata only and contacts nothing. The checks are listed in [publishing.md](publishing.md#7-check-the-package-toolspublish-checkps1). Tests: `PublishCheckTests`, over two fixtures from `tools/make-dummy-package.ps1 -Publishable` and `-PublishFlaws`. Run with Windows PowerShell 5.1 on 2026-10-10 against both fixtures and the HotDemo build.
 
 ## Everyday workflow
 

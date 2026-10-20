@@ -12,7 +12,8 @@ namespace Progenitor.PublishCheck;
 /// Writes a package's <c>progenitor.json</c> from the plugin DLL's own attributes, so the file can never disagree with
 /// the image: <c>id</c> and <c>version</c> from <c>[BepInPlugin]</c>, <c>side</c> from <c>[ProgenitorSide]</c> (both when
 /// undeclared), <c>compatibility.peers</c> from <c>[NetworkCompatibility]</c>'s <c>Peers</c>, and <c>sha256</c> of the DLL
-/// bytes. Only <c>hotLoadable</c> is the author's call, and it is refused for an image the Install tab would not load hot.
+/// bytes, and <c>progenitor</c> (<c>&gt;=</c> the Progenitor Core version it was compiled against, which the Progenitor
+/// Index reads). Only <c>hotLoadable</c> is the author's call, and it is refused for an image the Install tab would not load hot.
 /// Error texts name the options of <c>tools/publish-check.ps1</c>, the documented way to run this.
 /// </summary>
 internal static class ProgenitorJsonWriter
@@ -64,7 +65,8 @@ internal static class ProgenitorJsonWriter
         }
 
         using var ms = new MemoryStream();
-        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+        // Relaxed escaping keeps ">=" readable; the file is plain JSON on disk, never embedded in HTML.
+        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             w.WriteStartObject();
             w.WriteString("id", entry.Guid);
@@ -72,6 +74,8 @@ internal static class ProgenitorJsonWriter
             w.WriteString("side", entry.SideText);
             w.WriteBoolean("hotLoadable", hotLoadable);
             w.WriteString("sha256", PublishChecker.Sha256(dll));
+            // The Progenitor Index reads this range in place of a manifest dependency on a Progenitor package.
+            if (PublishChecker.MinimumProgenitorRange(facts.ProgenitorReference) is { } range) w.WriteString("progenitor", range);
             if (entry.Peers.Length > 0)
             {
                 w.WriteStartObject("compatibility");

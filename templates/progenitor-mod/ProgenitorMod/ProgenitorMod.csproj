@@ -7,7 +7,7 @@
          the same after the first release. -->
     <BepInExPluginGuid>yourteam.progenitormod</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Mod Display Name</BepInExPluginName>
-    <!-- One version string for [BepInPlugin] (MyPluginInfo.PLUGIN_VERSION), thunderstore/manifest.json and
+    <!-- One version string for [BepInPlugin] (MyPluginInfo.PLUGIN_VERSION), package/manifest.json and
          progenitor.json: major.minor.patch (PROGENITOR_GUIDE.md, "Versions and changelog"). -->
     <Version>1.0.0</Version>
     <ReferenceGame>true</ReferenceGame>

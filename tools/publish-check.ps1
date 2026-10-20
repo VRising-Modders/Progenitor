@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Check a built mod package before publishing it on Thunderstore, or write its progenitor.json
+  Check a built mod package before publishing it (a GitHub release and a Progenitor Index entry), or write its progenitor.json
   from the plugin DLL (docs/publishing.md).
 
 .DESCRIPTION
