@@ -254,6 +254,44 @@ public class UiFrameCostTests
     }
 
     [Fact]
+    public void Console_cost_field_is_the_window_delta_and_absent_without_a_queued_console()
+    {
+        long f = Stopwatch.Frequency;
+        // enqueued, dropped, truncated, written, writeTicks, maxWriteTicks, enqueueTicks, maxEnqueueTicks, maxPending, pending, freq
+        var before = new long[] { 100, 1, 0, 100, f, 0, 0, 0, 3, 0, f };
+        var now = new long[] { 512, 4, 3, 500, f + f * 93 / 100, f * 21 / 100, 0, f * 18 / 1_000_000, 57, 2, f };
+        Assert.Equal(" console=lines:412,dropped:3,cut:3,writeMs:930,maxBatchMs:210,maxQueue:57,maxEnqueueUs:18",
+            UiFrameCost.FormatConsoleCost(before, now));
+        Assert.Equal("", UiFrameCost.FormatConsoleCost(before, null));
+        Assert.Equal("", UiFrameCost.FormatConsoleCost(null, new long[3]));
+
+        UiFrameCost.ResetForTests();
+        var lines = new List<string>();
+        try
+        {
+            int reads = 0;
+            UiFrameCost.ConsoleCostProbe = reset =>
+            {
+                Assert.True(reset);
+                reads++;
+                return reads == 1 ? before : now;
+            };
+            UiFrameCost.LogSink = lines.Add;
+            Frame(300);
+            UiFrameCost.Record(1_000);
+            Frame(16);
+            UiFrameCost.Record(31_000);
+            string line = Assert.Single(lines);
+            Assert.EndsWith(" console=lines:412,dropped:3,cut:3,writeMs:930,maxBatchMs:210,maxQueue:57,maxEnqueueUs:18", line);
+            Assert.Equal(2, reads);
+        }
+        finally
+        {
+            UiFrameCost.ResetForTests();
+        }
+    }
+
+    [Fact]
     public void A_single_slow_Progenitor_frame_writes_at_once_and_is_rate_limited()
     {
         UiFrameCost.ResetForTests();

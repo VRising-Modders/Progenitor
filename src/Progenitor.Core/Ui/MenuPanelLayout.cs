@@ -100,6 +100,19 @@ internal static class UiFrameCost
     /// <summary>Tests: every line written (summary and immediate), before the logger.</summary>
     internal static Action<string>? LogSink;
 
+    /// <summary>
+    /// The queued console's counters (Bootstrap <c>ProcessHost.ConsoleLogCost</c>, see <c>ConsoleLogQueue.ToArray</c>),
+    /// read once per window with its maxima reset; null leaves the summary's <c>console=</c> field out.
+    /// </summary>
+    internal static Func<bool, long[]?>? ConsoleCostProbe =
+#if PROGENITOR_TESTS
+        null;
+#else
+        BootstrapLink.ConsoleLogCost;
+#endif
+
+    private static long[]? _consoleBaseline;
+
     internal static long IntervalMs;
     internal static long OutsideMs;
     internal static long FrameMs;
@@ -258,7 +271,11 @@ internal static class UiFrameCost
     /// </summary>
     internal static void Record(long nowMs)
     {
-        if (_windowStartMs == long.MinValue) _windowStartMs = nowMs;
+        if (_windowStartMs == long.MinValue)
+        {
+            _windowStartMs = nowMs;
+            _consoleBaseline = ReadConsoleCost();
+        }
         _frames++;
         if (IsHitch(IntervalMs, WorstMs))
         {
@@ -285,7 +302,9 @@ internal static class UiFrameCost
         }
 
         if (!SummaryDue(nowMs, _windowStartMs)) return;
-        if (_hitches > 0) Write(FormatWindow(nowMs - _windowStartMs), console: false);
+        var consoleCost = ReadConsoleCost();
+        if (_hitches > 0) Write(FormatWindow(nowMs - _windowStartMs) + FormatConsoleCost(_consoleBaseline, consoleCost), console: false);
+        _consoleBaseline = consoleCost;
         ResetWindow(nowMs);
     }
 
@@ -339,6 +358,36 @@ internal static class UiFrameCost
         return sb.Append(']').ToString();
     }
 
+    private static long[]? ReadConsoleCost()
+    {
+        try { return ConsoleCostProbe?.Invoke(true); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// The summary's console field for the window between two <c>ConsoleLogCost</c> snapshots:
+    /// <c> console=lines:412,dropped:0,cut:3,writeMs:930,maxBatchMs:212,maxQueue:57,maxEnqueueUs:18</c>.
+    /// <c>lines</c> were queued, <c>dropped</c> did not fit the queue, <c>cut</c> were shortened for the console;
+    /// <c>writeMs</c> and <c>maxBatchMs</c> are the background writer's time in console writes (time that used to be
+    /// spent on the thread that logged); <c>maxEnqueueUs</c> is the most one log line cost the logging thread.
+    /// "" when <paramref name="now"/> is null or malformed (no queued console).
+    /// </summary>
+    internal static string FormatConsoleCost(long[]? before, long[]? now)
+    {
+        if (now == null || now.Length < 11) return "";
+        long freq = now[10] > 0 ? now[10] : Stopwatch.Frequency;
+        long D(int i) => Math.Max(0, now[i] - (before != null && before.Length > i ? before[i] : 0));
+        long Ms(long ticks) => ticks <= 0 ? 0 : ticks * 1000 / freq;
+        long Us(long ticks) => ticks <= 0 ? 0 : ticks * 1_000_000 / freq;
+        return " console=lines:" + D(0).ToString(CultureInfo.InvariantCulture)
+            + ",dropped:" + D(1).ToString(CultureInfo.InvariantCulture)
+            + ",cut:" + D(2).ToString(CultureInfo.InvariantCulture)
+            + ",writeMs:" + Ms(D(4)).ToString(CultureInfo.InvariantCulture)
+            + ",maxBatchMs:" + Ms(now[5]).ToString(CultureInfo.InvariantCulture)
+            + ",maxQueue:" + now[8].ToString(CultureInfo.InvariantCulture)
+            + ",maxEnqueueUs:" + Us(now[7]).ToString(CultureInfo.InvariantCulture);
+    }
+
     /// <summary>The median of the first <paramref name="count"/> values (sorted in <paramref name="scratch"/>); 0 when empty.</summary>
     internal static long Median(long[] values, int count, long[] scratch)
     {
@@ -372,6 +421,8 @@ internal static class UiFrameCost
         ResetWindow(long.MinValue);
         NowMs = () => Environment.TickCount64;
         LogSink = null;
+        ConsoleCostProbe = null;
+        _consoleBaseline = null;
     }
 
     private static void NoteWorst(string name, long ms)

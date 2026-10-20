@@ -262,14 +262,19 @@ internal static unsafe class PrefabLiveRefreshApply
             var prefabType = ComponentIndex.Of<PrefabTag>(ComponentType.AccessMode.ReadOnly);
             var entities = Query.Entities(em, includeDisabled: true, includeSystems: false, buffType, guidType);
             int hash = target.GuidHash;
+            // Every buff in the world (disabled ones too) passes through here once per settled buff definition, on the
+            // main thread: read the GUID first (one call) and pay for the other checks only on a match. The query's
+            // entities were all alive when it ran, this same frame.
             for (int i = 0; i < entities.Count; i++)
             {
                 var e = entities[i];
                 if (e == prefabClone) continue;
+                PrefabGUID pg;
+                try { pg = em.GetComponentData<PrefabGUID>(e); }
+                catch { continue; }
+                if (pg.GuidHash != hash) continue;
                 if (!em.Exists(e)) continue;
                 if (em.HasComponent(e, prefabType)) continue;
-                PrefabGUID pg = em.GetComponentData<PrefabGUID>(e);
-                if (pg.GuidHash != hash) continue;
                 result.Add(e);
             }
         }
