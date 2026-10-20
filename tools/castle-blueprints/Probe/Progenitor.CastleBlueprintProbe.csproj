@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.CastleBlueprintProbe</AssemblyName>
+    <ReferenceGame>true</ReferenceGame>
+    <BepInExPluginGuid>progenitor.castle-blueprint-probe</BepInExPluginGuid>
+    <BepInExPluginName>Castle Blueprint Probe</BepInExPluginName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Progenitor" HintPath="$(BlueprintCore)" Private="false" />
+  </ItemGroup>
+  <Target Name="RequireCore" BeforeTargets="ResolveReferences" Condition="!Exists('$(BlueprintCore)')">
+    <Error Text="Set BlueprintCore to the reviewed target server Core image." />
+  </Target>
+</Project>
