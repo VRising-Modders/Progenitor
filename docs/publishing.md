@@ -6,8 +6,6 @@ Mods built on Progenitor are published on the [Progenitor Index](https://github.
 
 This page covers the package and Progenitor's own rules. The Index's entry format, checks and review are in its [README](https://github.com/VRising-Modders/ProgenitorIndex#readme) and [CONTRIBUTING.md](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md); this page does not repeat them. Where something is a hard requirement (the Index's or Progenitor's), this page says so; the rest are suggestions from the people who maintain the framework.
 
-**Status.** Install Mods and join screens read the Progenitor Index from the release that adds Index support; until then only Thunderstore.
-
 The package rules below are **source-checked** against Progenitor's package inspection and install planner. The checker, `tools/publish-check.ps1`, is **game-free tested** (`tests/Progenitor.Tests/PublishCheckTests.cs`). No package built from this page has been listed on the Index or installed from it in a test.
 
 **Contents**
