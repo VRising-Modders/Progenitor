@@ -140,7 +140,7 @@ Client and server · Requires Progenitor. Trade items with other players through
 <a id="readme-requirement-block"></a>
 **README requirement block.** Progenitor ships from its GitHub releases, so a listing tells players how to get it. Paste this near the top of `README.md` (the [mod template](../templates/progenitor-mod/README.md) already has it):
 
-Every command sits alone in its own `powershell` block, never inside a sentence, list item or table cell: Thunderstore shows no copy button, so the line itself must be easy to select.
+Every command sits alone in its own code block, never inside a sentence, list item or table cell: Thunderstore shows no copy button, so the line itself must be easy to select. Use a plain fence (three backticks, no `powershell` label): Thunderstore prints the label inside the block, players copy it with the command, and the command then fails.
 
 ````markdown
 > **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
@@ -149,7 +149,7 @@ Every command sits alone in its own `powershell` block, never inside a sentence,
 
 **With the installer.** Quit the game, open **PowerShell** from the Start menu, paste this line and press Enter:
 
-```powershell
+```
 irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
 ```
 
@@ -157,7 +157,7 @@ It finds the game through Steam and installs BepInEx too when it is missing. The
 
 For a dedicated server, stop the server and use this line instead:
 
-```powershell
+```
 & ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server
 ```
 
