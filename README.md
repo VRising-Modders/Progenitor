@@ -32,7 +32,7 @@ Progenitor ships from [GitHub releases](https://github.com/VRising-Modders/Proge
 irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
 ```
 
-It finds V Rising through Steam, refuses while the game runs, installs BepInEx when it is missing or incomplete (a pinned, reviewed BepInExPack_V_Rising checked by sha256; files a repair replaces go to the backup, and BepInEx settings are always kept), checks the Progenitor download against its published sha256 and installs the latest Progenitor. Files it replaces are moved to `BepInEx/progenitor-backups/install-<time>/` first, and a failure part way puts them back. Run it again to update or repair. The script is public; read it first at <https://vrising-modders.github.io/Progenitor/install.ps1>.
+It finds V Rising through Steam, refuses while the game runs, installs BepInEx when it is missing or incomplete (a pinned, reviewed BepInExPack_V_Rising checked by sha256; files a repair replaces go to the backup, and BepInEx settings are always kept), checks the Progenitor download against its published sha256 and installs the latest Progenitor. Files it replaces are moved to `BepInEx/progenitor-backups/install-<time>/` first, and a failure part way puts them back. Run it again to update or repair. It does not install an older release over a newer Progenitor (a development build, say) unless you add `-Force`. The script is public; read it first at <https://vrising-modders.github.io/Progenitor/install.ps1>.
 
 For a dedicated server, stop the server and use this line instead:
 
@@ -59,7 +59,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1 -Server -GamePath "D:\Serve
 | `-WhatIf` | Print the plan and change nothing. |
 | `-OfflinePackage <zip>`, `-OfflineBepInEx <zip>` | Install from zips you already downloaded. A `SHA256SUMS` beside the Progenitor zip is checked. |
 | `-LatestBepInEx` | Install the newest BepInExPack_V_Rising on Thunderstore instead of the pinned, reviewed version (checked for completeness only). |
-| `-Force` | Go on when a V Rising process is running whose folder Windows does not name (only when it runs from another folder). |
+| `-Force` | Go on when a V Rising process is running whose folder Windows does not name (only when it runs from another folder), and install an older release over a newer Progenitor. |
 
 `irm … | iex` cannot pass options; set them as environment variables first instead: `$env:PROGENITOR_GAME_PATH = "D:\Games\VRising"`, `PROGENITOR_SERVER=1`, `PROGENITOR_WHATIF=1`, `PROGENITOR_FORCE=1`, `PROGENITOR_OFFLINE_PACKAGE`, `PROGENITOR_OFFLINE_BEPINEX`, `PROGENITOR_LATEST_BEPINEX=1`, `PROGENITOR_STEAM_PATH`, `PROGENITOR_FEED_URL`. The installer keeps the last three install backups.
 
