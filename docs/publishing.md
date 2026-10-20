@@ -138,14 +138,36 @@ Client and server · Requires Progenitor. Trade items with other players through
 ```
 
 <a id="readme-requirement-block"></a>
-**README requirement block.** Paste one near the top of `README.md`:
+**README requirement block.** Progenitor ships from its GitHub releases, so a listing tells players how to get it. Paste this near the top of `README.md` (the [mod template](../templates/progenitor-mod/README.md) already has it):
 
-```markdown
-> **Requires Progenitor.** This mod is built on [Progenitor](https://thunderstore.io/c/v-rising/p/VRising_Modders/Progenitor/), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
+Every command sits alone in its own `powershell` block, never inside a sentence, list item or table cell: Thunderstore shows no copy button, so the line itself must be easy to select.
+
+````markdown
+> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
+
+**Installing Progenitor** ([step by step](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html#players/install)):
+
+**With the installer.** Quit the game, open **PowerShell** from the Start menu, paste this line and press Enter:
+
+```powershell
+irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
 ```
 
+It finds the game through Steam and installs BepInEx too when it is missing. The script is public; [read it first](https://vrising-modders.github.io/Progenitor/install.ps1).
+
+For a dedicated server, stop the server and use this line instead:
+
+```powershell
+& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server
+```
+
+**By hand.** Install [BepInExPack V Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/), then download `Progenitor-<version>.zip` from the [latest release](https://github.com/VRising-Modders/Progenitor/releases/latest) and extract it into the folder that holds `VRising.exe`. For a dedicated server, extract the same zip into the folder that holds `VRisingServer.exe`.
+````
+
+For a mod that only uses Progenitor when it is there:
+
 ```markdown
-> **Works better with Progenitor.** This mod runs on plain BepInEx. With [Progenitor](https://thunderstore.io/c/v-rising/p/VRising_Modders/Progenitor/) installed it also gets <what it adds: in-game settings, remappable keys, …>.
+> **Works better with Progenitor.** This mod runs on plain BepInEx. With [Progenitor](https://github.com/VRising-Modders/Progenitor) installed it also gets <what it adds: in-game settings, remappable keys, …>. [Install Progenitor](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html#players/install).
 ```
 
 **Wording to avoid:** "official", "verified" or "approved" next to Progenitor. Progenitor does not review or endorse mods; write "built on Progenitor" or "requires Progenitor".
