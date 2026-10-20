@@ -12,7 +12,7 @@ namespace Progenitor.Install;
 internal static class SelfFeedKeys
 {
     // release-feed:current
-    public static readonly string Current = "";
+    public static readonly string Current = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEgEffhXj62VBrAbR7E5xkpaLx+hGXEs1fAg+HspKu499bh9shPPpmUirmrQPb5cy0x80UtPHPmPpMgJuFftvahg==";
 
     // release-feed:next
     public static readonly string Next = "";
