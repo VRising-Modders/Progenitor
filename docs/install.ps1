@@ -8,7 +8,8 @@
   latest Progenitor release from GitHub. Files it replaces (Progenitor's, and BepInEx's own files when it
   repairs an incomplete BepInEx; BepInEx settings are never replaced) are moved to
   BepInEx\progenitor-backups\install-<time> first; when anything fails part way, they are put back. The
-  last three install backups are kept. Running it again updates or repairs.
+  last three install backups are kept. Running it again updates or repairs. It does not replace a newer
+  Progenitor (a development build, say) with an older release unless -Force is given.
 
   Read this script before you run it:
     https://vrising-modders.github.io/Progenitor/install.ps1
@@ -37,8 +38,9 @@
   Print what would happen and change nothing.
 
 .PARAMETER Force
-  Go on when a V Rising process is running whose folder Windows does not name. Use it only when that
-  process runs from another folder.
+  Go on when a V Rising process is running whose folder Windows does not name (use it only when that
+  process runs from another folder), and install an older release over a newer Progenitor. The installed
+  version is the self-install record's when the record matches the installed files, otherwise Core's own.
 
 .PARAMETER OfflinePackage
   Install this Progenitor zip instead of downloading the latest release. A SHA256SUMS file beside it is
@@ -248,24 +250,42 @@ function Assert-PgNotRunning($Target, [string]$Action, [bool]$Force) {
   }
 }
 
-function Get-PgInstalledVersion([string]$GameRoot) {
+# Which Progenitor is installed. The self-install record's version counts only when its coreSha256 and bootstrapSha256
+# are the installed Core and Bootstrap (the rule of Core's SelfInstallRecord.Matches): a record left beside other files
+# names a release that is not here. Otherwise Core's own version. Version is '' when Progenitor is not installed and
+# 'unknown' when it is but no version is known; Note says why the record was not used.
+function Get-PgInstalled([string]$GameRoot) {
   $record = Join-Path $GameRoot 'BepInEx\progenitor-self-install.json'
-  if (Test-Path -LiteralPath $record -PathType Leaf) {
-    try {
-      $r = [System.IO.File]::ReadAllText($record) | ConvertFrom-Json
-      if ($r.version) { return [string]$r.version }
-    }
-    catch { }
-  }
   $core = Join-Path $GameRoot 'BepInEx\progenitor-core\Progenitor.dll'
+  $boot = Join-Path $GameRoot 'BepInEx\plugins\Progenitor.Bootstrap.dll'
+  $note = ''
+  if (Test-Path -LiteralPath $record -PathType Leaf) {
+    $r = $null
+    try { $r = [System.IO.File]::ReadAllText($record) | ConvertFrom-Json } catch { $r = $null }
+    if ($r -and $r.version) {
+      $coreSha = [string]$r.coreSha256
+      $bootSha = [string]$r.bootstrapSha256
+      $match = $false
+      if ($coreSha -and $bootSha -and (Test-Path -LiteralPath $core -PathType Leaf) -and (Test-Path -LiteralPath $boot -PathType Leaf)) {
+        try {
+          $match = (((Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash -eq $coreSha) -and ((Get-FileHash -LiteralPath $boot -Algorithm SHA256).Hash -eq $bootSha))
+        }
+        catch { $match = $false }
+      }
+      if ($match) { return [pscustomobject]@{ Version = [string]$r.version; Note = '' } }
+      $note = 'record does not match the files'
+    }
+  }
   if (Test-Path -LiteralPath $core -PathType Leaf) {
     $v = Get-PgDllVersion $core
-    if ($v) { return $v }
-    return 'unknown'
+    if (-not $v) { $v = 'unknown' }
+    return [pscustomobject]@{ Version = $v; Note = $note }
   }
-  if (Test-Path -LiteralPath (Join-Path $GameRoot 'BepInEx\plugins\Progenitor.Bootstrap.dll') -PathType Leaf) { return 'unknown' }
-  return ''
+  if (Test-Path -LiteralPath $boot -PathType Leaf) { return [pscustomobject]@{ Version = 'unknown'; Note = $note } }
+  return [pscustomobject]@{ Version = ''; Note = '' }
 }
+
+function Get-PgInstalledVersion([string]$GameRoot) { return (Get-PgInstalled $GameRoot).Version }
 
 # A DLL's product version without the "+<revision>" suffix, or '' when it has none.
 function Get-PgDllVersion([string]$Path) {
@@ -278,9 +298,11 @@ function Get-PgDllVersion([string]$Path) {
 }
 
 # "Progenitor 2026.10.162", or "Progenitor (version unknown)".
-function Format-PgInstalled([string]$Version) {
-  if (-not $Version -or $Version -eq 'unknown') { return 'Progenitor (version unknown)' }
-  return 'Progenitor ' + $Version
+function Format-PgInstalled([string]$Version, [string]$Note = '') {
+  $text = 'Progenitor ' + $Version
+  if (-not $Version -or $Version -eq 'unknown') { $text = 'Progenitor (version unknown)' }
+  if ($Note) { $text = $text + ' (' + $Note + ')' }
+  return $text
 }
 
 # A new folder under progenitor-backups: <kind>-<local time>, with -2, -3 and so on when that name is taken.
@@ -382,6 +404,38 @@ function ConvertTo-PgVersion([string]$Text) {
   $v = $null
   if ([System.Version]::TryParse(($Text -split '[-+]')[0], [ref]$v)) { return $v }
   return $null
+}
+
+# -1, 0 or 1 as version A is older than, the same as or newer than B, comparing the numbers part by part (a missing part
+# counts as 0, so 2026.10.157 and 2026.10.157.0 are the same); $null when either is not a version.
+function Compare-PgVersion([string]$A, [string]$B) {
+  $pa = @((([string]$A) -split '[-+]')[0].Trim() -split '\.')
+  $pb = @((([string]$B) -split '[-+]')[0].Trim() -split '\.')
+  foreach ($p in ($pa + $pb)) { if ($p -notmatch '^\d{1,9}$') { return $null } }
+  $n = [Math]::Max($pa.Count, $pb.Count)
+  for ($i = 0; $i -lt $n; $i++) {
+    $x = 0; $y = 0
+    if ($i -lt $pa.Count) { $x = [int]$pa[$i] }
+    if ($i -lt $pb.Count) { $y = [int]$pb[$i] }
+    if ($x -lt $y) { return -1 }
+    if ($x -gt $y) { return 1 }
+  }
+  return 0
+}
+
+# The version Core inside a Progenitor zip reports, or '' when it has none (read from a copy in the temp folder).
+function Get-PgZipCoreVersion([string]$Path, [string]$Temp) {
+  $zip = Open-PgZip $Path 'The Progenitor download'
+  try {
+    foreach ($e in $zip.Entries) {
+      if ((Get-PgEntryName $e) -ne 'BepInEx/progenitor-core/Progenitor.dll') { continue }
+      $out = Join-Path $Temp ('core-' + [guid]::NewGuid().ToString('N') + '.dll')
+      [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out)
+      return (Get-PgDllVersion $out)
+    }
+  }
+  finally { $zip.Dispose() }
+  return ''
 }
 
 # The newest release in the release list, or $null when the list cannot be read.
@@ -678,7 +732,20 @@ function Invoke-PgInstall {
     $package = $null
     if ($pkgZip) { $package = Read-PgPackage $pkgZip }
 
-    $installed = Get-PgInstalledVersion $game
+    $installedInfo = Get-PgInstalled $game
+    $installed = $installedInfo.Version
+
+    # Never an older release over a newer Progenitor (a development build, say) unless -Force says so. "Installed" is
+    # the matching record's version or Core's own; a reinstall of the same version (a repair) is allowed.
+    $incoming = ''
+    if ($release.Verified -and $release.Version) { $incoming = $release.Version }
+    elseif ($pkgZip -and $package -and $package.HasCoreDll) { $incoming = Get-PgZipCoreVersion $pkgZip $temp }
+    $downgrade = ''
+    if ($installed -and $installed -ne 'unknown' -and $incoming -and ((Compare-PgVersion $installed $incoming) -eq 1)) {
+      $downgrade = 'Progenitor ' + $installed + ' is installed, which is newer than ' + $incoming + '.'
+      if ($Force) { Write-PgLine ('Note: ' + $downgrade + ' Installing the older ' + $incoming + ' because of -Force.') 'Yellow' }
+      elseif (-not $dry) { throw ($downgrade + ' The installer does not replace a newer Progenitor with an older one. To install ' + $incoming + ' anyway, run this again with -Force (or set PROGENITOR_FORCE=1).') }
+    }
     $backup = New-PgBackupPath (Join-Path $bep 'progenitor-backups') 'install'
 
     # What the new files replace, and the staged copies a start would otherwise apply over them.
@@ -717,7 +784,7 @@ function Invoke-PgInstall {
       Write-PgLine 'Plan:'
       Write-PgLine ('  BepInEx:     ' + ($bepLabel -replace '^installed', 'would install' -replace '^repaired', 'would repair'))
       $now = 'none'
-      if ($installed) { $now = Format-PgInstalled $installed }
+      if ($installed) { $now = Format-PgInstalled $installed $installedInfo.Note }
       $what = $release.Version
       if (-not $what) { $what = 'Progenitor' }
       Write-PgLine ('  Progenitor:  would install ' + $what + ' from ' + $release.From + ' (installed now: ' + $now + ')')
@@ -735,6 +802,12 @@ function Invoke-PgInstall {
       else { Write-PgLine ('  Writes:      BepInEx/plugins/Progenitor.Bootstrap.dll, BepInEx/patchers/Progenitor.Preloader.dll, BepInEx/progenitor-core/') }
       if ($bepFiles) { Write-PgLine ('               and ' + $bepFiles.Count + ' BepInEx files into ' + $game + ' (existing BepInEx settings are kept)') }
       foreach ($o in $others) { Write-PgLine ("  Note:        another copy of Progenitor's files is at $o. Remove it with uninstall.ps1 or by hand if Progenitor loads twice.") 'Yellow' }
+      if ($downgrade -and -not $Force) {
+        Write-PgLine ('  Refused:     ' + $downgrade + ' A run without -WhatIf would refuse to install the older release; add -Force (or set PROGENITOR_FORCE=1) to install it anyway.') 'Yellow'
+        Write-PgLine ''
+        Write-PgLine 'Nothing was changed.' 'Cyan'
+        return 1
+      }
       Write-PgLine ''
       Write-PgLine 'Nothing was changed. Run again without -WhatIf to install.' 'Cyan'
       return 0
@@ -825,6 +898,8 @@ function Invoke-PgInstall {
     if ($installed -and $installed -eq $newVersion) { $was = ' (reinstalled)' }
     elseif ($installed -eq 'unknown') { $was = ' (replaced a Progenitor of unknown version)' }
     elseif ($installed) { $was = ' (was ' + $installed + ')' }
+    if ($was -and $installedInfo.Note) { $was = $was.TrimEnd(')') + '; its ' + $installedInfo.Note + ')' }
+    if ($downgrade) { $was = $was + ' (an older release, installed because of -Force)' }
     $shown = $newVersion
     if (-not $shown) { $shown = '(version unknown)' }
     Write-PgLine ('  Progenitor:  ' + $shown + $was + ', ' + $verified)

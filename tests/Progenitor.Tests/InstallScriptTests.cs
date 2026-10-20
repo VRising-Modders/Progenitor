@@ -283,8 +283,10 @@ public sealed class InstallScriptTests
         // Nothing checks the zip's name: the record takes Core's version instead.
         string unchecked_ = fx.Package("2026.10.303", coreVersion: "2026.10.298");
         File.Delete(Path.Combine(Path.GetDirectoryName(unchecked_)!, "SHA256SUMS"));
-        var byCore = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", unchecked_);
+        // Core 2026.10.298 is older than the installed 2026.10.300, so this one needs -Force.
+        var byCore = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", unchecked_, "-Force");
         Assert.True(byCore.Exit == 0, byCore.Output);
+        Assert.Contains("Installing the older 2026.10.298 because of -Force", byCore.Output, StringComparison.Ordinal);
         using (var doc = JsonDocument.Parse(File.ReadAllText(record)))
             Assert.Equal("2026.10.298", doc.RootElement.GetProperty("version").GetString());
 
@@ -332,6 +334,67 @@ public sealed class InstallScriptTests
             + ScriptPath("install.ps1") + "'))) -GamePath '.\\Game Folder' -WhatIf -OfflinePackage '" + fx.Package("2026.10.321") + "'");
         Assert.True(relative.Exit == 0, relative.Output);
         Assert.Contains("Target: " + game + " (VRising.exe)", relative.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Install_trusts_only_a_record_that_matches_the_files_and_refuses_an_older_release_without_force()
+    {
+        string shell = Shells().FirstOrDefault()!;
+        if (shell == null) return;
+        using var fx = new Fixture();
+        string game = fx.Game("VRising.exe");
+        string record = Path.Combine(game, "BepInEx", "progenitor-self-install.json");
+        var first = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", fx.Package("2026.10.157"), "-OfflineBepInEx", fx.BepInExPack());
+        Assert.True(first.Exit == 0, first.Output);
+
+        // A record left by other files names a release that is not here: Core's own version counts instead.
+        File.WriteAllText(record, "{\"schema\":1,\"package\":\"VRising_Modders-Progenitor\",\"version\":\"2026.10.200\",\"coreSha256\":\""
+            + new string('c', 64) + "\",\"bootstrapSha256\":\"" + new string('d', 64) + "\",\"source\":\"installer\"}");
+        var dry = Run(shell, "install.ps1", null, "-GamePath", game, "-WhatIf", "-OfflinePackage", fx.Package("2026.10.162"));
+        Assert.True(dry.Exit == 0, dry.Output);
+        Assert.Contains("(installed now: Progenitor 2026.10.157 (record does not match the files))", dry.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("2026.10.200", dry.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Refused", dry.Output, StringComparison.Ordinal);
+        var update = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", fx.Package("2026.10.162"));
+        Assert.True(update.Exit == 0, update.Output);
+        Assert.Contains("2026.10.162 (was 2026.10.157; its record does not match the files)", update.Output, StringComparison.Ordinal);
+
+        // An older release over a newer install is refused, in a dry run (the plan is still shown) and for real.
+        // Versions compare by number: 2026.10.99 is older than 2026.10.162.
+        var before = Snapshot(game, null);
+        foreach (string older in new[] { "2026.10.150", "2026.10.99" })
+        {
+            var dryOld = Run(shell, "install.ps1", null, "-GamePath", game, "-WhatIf", "-OfflinePackage", fx.Package(older));
+            Assert.True(dryOld.Exit == 1, dryOld.Output);
+            Assert.Contains("would install " + older, dryOld.Output, StringComparison.Ordinal);
+            Assert.Contains("Refused:     Progenitor 2026.10.162 is installed, which is newer than " + older, dryOld.Output, StringComparison.Ordinal);
+            Assert.Contains("-Force", dryOld.Output, StringComparison.Ordinal);
+            var old = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", fx.Package(older));
+            Assert.True(old.Exit == 1, old.Output);
+            Assert.Contains("Progenitor 2026.10.162 is installed, which is newer than " + older, old.Output, StringComparison.Ordinal);
+            Assert.Contains("run this again with -Force (or set PROGENITOR_FORCE=1)", old.Output, StringComparison.Ordinal);
+            Assert.Contains("Nothing was changed", old.Output, StringComparison.Ordinal);
+            AssertSame(before, Snapshot(game, null));
+        }
+
+        // The same version again is a repair, and allowed.
+        var repair = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", fx.Package("2026.10.162"));
+        Assert.True(repair.Exit == 0, repair.Output);
+        Assert.Contains("2026.10.162 (reinstalled)", repair.Output, StringComparison.Ordinal);
+
+        // -Force, or PROGENITOR_FORCE=1, installs the older release.
+        var dryForced = Run(shell, "install.ps1", null, "-GamePath", game, "-WhatIf", "-Force", "-OfflinePackage", fx.Package("2026.10.150"));
+        Assert.True(dryForced.Exit == 0, dryForced.Output);
+        Assert.DoesNotContain("Refused", dryForced.Output, StringComparison.Ordinal);
+        var forced = Run(shell, "install.ps1", null, "-GamePath", game, "-Force", "-OfflinePackage", fx.Package("2026.10.150"));
+        Assert.True(forced.Exit == 0, forced.Output);
+        Assert.Contains("Installing the older 2026.10.150 because of -Force", forced.Output, StringComparison.Ordinal);
+        using (var doc = JsonDocument.Parse(File.ReadAllText(record)))
+            Assert.Equal("2026.10.150", doc.RootElement.GetProperty("version").GetString());
+        var byEnv = Run(shell, "install.ps1", new() { ["PROGENITOR_FORCE"] = "1" }, "-GamePath", game, "-OfflinePackage", fx.Package("2026.10.140"));
+        Assert.True(byEnv.Exit == 0, byEnv.Output);
+        using (var doc = JsonDocument.Parse(File.ReadAllText(record)))
+            Assert.Equal("2026.10.140", doc.RootElement.GetProperty("version").GetString());
     }
 
     [Fact]

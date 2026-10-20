@@ -385,7 +385,7 @@ window.HELP = {
 <p>It finds V Rising through Steam, installs BepInEx if it's missing or broken, installs Progenitor and tells you what it did. Files it replaces go to <code>BepInEx\\progenitor-backups</code> first. Then start the game.</p>
 <p>The script is public; read it first at <a href="https://vrising-modders.github.io/Progenitor/install.ps1">vrising-modders.github.io/Progenitor/install.ps1</a>. Saved it instead? Run <code>powershell -ExecutionPolicy Bypass -File install.ps1</code> in the folder you saved it to. Game in a folder Steam doesn't know? Add <code>-GamePath "D:\\Games\\VRising"</code> to that line.</p>
 <p>A working BepInEx stays as it is. When the installer repairs a broken one, the files it replaces go to the same backup; your BepInEx settings are always kept.</p>
-<p>Either way, Progenitor updates itself from GitHub from then on, at the title screen. See <a href="#menu/updates">Updates</a>. To update by hand, do either one again.</p>`,
+<p>Either way, Progenitor updates itself from GitHub from then on, at the title screen. See <a href="#menu/updates">Updates</a>. To update by hand, do either one again. The script won't put an older Progenitor over a newer one unless you add <code>-Force</code>.</p>`,
           code: { lang: "powershell", text: `irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex` } },
         { id: "open", title: "Open the Mods menu", shot: { src: "img/players-open-title.webp", alt: "The V Rising title screen with Mods above Continue", caption: "<strong>Mods</strong> on the title screen." },
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>

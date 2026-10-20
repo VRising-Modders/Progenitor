@@ -221,24 +221,42 @@ function Assert-PgNotRunning($Target, [string]$Action, [bool]$Force) {
   }
 }
 
-function Get-PgInstalledVersion([string]$GameRoot) {
+# Which Progenitor is installed. The self-install record's version counts only when its coreSha256 and bootstrapSha256
+# are the installed Core and Bootstrap (the rule of Core's SelfInstallRecord.Matches): a record left beside other files
+# names a release that is not here. Otherwise Core's own version. Version is '' when Progenitor is not installed and
+# 'unknown' when it is but no version is known; Note says why the record was not used.
+function Get-PgInstalled([string]$GameRoot) {
   $record = Join-Path $GameRoot 'BepInEx\progenitor-self-install.json'
-  if (Test-Path -LiteralPath $record -PathType Leaf) {
-    try {
-      $r = [System.IO.File]::ReadAllText($record) | ConvertFrom-Json
-      if ($r.version) { return [string]$r.version }
-    }
-    catch { }
-  }
   $core = Join-Path $GameRoot 'BepInEx\progenitor-core\Progenitor.dll'
+  $boot = Join-Path $GameRoot 'BepInEx\plugins\Progenitor.Bootstrap.dll'
+  $note = ''
+  if (Test-Path -LiteralPath $record -PathType Leaf) {
+    $r = $null
+    try { $r = [System.IO.File]::ReadAllText($record) | ConvertFrom-Json } catch { $r = $null }
+    if ($r -and $r.version) {
+      $coreSha = [string]$r.coreSha256
+      $bootSha = [string]$r.bootstrapSha256
+      $match = $false
+      if ($coreSha -and $bootSha -and (Test-Path -LiteralPath $core -PathType Leaf) -and (Test-Path -LiteralPath $boot -PathType Leaf)) {
+        try {
+          $match = (((Get-FileHash -LiteralPath $core -Algorithm SHA256).Hash -eq $coreSha) -and ((Get-FileHash -LiteralPath $boot -Algorithm SHA256).Hash -eq $bootSha))
+        }
+        catch { $match = $false }
+      }
+      if ($match) { return [pscustomobject]@{ Version = [string]$r.version; Note = '' } }
+      $note = 'record does not match the files'
+    }
+  }
   if (Test-Path -LiteralPath $core -PathType Leaf) {
     $v = Get-PgDllVersion $core
-    if ($v) { return $v }
-    return 'unknown'
+    if (-not $v) { $v = 'unknown' }
+    return [pscustomobject]@{ Version = $v; Note = $note }
   }
-  if (Test-Path -LiteralPath (Join-Path $GameRoot 'BepInEx\plugins\Progenitor.Bootstrap.dll') -PathType Leaf) { return 'unknown' }
-  return ''
+  if (Test-Path -LiteralPath $boot -PathType Leaf) { return [pscustomobject]@{ Version = 'unknown'; Note = $note } }
+  return [pscustomobject]@{ Version = ''; Note = '' }
 }
+
+function Get-PgInstalledVersion([string]$GameRoot) { return (Get-PgInstalled $GameRoot).Version }
 
 # A DLL's product version without the "+<revision>" suffix, or '' when it has none.
 function Get-PgDllVersion([string]$Path) {
@@ -251,9 +269,11 @@ function Get-PgDllVersion([string]$Path) {
 }
 
 # "Progenitor 2026.10.162", or "Progenitor (version unknown)".
-function Format-PgInstalled([string]$Version) {
-  if (-not $Version -or $Version -eq 'unknown') { return 'Progenitor (version unknown)' }
-  return 'Progenitor ' + $Version
+function Format-PgInstalled([string]$Version, [string]$Note = '') {
+  $text = 'Progenitor ' + $Version
+  if (-not $Version -or $Version -eq 'unknown') { $text = 'Progenitor (version unknown)' }
+  if ($Note) { $text = $text + ' (' + $Note + ')' }
+  return $text
 }
 
 # A new folder under progenitor-backups: <kind>-<local time>, with -2, -3 and so on when that name is taken.
