@@ -619,7 +619,7 @@ public sealed class ProgenitorIndexTests : IDisposable
             new IndexRevocationSource.Installed("a.disabled", "A-Disabled", "1.0.0"),
             new IndexRevocationSource.Installed("a.warned", "A-Warned", "1.0.0"),
             new IndexRevocationSource.Installed("a.hidden", "A-Hidden", "1.0.0"),
-            new IndexRevocationSource.Installed("a.partial", "A-Partial", "1.0.0"),
+            new IndexRevocationSource.Installed("a.partial", "A-Partial", "1.0.0", FromIndex: true),
         };
         var problems = new IndexRevocationSource().Current().ToList();
         Assert.Equal(2, problems.Count);

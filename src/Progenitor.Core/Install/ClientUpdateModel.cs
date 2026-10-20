@@ -94,6 +94,9 @@ internal sealed class ManagedPackage
 
     /// <summary>Waiting for the next start (every row is <c>pending</c>).</summary>
     public bool Pending { get; set; }
+
+    /// <summary>INDEX1: installed from the Progenitor Index (a ledger row says <c>"origin": "index"</c>).</summary>
+    public bool FromIndex { get; set; }
 }
 
 /// <summary>One listing of the index Progenitor already read, reduced to what detection needs.</summary>
@@ -116,6 +119,19 @@ internal sealed class IndexListing
 
     /// <summary>The newest version's dependency strings (<c>Owner-Name-1.2.3</c>).</summary>
     public IReadOnlyList<string> Dependencies { get; set; } = Array.Empty<string>();
+
+    /// <summary>INDEX1: this listing is the Progenitor Index's.</summary>
+    public bool FromIndex { get; set; }
+
+    /// <summary>INDEX1: on an Index listing, the Thunderstore listing of the same key it shadows, or null.</summary>
+    public IndexListing? Thunderstore { get; set; }
+
+    /// <summary>
+    /// INDEX1: the listing an install from <paramref name="fromIndex"/>'s source updates from: this one when it is that
+    /// source's, the shadowed Thunderstore one for a Thunderstore install, else null.
+    /// </summary>
+    public IndexListing? ForSource(bool fromIndex) =>
+        fromIndex == FromIndex ? this : !fromIndex ? Thunderstore : null;
 }
 
 /// <summary>One mod with a newer version in the index.</summary>
@@ -308,6 +324,9 @@ internal static class UpdateDetection
 {
     public const string SkipChanged = "its files changed or are gone since Progenitor wrote them";
     public const string SkipNotListed = "not in the index";
+
+    /// <summary>INDEX1: only the other index lists the package; an update never switches the source it was installed from.</summary>
+    public const string SkipOtherSource = "not listed by the source it was installed from";
     public const string SkipDeprecated = "the listing is deprecated";
     public const string SkipNsfw = "the listing is marked NSFW and Show mods with NSFW content is off";
     public const string SkipLoader = "the loader or Progenitor itself (Progenitor's own update is listed on its own)";
@@ -374,6 +393,20 @@ internal static class UpdateDetection
             {
                 skipped.Add(new UpdateSkip(m.Key, SkipNotListed));
                 continue;
+            }
+
+            // INDEX1: updates stay with their source. An Index install updates only from the Index; a Thunderstore install
+            // only from Thunderstore (the row an Index row shadows). The local test source is not a source of either.
+            if (!listing.Local)
+            {
+                var own = listing.ForSource(m.FromIndex);
+                if (own == null)
+                {
+                    skipped.Add(new UpdateSkip(m.Key, SkipOtherSource));
+                    continue;
+                }
+
+                listing = own;
             }
 
             if (listing.Deprecated) { skipped.Add(new UpdateSkip(m.Key, SkipDeprecated)); continue; }

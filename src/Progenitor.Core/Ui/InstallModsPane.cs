@@ -607,6 +607,13 @@ internal static class InstallModsCopy
     /// <summary>INDEX1: the drawer's fact for an Index takedown with a warning.</summary>
     public const string FactIndexWarning = "Warning";
 
+    /// <summary>INDEX1: the drawer's fact for a copy installed from another source than the row's.</summary>
+    public const string FactInstalledFrom = "Installed from";
+
+    /// <summary>INDEX1: a Thunderstore install of a mod the Index now lists (and the mod page's line).</summary>
+    public const string InstalledFromThunderstoreListedInIndex =
+        "Thunderstore. It keeps updating from Thunderstore; to move it to the Progenitor Index, uninstall it and install it again here.";
+
     /// <summary>INDEX1: the drawer's fact for an Index mod that needs a newer Progenitor than this one.</summary>
     public const string FactNeedsProgenitor = "Needs";
 
@@ -644,7 +651,7 @@ internal static class InstallModsCopy
 
     // ---- Surfaces --------------------------------------------------------------------
     public const string NoSourceEnabled =
-        "No catalog source is enabled. Turn Thunderstore on under Configuration, or drop a pre-fetched index.";
+        "No catalog source is enabled. Turn Thunderstore on under Configuration, or turn [Install] UseProgenitorIndex back on.";
     public const string IndexNotLoaded = "The package index is not loaded.";
     public const string Loading = "Loading the package index…";
     public const string ErrorRetry = "Retry";
@@ -10035,6 +10042,12 @@ internal sealed partial class InstallModsPane
         // INDEX1: where it comes from, and the Index's warning when a takedown names this version.
         facts.Add((InstallModsCopy.FactSource, entry.FromIndex ? InstallModsCopy.SourceIndex
             : IsLocalListing(entry) ? LocalTestSource.Words : InstallModsCopy.SourceThunderstore));
+        // INDEX1: updates stay with their source; a Thunderstore install the Index now lists says how to move it.
+        bool? installedFromIndex = null;
+        try { installedFromIndex = (_catalog as InstallCatalogService)?.InstalledFromIndex(entry.Key); }
+        catch { installedFromIndex = null; }
+        if (entry.FromIndex && installedFromIndex == false)
+            facts.Add((InstallModsCopy.FactInstalledFrom, InstallModsCopy.InstalledFromThunderstoreListedInIndex));
         if (entry.Pin?.Revocation is { Mode: IndexRevocationMode.Warning } warned)
             facts.Add((InstallModsCopy.FactIndexWarning, IndexCatalog.RevocationText(warned)));
         if (IndexCatalog.ProgenitorTooOld(entry, out string needs))
@@ -11699,6 +11712,14 @@ internal sealed class InstallIndexRefresher
         {
             if (_served) return false;
         }
+        if (SkippingThunderstore)
+        {
+            // INDEX1: Thunderstore is off: the Index's verified cache (and the local test source) alone.
+            result = LoadWithoutThunderstore!();
+            if (!result.Ok) return false;
+            lock (_gate) _served = true;
+            return true;
+        }
         if (!TryReadCacheStamp(out var stamp)) return false;
         string json;
         try { json = File.ReadAllText(IndexPath!); }
@@ -11761,6 +11782,24 @@ internal sealed class InstallIndexRefresher
     /// </summary>
     public Func<CancellationToken, bool, Task>? BeforeLoad { get; set; }
 
+    /// <summary>
+    /// INDEX1: the Thunderstore index is not read now (<c>[Mods] UseThunderstore</c> off): a refresh runs
+    /// <see cref="BeforeLoad"/> and then <see cref="LoadWithoutThunderstore"/>, and serving the cache does the latter.
+    /// </summary>
+    public Func<bool>? SkipThunderstore { get; set; }
+
+    /// <summary>INDEX1: the catalog's merge without a Thunderstore body (<c>InstallCatalogService.LoadIndexOnly</c>).</summary>
+    public Func<CatalogLoadResult>? LoadWithoutThunderstore { get; set; }
+
+    private bool SkippingThunderstore
+    {
+        get
+        {
+            try { return LoadWithoutThunderstore != null && (SkipThunderstore?.Invoke() ?? false); }
+            catch { return false; }
+        }
+    }
+
     private async Task<CatalogLoadResult> RefreshCoreAsync(CancellationToken cancellationToken, bool force)
     {
         if (BeforeLoad is { } before)
@@ -11768,6 +11807,13 @@ internal sealed class InstallIndexRefresher
             try { await before(cancellationToken, force).ConfigureAwait(false); }
             catch (OperationCanceledException) { return new CatalogLoadResult(false, InstallReasons.FetchCancelled, 0, null); }
             catch { /* the Index keeps its last good list */ }
+        }
+
+        if (SkippingThunderstore)
+        {
+            var only = LoadWithoutThunderstore!();
+            if (only.Ok) lock (_gate) _served = true;
+            return only;
         }
 
         CatalogTextFetchResult fetched;

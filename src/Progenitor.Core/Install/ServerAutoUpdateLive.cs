@@ -363,7 +363,7 @@ internal static class ServerAutoUpdateLive
                     return new InspectCallResult(false, "the download link is not on " + settings.ThunderstoreBaseUrl, entry, null);
             }
 
-            return await catalog.DownloadAndInspectAsync(key, ct).ConfigureAwait(false);
+            return await catalog.DownloadUpdateAndInspectAsync(key, ct).ConfigureAwait(false);
         },
         Plan = async (key, ct) =>
         {

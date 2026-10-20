@@ -268,6 +268,7 @@ internal sealed class CatalogEntry
             HasNsfwContent)
         {
             Pin = Pin,
+            ThunderstoreRow = ThunderstoreRow,
         };
 
     /// <summary>
@@ -276,6 +277,22 @@ internal sealed class CatalogEntry
     /// listing. A pinned listing installs only the file the pin names (<see cref="ProgenitorIndex.CheckDownload"/>).
     /// </summary>
     public IndexPin? Pin { get; init; }
+
+    /// <summary>
+    /// INDEX1: on an Index row, the Thunderstore row of the same key it shadows (null when Thunderstore lists none or is
+    /// off). A mod installed from Thunderstore keeps updating from this row, never from the Index row.
+    /// </summary>
+    public CatalogEntry? ThunderstoreRow { get; init; }
+
+    /// <summary>The same row carrying <paramref name="thunderstore"/> as the row it shadows.</summary>
+    public CatalogEntry WithThunderstoreRow(CatalogEntry? thunderstore) =>
+        new CatalogEntry(Manifest, Provenance, SourceId, SourceLabel, IndexStamp, DisplayName, Author, Description, ListingUrl, Side,
+            IsDeprecated, ForeignDependencies, PluginDependencies, SelectedVersionFullName, DownloadUrl, ListingFileSize, Owner,
+            PackageName, Categories, DateUpdated, ReleasedUtc, Downloads, RatingScore, HasNsfwContent)
+        {
+            Pin = Pin,
+            ThunderstoreRow = thunderstore,
+        };
 
     /// <summary>INDEX1: a listing read from the Progenitor Index (its installs may hot load; Thunderstore installs restart).</summary>
     public bool FromIndex => string.Equals(SourceId, ProgenitorIndex.SourceId, StringComparison.Ordinal) && Pin != null;

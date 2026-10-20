@@ -730,13 +730,13 @@ Status: **source-checked, built (Debug and Release), game-free tested, and live-
 
 Status: **source-checked, built and game-free tested (`ProgenitorIndexTests`, `AdmissionTests`, `InstallHotLoadTests`, `RemoteInstallTests`); not live-verified.** The list, its signature, cache and download rules are in [auto-update.md](auto-update.md#the-progenitor-index).
 
-- **One list.** The Install tab lists the signed Progenitor Index together with Thunderstore. Each refresh checks the Index first (its own conditional request), then the Thunderstore index, and merges: the local test source, then the Index, then Thunderstore. A mod in both is its Index row.
+- **One list.** The Install tab lists the signed Progenitor Index together with Thunderstore. Each refresh checks the Index first (its own conditional request), then the Thunderstore index, and merges: the local test source, then the Index, then Thunderstore. A mod in both is its Index row. With **Use Thunderstore** off the tab still lists the Index; only Thunderstore's rows go away.
 - **Source label.** An Index row's second line ends with `· Progenitor Index` (`by owner · Progenitor Index`); Thunderstore rows are unchanged. The drawer's facts add **Source** (`Progenitor Index`, `Thunderstore` or the local test source).
 - **README and icon.** An Index row's README and changelog come from the list itself (nothing is fetched); its icon is the one the Index publishes beside the list.
-- **Takedowns.** A `warning` version reads `· ⚠ Warning` on its row and a **Warning** fact with the reason; a `hidden` or `disable` version is not listed and cannot be installed. An installed copy of a `warning` or `disable` version gets a problem line on its mod page (`Warning from the Progenitor Index` / `Taken down from the Progenitor Index`, with the reason).
+- **Takedowns.** A `warning` version reads `· ⚠ Warning` on its row and a **Warning** fact with the reason; a `hidden` or `disable` version is not listed and cannot be installed. An installed copy of a `warning` or `disable` version gets a problem line on its mod page (`Warning from the Progenitor Index` / `Taken down from the Progenitor Index`, with the reason). A taken-down Progenitor mod is not loaded (at the next start or a hot load); nothing is deleted, and it loads again if the takedown is lifted.
 - **Progenitor version.** A mod whose `progenitor` range excludes this Progenitor reads `· Needs a newer Progenitor`, with a **Needs** fact (`Progenitor >=X (this is Y)`); its install is refused before any download.
 - **Hot load.** Only an Index install may load without a restart. The same hotLoadable package from Thunderstore installs for the next start; its plan reads `installed from Thunderstore, so it loads at the next start; …`.
-- **Updates.** An update of a mod the Index lists comes from the Index.
+- **Updates.** Updates stay with their source (the ledger's `origin`): an Index install updates only from the Index, a Thunderstore install only from Thunderstore. A Thunderstore install the Index now lists shows **Installed from** in the drawer and an information line on its mod page: uninstall it and install it again here to move it.
 
 ## HotDemo: hot install and uninstall, trusted hotLoadable (HOTDEMO1)
 

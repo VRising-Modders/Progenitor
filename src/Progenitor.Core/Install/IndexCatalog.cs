@@ -151,6 +151,18 @@ internal static class IndexCatalog
         out int shadowedLocal,
         out int shadowedThunderstore)
     {
+        // Each Index row carries the Thunderstore row it shadows: a mod installed from Thunderstore updates from that row.
+        if (index != null && index.Count > 0 && thunderstore != null && thunderstore.Count > 0)
+        {
+            var byKey = new Dictionary<string, CatalogEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in thunderstore)
+                if (t != null && !string.IsNullOrEmpty(t.Key) && !byKey.ContainsKey(t.Key)) byKey[t.Key] = t;
+            var withShadows = new List<CatalogEntry>(index.Count);
+            foreach (var e in index)
+                withShadows.Add(e != null && byKey.TryGetValue(e.Key, out var t) ? e.WithThunderstoreRow(t) : e!);
+            index = withShadows;
+        }
+
         var fetched = LocalIndexSource.Merge(index, thunderstore, out shadowedThunderstore);
         return LocalIndexSource.Merge(local, fetched, out shadowedLocal);
     }

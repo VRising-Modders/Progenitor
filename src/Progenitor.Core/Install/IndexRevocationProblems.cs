@@ -7,17 +7,54 @@ namespace Progenitor.Install;
 
 /// <summary>
 /// INDEX1: installed mods a Progenitor Index takedown names (<c>revoked[]</c>, mode Warning or Disable), as mod problems
-/// (<see cref="ModProblems"/>), so the Mods page flags the installed copy with the reason. Report only: nothing is turned
-/// off or removed. A copy is matched by its install-ledger row (package and version), whichever source installed it.
+/// (<see cref="ModProblems"/>), so the Mods page flags the installed copy with the reason. A copy is matched by its
+/// install-ledger row (package and version), whichever source installed it. A Disable takedown also keeps the copy from
+/// loading (<see cref="DisableReason"/>, read by <c>ModEnableState.OffReason</c> when a Progenitor plugin loads, at a start
+/// or a hot load); nothing is deleted, and the copy loads again once the takedown is lifted. A Thunderstore install of a mod
+/// the Index now lists gets an information line saying how to move it.
 /// </summary>
 internal sealed class IndexRevocationSource : IModProblemSource
 {
     public const string Kind = "index-takedown";
 
+    /// <summary>The information line of a Thunderstore install the Index now lists.</summary>
+    public const string MovableKind = "index-listed";
+
     public string Name => "progenitor index takedowns";
 
-    /// <summary>One installed copy: its plugin id, listing key (<c>Owner-Name</c>) and version.</summary>
-    internal readonly record struct Installed(string PluginId, string Package, string Version);
+    /// <summary>One installed copy: its plugin id, listing key (<c>Owner-Name</c>), version and whether it came from the Index.</summary>
+    internal readonly record struct Installed(string PluginId, string Package, string Version, bool FromIndex = false);
+
+    /// <summary>
+    /// Why plugin <paramref name="pluginId"/> must not load: an installed copy's version is taken down (Disable) in the
+    /// Progenitor Index this process holds (its verified cache at start). Null when it may load. Never throws.
+    /// </summary>
+    internal static string? DisableReason(string? pluginId)
+    {
+        if (string.IsNullOrWhiteSpace(pluginId)) return null;
+        try
+        {
+            var doc = IndexProbe != null ? IndexProbe() : LiveIndex();
+            if (doc == null || doc.Revoked.Count == 0) return null;
+            var installed = InstalledProbe != null ? InstalledProbe() : LiveInstalled();
+            return DisableReasonFor(doc, installed, pluginId!.Trim());
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The pure rule behind <see cref="DisableReason"/>.</summary>
+    internal static string? DisableReasonFor(IndexDocument doc, IEnumerable<Installed> installed, string pluginId)
+    {
+        foreach (var i in installed)
+        {
+            if (!string.Equals(i.PluginId, pluginId, StringComparison.OrdinalIgnoreCase)) continue;
+            var r = IndexCatalog.RevocationForInstalled(doc, i.Package, i.Version);
+            if (r is { Mode: IndexRevocationMode.Disable })
+                return "taken down from the Progenitor Index" + (r.Reason.Length > 0 ? " (" + r.Reason.TrimEnd('.') + ")" : "");
+        }
+
+        return null;
+    }
 
     /// <summary>Tests: the installed copies (null: this client's install ledger).</summary>
     internal static Func<IEnumerable<Installed>>? InstalledProbe { get; set; }
@@ -30,7 +67,7 @@ internal sealed class IndexRevocationSource : IModProblemSource
         IndexDocument? doc;
         try { doc = IndexProbe != null ? IndexProbe() : LiveIndex(); }
         catch { doc = null; }
-        if (doc == null || doc.Revoked.Count == 0) return Array.Empty<ModProblem>();
+        if (doc == null || (doc.Revoked.Count == 0 && doc.Packages.Count == 0)) return Array.Empty<ModProblem>();
 
         IEnumerable<Installed> installed;
         try { installed = InstalledProbe != null ? InstalledProbe() : LiveInstalled(); }
@@ -43,11 +80,28 @@ internal sealed class IndexRevocationSource : IModProblemSource
     {
         var list = new List<ModProblem>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in IndexCatalog.ToEntries(doc, ""))
+            listed.Add(row.Key);
         foreach (var i in installed)
         {
             if (i.PluginId.Length == 0 || !seen.Add(i.PluginId)) continue;
             var r = IndexCatalog.RevocationForInstalled(doc, i.Package, i.Version);
-            if (r == null || r.Mode is not (IndexRevocationMode.Warning or IndexRevocationMode.Disable)) continue;
+            if (r == null || r.Mode is not (IndexRevocationMode.Warning or IndexRevocationMode.Disable))
+            {
+                // Updates stay with their source: a Thunderstore install the Index now lists is moved by hand.
+                if (!i.FromIndex && listed.Contains(i.Package))
+                    list.Add(new ModProblem(
+                        ModProblemSeverity.Info,
+                        MovableKind,
+                        i.PluginId,
+                        "Installed from Thunderstore, and the Progenitor Index lists it too. It keeps updating from Thunderstore.",
+                        "To move it to the Progenitor Index, uninstall it and install it again from Install mods.",
+                        key: i.Package,
+                        listLine: "Also in the Progenitor Index"));
+                continue;
+            }
+
             bool down = r.Mode == IndexRevocationMode.Disable;
             string why = r.Reason.Length > 0 ? ": " + r.Reason : "";
             list.Add(new ModProblem(
@@ -55,7 +109,8 @@ internal sealed class IndexRevocationSource : IModProblemSource
                 Kind,
                 i.PluginId,
                 (down ? "The Progenitor Index took this version down" : "The Progenitor Index warns about this version") + why
-                    + (why.EndsWith(".", StringComparison.Ordinal) ? "" : "."),
+                    + (why.EndsWith(".", StringComparison.Ordinal) ? "" : ".")
+                    + (down ? " Progenitor does not load it. Nothing was deleted: it loads again if the takedown is lifted." : ""),
                 down ? "Uninstall it." : "Read the warning before you keep using it.",
                 details: i.Package + " " + i.Version + " (" + r.Date + ")",
                 key: i.Package + "@" + i.Version,
@@ -99,7 +154,7 @@ internal sealed class IndexRevocationSource : IModProblemSource
             {
                 if (f.Category == ServerInstallLedger.CategoryFramework) continue;
                 if (!InstalledState.TrySplitPackageSource(f.Source, out string package, out string version)) continue;
-                rows.Add(new Installed(f.PluginId, package, version));
+                rows.Add(new Installed(f.PluginId, package, version, f.FromIndex));
             }
 
             _ledgerStamp = stamp;

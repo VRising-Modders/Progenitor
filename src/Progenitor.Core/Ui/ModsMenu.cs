@@ -2760,7 +2760,7 @@ public static partial class ModsMenu
         {
             // TSTRAFFIC1: a pane rebuilt with the catalog gets the cached index when no check is due; it does not check again.
             var refresher = _indexRefresher;
-            if (refresher != null && !refresher.ShouldFetch(DateTime.UtcNow) && (_bindings?.UseThunderstore.Value ?? true))
+            if (refresher != null && !refresher.ShouldFetch(DateTime.UtcNow) && AnyListingSource)
                 ServeCachedIndexNow();
             else
                 QueueInstallIndexLoad();
@@ -2784,7 +2784,8 @@ public static partial class ModsMenu
         Owned.Adopt(panel);
         if (panel.Enabled)
         {
-            bool thunder = _bindings?.UseThunderstore.Value ?? true;
+            // INDEX1: the Progenitor Index lists mods with Thunderstore off; only its listings go away.
+            bool thunder = AnyListingSource;
             bool nexus = _bindings?.UseNexus.Value ?? false;
             pane.SetInstalledQuery(CurrentInstalledQuery());
             // HOT3 defect 3: an install or remove that changed what this process has loaded asks for
@@ -3816,6 +3817,10 @@ public static partial class ModsMenu
         // INDEX1: each refresh checks the Progenitor Index first (its own conditional request), so the list it hands the
         // catalog is merged with the Index's.
         _indexRefresher.BeforeLoad = (ct, force) => service.RefreshIndexAsync(ct, force);
+        // INDEX1: with [Mods] UseThunderstore off the tab lists the Index (and the local test source) alone.
+        _indexRefresher.SkipThunderstore = () => !(_bindings?.UseThunderstore.Value ?? true);
+        _indexRefresher.LoadWithoutThunderstore = service.LoadIndexOnly;
+        service.ThunderstoreEnabled = () => _bindings?.UseThunderstore.Value ?? true;
         _indexRefresher.InheritSession(previousRefresher);
 #endif
     }
@@ -3832,7 +3837,7 @@ public static partial class ModsMenu
         _indexOpenHandled = true;
         var refresher = _indexRefresher;
         if (refresher == null) return;
-        if (!(_bindings?.UseThunderstore.Value ?? true)) return;
+        if (!AnyListingSource) return;
         var pane = EnsureInstallPane();
         if (!refresher.CacheServed && refresher.TryServeCache(out var cached))
         {
@@ -3852,7 +3857,7 @@ public static partial class ModsMenu
     {
         var refresher = _indexRefresher;
         if (refresher == null || refresher.CacheServed) return;
-        if (!(_bindings?.UseThunderstore.Value ?? true)) return;
+        if (!AnyListingSource) return;
         var pane = EnsureInstallPane();
         if (refresher.TryServeCache(out var cached))
         {
@@ -3860,6 +3865,17 @@ public static partial class ModsMenu
             NoteIndexContent("index-cache-served");
             try { Plugin.Logger?.LogInfo("Install: cached index served ahead of the open (" + cached.Count + " listings)."); }
             catch { /* */ }
+        }
+    }
+
+    /// <summary>INDEX1: the Install tab has something to list: Thunderstore is on, or the Progenitor Index is.</summary>
+    private static bool AnyListingSource
+    {
+        get
+        {
+            if (_bindings?.UseThunderstore.Value ?? true) return true;
+            try { return ProgenitorIndexConfig.Enabled; }
+            catch { return false; }
         }
     }
 

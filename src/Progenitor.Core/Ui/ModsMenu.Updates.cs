@@ -100,7 +100,7 @@ public static partial class ModsMenu
         ClientUpdates.Log = line => Plugin.Logger?.LogInfo(line);
         ClientUpdates.Pipeline = new UpdatePipeline
         {
-            Inspect = (key, ct) => Catalog().DownloadAndInspectAsync(key, ct),
+            Inspect = (key, ct) => Catalog() is InstallCatalogService s ? s.DownloadUpdateAndInspectAsync(key, ct) : Catalog().DownloadAndInspectAsync(key, ct), // INDEX1: from the installed copy's own source
             Plan = (key, ct) => _catalog is InstallCatalogService s
                 ? s.PlanWithDependenciesAsync(key, InstallTarget.Client, ct)
                 : Task.FromResult(InstallPlanSet.Refuse("the install catalog cannot plan dependencies")),

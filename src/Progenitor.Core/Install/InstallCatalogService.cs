@@ -121,6 +121,36 @@ internal sealed class InstallCatalogService : IInstallCatalog
         }
     }
 
+    /// <summary>
+    /// INDEX1: <c>[Mods] UseThunderstore</c> (null: on). Off, the merge leaves Thunderstore's rows out and lists the local
+    /// test source and the Progenitor Index alone.
+    /// </summary>
+    internal Func<bool>? ThunderstoreEnabled { get; set; }
+
+    private bool ThunderstoreOn()
+    {
+        try { return ThunderstoreEnabled?.Invoke() ?? true; }
+        catch { return true; }
+    }
+
+    /// <summary>
+    /// INDEX1: merge without reading Thunderstore (it is off): the local test source and the Index list the source holds now.
+    /// Always succeeds; the count may be zero.
+    /// </summary>
+    internal CatalogLoadResult LoadIndexOnly()
+    {
+        string stamp = CatalogFetcher.FormatStamp(_clock.UtcNow);
+        lock (_gate)
+        {
+            _indexStamp = stamp;
+            FollowConfiguredLocalIndexLocked();
+            FollowIndexLocked();
+            int count = MergeLocked();
+            _status = InstallProgress.Idle;
+            return new CatalogLoadResult(true, null, count, stamp);
+        }
+    }
+
     /// <summary>INDEX1: how old the Index may be before an index load checks it again (Install tab 30 min, join 10).</summary>
     internal TimeSpan IndexRefreshAge { get; set; } = ProgenitorIndexSource.InstallTabAge;
 
@@ -1095,6 +1125,61 @@ internal sealed class InstallCatalogService : IInstallCatalog
         return HotLoadTrust.CanUnloadHot(VerifiedFor(entry), filePath, out reason);
     }
 
+    /// <summary>
+    /// INDEX1: where this root's installed copy of listing <paramref name="key"/> came from: true for the Progenitor Index,
+    /// false for anything else (Thunderstore, an earlier build), null when this root's ledger has no copy of it.
+    /// </summary>
+    internal bool? InstalledFromIndex(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return null;
+        string? game = ServerInstall.GameRootOf(_bepInExRoot);
+        var ledger = string.IsNullOrEmpty(game) ? null : ServerInstallLedger.TryRead(game!);
+        if (ledger == null) return null;
+        bool? found = null;
+        foreach (var row in ledger.Files)
+        {
+            if (row.Category == ServerInstallLedger.CategoryFramework) continue;
+            if (!InstalledState.TrySplitPackageSource(row.Source, out string package, out _)) continue;
+            if (!string.Equals(package, key!.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+            if (row.FromIndex) return true;
+            found = false;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// INDEX1: updates stay with their source. Before an update of <paramref name="key"/> downloads, the catalog's row is
+    /// the one of the source the installed copy came from: an Index install keeps the Index row, a Thunderstore install takes
+    /// the Thunderstore row an Index row shadows. Null when that is in place; the refusal when that source does not list it.
+    /// </summary>
+    internal string? UseInstalledSource(string key)
+    {
+        bool? fromIndex = InstalledFromIndex(key);
+        if (fromIndex == null || IsLocalKey(key)) return null;
+        if (!TryGetEntry(key, out var row) || row == null) return InstallReasons.UnknownEntry;
+        if (fromIndex.Value)
+            return row.FromIndex ? null : InstallReasons.UpdateIndexGone;
+        if (!row.FromIndex) return null;
+        if (row.ThunderstoreRow == null) return InstallReasons.UpdateThunderstoreGone;
+        UseVersionEntry(row.ThunderstoreRow);
+        return null;
+    }
+
+    /// <summary>INDEX1: an update's download: the row of the installed copy's own source (<see cref="UseInstalledSource"/>), then the usual download and inspection.</summary>
+    internal async Task<InspectCallResult> DownloadUpdateAndInspectAsync(string key, CancellationToken cancellationToken)
+    {
+        string? refusal = UseInstalledSource(key);
+        if (refusal != null)
+        {
+            TryGetEntry(key, out var entry);
+            InstallLog.Warn("Install: update of " + key + " refused: " + refusal + ".");
+            return new InspectCallResult(false, refusal, entry, null);
+        }
+
+        return await DownloadAndInspectAsync(key, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>INDEX1: the install ledger row of this file (on the client or the local server root) names the Progenitor Index.</summary>
     internal bool LedgerSaysIndex(string? filePath)
     {
@@ -1769,7 +1854,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
 
         // INDEX1: local test listings, then the Progenitor Index, then Thunderstore; a mod in the Index and on Thunderstore
         // is its Index row.
-        var merged = IndexCatalog.Merge(local, _indexEntries, _fetchedEntries, out _localShadowed, out _indexShadowed);
+        var merged = IndexCatalog.Merge(local, _indexEntries, ThunderstoreOn() ? _fetchedEntries : Array.Empty<CatalogEntry>(), out _localShadowed, out _indexShadowed);
         _entries = merged;
         _byKey.Clear();
         for (int i = 0; i < merged.Count; i++)

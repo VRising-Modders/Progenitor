@@ -254,10 +254,22 @@ internal static class ModEnableState
     internal static string? OffReason(string id, IReadOnlyList<string>? hardDependencies, Func<string, bool>? skippedNow = null)
     {
         if (IsRequiredPart(id)) return null;
+        // INDEX1: an installed version the Progenitor Index took down (Disable) does not load, at a start or a hot load.
+        // Nothing is written: the copy loads again once the takedown is lifted.
+        string? takedown = null;
+        try { takedown = TakedownReason?.Invoke(id); }
+        catch { takedown = null; }
+        if (!string.IsNullOrEmpty(takedown)) return takedown;
         if (IsDisabled(id)) return ModSwitchWords.OffByPlayer;
         string? dep = BlockingDependency(id, hardDependencies, skippedNow);
         return dep == null ? null : ModSwitchWords.OffBecause(dep);
     }
+
+    /// <summary>
+    /// INDEX1: why a plugin's installed version is taken down from the Progenitor Index (it must not load), or null. Set at
+    /// Core load (<c>Install.IndexRevocationSource.DisableReason</c>); null in tests unless a test sets it.
+    /// </summary>
+    internal static Func<string, string?>? TakedownReason { get; set; }
 
     /// <summary>The first hard dependency that is off (turned off, or skipped for that reason), or null.</summary>
     internal static string? BlockingDependency(string id, IReadOnlyList<string>? hardDependencies, Func<string, bool>? skippedNow = null)

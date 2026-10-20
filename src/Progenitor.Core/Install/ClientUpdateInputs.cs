@@ -49,6 +49,7 @@ internal static class ClientUpdateInputs
 
             if (row.PluginId.Length > 0 && !m.PluginIds.Exists(id => string.Equals(id, row.PluginId, StringComparison.OrdinalIgnoreCase)))
                 m.PluginIds.Add(row.PluginId);
+            if (row.FromIndex) m.FromIndex = true;
             if (!FileMatches(gameRoot, row)) m.Changed = true;
         }
 
@@ -215,20 +216,26 @@ internal static class ClientUpdateInputs
             bool local;
             try { local = isLocal?.Invoke(key) ?? false; }
             catch { local = false; }
-            map[key] = new IndexListing
-            {
-                Key = key,
-                Name = DisplayName(e),
-                Latest = e.Manifest?.Version ?? "",
-                Deprecated = e.IsDeprecated,
-                Nsfw = e.HasNsfwContent,
-                Local = local,
-                Dependencies = e.ForeignDependencies ?? (IReadOnlyList<string>)Array.Empty<string>(),
-            };
+            var listing = ListingOf(e, key, local);
+            // INDEX1: the Thunderstore row an Index row shadows, for a mod installed from Thunderstore.
+            if (e.FromIndex && e.ThunderstoreRow != null) listing.Thunderstore = ListingOf(e.ThunderstoreRow, key, false);
+            map[key] = listing;
         }
 
         return map;
     }
+
+    private static IndexListing ListingOf(CatalogEntry e, string key, bool local) => new()
+    {
+        Key = key,
+        Name = DisplayName(e),
+        Latest = e.Manifest?.Version ?? "",
+        Deprecated = e.IsDeprecated,
+        Nsfw = e.HasNsfwContent,
+        Local = local,
+        Dependencies = e.ForeignDependencies ?? (IReadOnlyList<string>)Array.Empty<string>(),
+        FromIndex = e.FromIndex,
+    };
 
     private static string DisplayName(CatalogEntry e)
     {
