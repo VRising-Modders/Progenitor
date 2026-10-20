@@ -403,7 +403,7 @@ window.HELP = {
 <li><a href="#keybinds/tab">Remappable keys</a> for every mod and the game.</li></ul>
 <p>The next chapters cover each one and its settings.</p>` },
         { id: "install-mods", title: "Install mods",
-          html: `<p>Open [[install-tab|Install Mods]], find a mod and click <strong>Install</strong>. Mods built on Progenitor come from the [[progenitor-index|Progenitor Index]] and can load at once; other mods come from Thunderstore and load at the next start.</p>
+          html: `<p>Open [[install-tab|Install Mods]], find a mod and click <strong>Install</strong>. Mods their authors listed on the [[progenitor-index|Progenitor Index]] can load at once; mods from Thunderstore load at the next start.</p>
 <ul><li><strong>Simple</strong> (default): one button per mod. <strong>Advanced</strong>: separate Client and Server columns, a server picker and more filters. Switch at the left of the search box.</li>
 <li>Click a row to see its <strong>Side</strong>: Client (this game), Server, or Client and server.</li>
 <li>Players need only client mods. Server-only mods are listed only for an [[admin|admin]] of the server you are on.</li>
@@ -555,7 +555,7 @@ window.HELP = {
 <tr><td>Edit other mods' settings</td><td>Off</td><td>Lets the Mods menu change mods not built on Progenitor.</td></tr>
 <tr><td>Install view</td><td>Simple</td><td>Simple or Advanced Install Mods tab.</td></tr>
 <tr><td>Remember Install filters and sort</td><td>Off</td><td>Keeps them between sessions.</td></tr>
-<tr><td>Use Thunderstore</td><td>On</td><td>Lists Thunderstore's mods in Install Mods. Mods from the Progenitor Index are listed either way.</td></tr>
+<tr><td>Use Thunderstore</td><td>On</td><td>Lists Thunderstore's mods in Install Mods. Off: mods from the Progenitor Index are still listed, and mods you installed from Thunderstore stop updating.</td></tr>
 <tr><td>Show mods with NSFW content</td><td>Off</td><td>Lists them too.</td></tr>
 <tr><td>Download limit</td><td class="num">128</td><td>MB, 8 to 1,024. Bigger mods aren't installed.</td></tr>
 <tr><td>Show only Progenitor servers</td><td>Off</td><td>Filters the game's Join Game list.</td></tr></tbody></table>
@@ -596,17 +596,18 @@ window.HELP = {
 <li><strong>Updates</strong> band: <strong>Update all</strong>, or <strong>Keep 1.2.0</strong> on a row (<strong>Unpin</strong> undoes it).</li>
 <li><em>Needs a newer Progenitor</em>: update Progenitor first; until then it won't install.</li></ul>` },
         { id: "source", title: "Where mods come from",
-          html: `<p>Mods built on Progenitor come from the [[progenitor-index|Progenitor Index]]; other mods come from [[thunderstore|Thunderstore]]. A mod in both shows and installs the Index copy.</p>
+          html: `<p>Install Mods lists the mods their authors put on the [[progenitor-index|Progenitor Index]], and mods from [[thunderstore|Thunderstore]]. A mod in both shows and installs the Index copy.</p>
 <ul><li>Index rows end with <em>&middot; Progenitor Index</em>; a row's details show its <strong>Source</strong>.</li>
 <li>Only mods from the Index load or unload without a restart. Thunderstore mods change at the next start.</li>
 <li>A mod keeps updating from where you installed it. To move one from Thunderstore to the Index, uninstall it and install it again here.</li>
-<li><strong>Use Thunderstore</strong> off (Preferences) still lists the Index.</li>
+<li><strong>Use Thunderstore</strong> off (Preferences): the Index is still listed, but mods installed from Thunderstore don't update, and their page says why.</li>
 <li>Uninstall removes only files Progenitor installed. <em>Too large to install</em> and <em>Tool, not a plugin</em> mean it can't be installed here.</li></ul>` },
         { id: "index-safety", title: "Index warnings and takedowns",
           html: `<p>The [[progenitor-index|Progenitor Index]] is reviewed, and every download must be the exact file it lists, or it is refused.</p>
 <ul><li><em>&#9888; Warning</em> on a mod: the Index flagged it. Its row says why.</li>
-<li>A mod the Index takes down is no longer offered. If you have it, it stops loading at the next start and its page explains why.</li>
-<li>Nothing is deleted: uninstall it, or it loads again if the takedown is lifted.</li></ul>` }
+<li>A mod the Index takes down is no longer offered. If you have it, its page explains why and says what happens next.</li>
+<li>Most stop loading at the next start. A plain BepInEx plugin can't be stopped, so its page asks you to uninstall it.</li>
+<li>Nothing is deleted: uninstall it yourself, or a stopped mod loads again if the takedown is lifted.</li></ul>` }
       ]
     },
     /* ---------------- Players: Keybinds ---------------- */
@@ -1174,7 +1175,7 @@ My question:` } },
 <li>Removed: SteamIDs, IP addresses, your Windows user name, passwords and tokens. Character and server names stay.</li></ul>` },
         { id: "why-not-thunderstore", title: "Why aren't Progenitor mods on Thunderstore?",
           html: `<p>Thunderstore doesn't list mod managers, and managing mods is a core part of Progenitor: installing, updating, hot loading, and joining servers with the right mods.</p>
-<p>So Progenitor comes from its GitHub releases, and the mods built on it are listed in the [[progenitor-index|Progenitor Index]]. Install them from <strong>Mods</strong> &rsaquo; <strong>Install Mods</strong>. Thunderstore is still the place for BepInEx and for mods that don't use Progenitor.</p>` },
+<p>So Progenitor comes from its GitHub releases, and authors list the mods built on it in the [[progenitor-index|Progenitor Index]]. Install them from <strong>Mods</strong> &rsaquo; <strong>Install Mods</strong>. Thunderstore is still the place for BepInEx and for mods that don't use Progenitor.</p>` },
         { id: "logs-settings", title: "Get help settings",
           html: `<table><thead><tr><th class="label">Row</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Last bundle</td><td></td><td>The newest zip, or how the last collect went.</td></tr>
@@ -1252,7 +1253,7 @@ My question:` } },
     { id: "world-epoch", term: "World epoch", def: "A stamp of the current world load; keep it beside any held entity and check <code>ctx.WorldState.IsStale</code>." },
     { id: "mod-link", term: "Mod link", def: "A chat token such as <code>[mod:Namespace-Name]</code> that opens a mod's page or Install Mods listing when clicked, and never installs anything." },
     { id: "thunderstore", term: "Thunderstore", def: "The V Rising mod site the Install Mods tab installs ordinary mods from; Progenitor and the mods built on it are not there." },
-    { id: "progenitor-index", term: "Progenitor Index", def: "The signed, reviewed list of mods built on Progenitor that Install Mods installs them from." },
+    { id: "progenitor-index", term: "Progenitor Index", def: "The signed, reviewed list of mods their authors submitted for Progenitor; Install Mods installs them from it." },
     { id: "stamp", term: "Progenitor stamp", def: "An optional corner mark on a mod's icon showing it runs on Progenitor; it is not an endorsement." },
     { id: "dev-bridge", term: "Dev bridge", def: "<code>Progenitor.Dev</code>: a local-only bridge and MCP server for building, reloading and testing in a test game; never on a public server." },
     { id: "game-free-test", term: "Game-free test", def: "A test that runs with <code>dotnet test</code> and no game install, as CI does." }
