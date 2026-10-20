@@ -159,6 +159,36 @@ internal sealed class IndexDocument
     public IReadOnlyList<IndexPackage> Packages { get; init; } = Array.Empty<IndexPackage>();
     public IReadOnlyList<IndexRevocation> Revoked { get; init; } = Array.Empty<IndexRevocation>();
 
+    /// <summary>Packages left out while reading the list, each with why (<c>id: no sha256</c>).</summary>
+    public IReadOnlyList<string> Dropped { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// The adoption log line: <c>Progenitor Index: N listed (native), M imported ignored, K taken down</c>, then each dropped
+    /// or taken-down package with why.
+    /// </summary>
+    public string Summary()
+    {
+        int native = 0, imported = 0, down = 0;
+        var why = new List<string>(Dropped);
+        foreach (var p in Packages)
+        {
+            if (p.Imported) { imported++; continue; }
+            var r = RevocationOf(p.Owner, p.Name, p.Version, p.Repo);
+            if (r is { Mode: IndexRevocationMode.Hidden or IndexRevocationMode.Disable })
+            {
+                down++;
+                why.Add(p.Id + ": taken down (" + r.Mode.ToString().ToLowerInvariant() + ")");
+                continue;
+            }
+
+            native++;
+        }
+
+        string line = "Progenitor Index: " + native + " listed (native), " + imported + " imported ignored, " + down + " taken down";
+        if (why.Count > 0) line += "; left out: " + string.Join("; ", why);
+        return line + ".";
+    }
+
     /// <summary>sha256 of the list's text: a different list is a different hash (L5).</summary>
     public string Sha256 { get; init; } = "";
 
@@ -346,9 +376,11 @@ internal static class ProgenitorIndex
             if (format != Format) { error = "the Index has format " + format + ", not " + Format; return IndexDocument.Empty; }
 
             var packages = new List<IndexPackage>();
+            var dropped = new List<string>();
             if (root.TryGetProperty("packages", out var arr) && arr.ValueKind == JsonValueKind.Array)
                 foreach (var p in arr.EnumerateArray())
-                    if (TryReadPackage(p, out var package)) packages.Add(package);
+                    if (TryReadPackage(p, out var package, out string why)) packages.Add(package);
+                    else dropped.Add(why);
 
             var revoked = new List<IndexRevocation>();
             if (root.TryGetProperty("revoked", out var rev) && rev.ValueKind == JsonValueKind.Array)
@@ -362,6 +394,7 @@ internal static class ProgenitorIndex
                 Sha256 = CatalogFetcher.ToHex(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json))),
                 Packages = packages,
                 Revoked = revoked,
+                Dropped = dropped,
             };
         }
         catch (JsonException e)
@@ -383,15 +416,20 @@ internal static class ProgenitorIndex
         catch (JsonException) { return null; }
     }
 
-    private static bool TryReadPackage(JsonElement p, out IndexPackage package)
+    private static bool TryReadPackage(JsonElement p, out IndexPackage package, out string dropped)
     {
         package = null!;
-        if (p.ValueKind != JsonValueKind.Object) return false;
+        dropped = "";
+        if (p.ValueKind != JsonValueKind.Object) { dropped = "a package that is not an object"; return false; }
         string owner = Str(p, "owner"), name = Str(p, "name"), version = Str(p, "version");
         string source = Str(p, "source"), url = Str(p, "package"), sha = Str(p, "sha256").ToLowerInvariant();
         long size = p.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt64(out long z) ? z : 0;
-        if (owner.Length == 0 || name.Length == 0 || version.Length == 0 || url.Length == 0 || size <= 0 || !SelfFeed.IsSha256(sha)) return false;
-        if (source != IndexPackage.SourceGitHubRelease && source != IndexPackage.SourceThunderstore) return false;
+        string id0 = owner + "-" + name + "-" + version;
+        if (owner.Length == 0 || name.Length == 0 || version.Length == 0) { dropped = "a package without an owner, name or version"; return false; }
+        if (url.Length == 0) { dropped = id0 + ": no package URL"; return false; }
+        if (size <= 0) { dropped = id0 + ": no size"; return false; }
+        if (!SelfFeed.IsSha256(sha)) { dropped = id0 + ": no sha256"; return false; }
+        if (source != IndexPackage.SourceGitHubRelease && source != IndexPackage.SourceThunderstore) { dropped = id0 + ": unknown source \"" + source + "\""; return false; }
 
         var deps = new List<IndexDependency>();
         if (p.TryGetProperty("dependencies", out var d) && d.ValueKind == JsonValueKind.Array)

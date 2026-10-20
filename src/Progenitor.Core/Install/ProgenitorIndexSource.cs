@@ -468,8 +468,15 @@ internal sealed class ProgenitorIndexSource
             bool same = ReferenceEquals(doc, _current) || (doc.Sha256.Length > 0 && string.Equals(doc.Sha256, _current.Sha256, StringComparison.Ordinal));
             _current = doc;
             _stamp = stamp;
-            if (!same) _version++;
+            if (same) return;
+            _version++;
         }
+
+        // The live test's evidence: what an adopted list contributes, and what it leaves out and why.
+        string summary;
+        try { summary = doc.Summary(); }
+        catch (Exception e) { summary = "Progenitor Index: adopted a list (" + e.Message + ")."; }
+        InstallLog.Info(summary + " (" + _fetch.Url + ", " + stamp + ")");
     }
 
     // ---- the process's own -----------------------------------------------------------------------------------
