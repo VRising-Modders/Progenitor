@@ -180,7 +180,8 @@ internal static class InstallStaging
                 size,
                 LedgerSpelling.SourceFor(plan.Entry, version),
                 ServerInstallLedger.CategoryPending,
-                pluginId: plan.PluginId);
+                pluginId: plan.PluginId,
+                origin: IndexCatalog.LedgerOriginOf(plan.Entry));
             return;
         }
 
@@ -200,7 +201,8 @@ internal static class InstallStaging
                     size,
                     LedgerSpelling.SourceFor(plan.Entry, version),
                     ServerInstallLedger.CategoryPending,
-                    pluginId: plan.PluginId))
+                    pluginId: plan.PluginId,
+                    origin: IndexCatalog.LedgerOriginOf(plan.Entry)))
                 InstallLog.Warn("Install: wrote " + pendingFile + " but could not record it in the install ledger;"
                     + " the row cannot show or remove that copy.");
             return;
@@ -217,7 +219,8 @@ internal static class InstallStaging
                 sha256,
                 size,
                 LedgerSpelling.SourceFor(plan.Entry, version),
-                plan.PluginId))
+                plan.PluginId,
+                IndexCatalog.LedgerOriginOf(plan.Entry)))
             InstallLog.Warn("Install: wrote " + pendingFile + " but that server folder has no readable install ledger;"
                 + " the row cannot show or remove that copy.");
     }

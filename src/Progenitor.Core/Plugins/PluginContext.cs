@@ -1200,10 +1200,10 @@ public sealed class PluginHandshake
     /// Removed 2026-10-05: servers no longer distribute mod files; mods come only from Thunderstore (accountable
     /// authors, easy takedown). Kept so a plugin built against an older Core still loads: it does nothing but log one
     /// warning per mod id per Core generation, and returns a handle
-    /// whose <c>Dispose</c> does nothing. Publish the mod on Thunderstore and name its package in the server's
+    /// whose <c>Dispose</c> does nothing. Publish a GitHub release of the mod, list it in the Progenitor Index and name its package in the server's
     /// <c>progenitor-manifest.json</c> so players can install it from the join screens.
     /// </summary>
-    [Obsolete("Servers no longer distribute mod files; publish the mod on Thunderstore. This call does nothing.")]
+    [Obsolete("Servers no longer distribute mod files; publish a GitHub release and list it in the Progenitor Index. This call does nothing.")]
     public IDisposable OfferPackage(string path)
     {
 #pragma warning disable CS0618 // the obsolete static is the same no-op
@@ -1215,7 +1215,7 @@ public sealed class PluginHandshake
     /// Removed 2026-10-05 with <see cref="OfferPackage"/>: always false, with <paramref name="reason"/>
     /// <c>"removed"</c>, an empty hash and size 0.
     /// </summary>
-    [Obsolete("Servers no longer distribute mod files; publish the mod on Thunderstore. This call always answers false.")]
+    [Obsolete("Servers no longer distribute mod files; publish a GitHub release and list it in the Progenitor Index. This call always answers false.")]
     public bool TryGetOfferedPackageState(out string sha256, out long size, out string reason)
     {
         sha256 = "";

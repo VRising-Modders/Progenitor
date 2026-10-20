@@ -17,7 +17,7 @@ Today a mod is required only when its author declares `[NetworkCompatibility(Ser
 
 ## Security
 
-**Mods come only from Thunderstore (decided 2026-10-05).** A server never sends mod files to a client, and the client never installs a file a server sent; required and recommended mods are installed from Thunderstore, in game from the join screens or the Install tab. Why:
+**Mods come only from public listings (decided 2026-10-05; the Progenitor Index added 2026-10-20).** A server never sends mod files to a client, and the client never installs a file a server sent; required and recommended mods are installed from the signed Progenitor Index when it lists the package, otherwise from Thunderstore, in game from the join screens or the Install tab. Why:
 
 - **Accountable authors.** A Thunderstore package has a named owner, a public listing and a version history; a server's copy has none of that.
 - **Easy takedown.** A malicious package can be removed from Thunderstore for everyone at once; a copy a server hands out cannot be recalled.

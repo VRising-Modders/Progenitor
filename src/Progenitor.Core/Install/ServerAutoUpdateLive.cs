@@ -354,7 +354,8 @@ internal static class ServerAutoUpdateLive
             if (catalog == null) return new InspectCallResult(false, "no install catalog", null, null);
             // The remote installer's checks: a V Rising listing, a download on the configured Thunderstore (the operator's
             // local index excepted).
-            if (catalog.TryGetEntry(key, out var entry) && entry != null && !catalog.IsLocalKey(key))
+            // INDEX1: a Progenitor Index entry is checked against its signed pin by the download itself.
+            if (catalog.TryGetEntry(key, out var entry) && entry != null && !catalog.IsLocalKey(key) && !entry.FromIndex)
             {
                 if (!string.IsNullOrEmpty(entry.ListingUrl) && entry.ListingUrl!.IndexOf("/c/v-rising/", StringComparison.OrdinalIgnoreCase) < 0)
                     return new InspectCallResult(false, "the listing is not in the V Rising community", entry, null);
@@ -362,7 +363,7 @@ internal static class ServerAutoUpdateLive
                     return new InspectCallResult(false, "the download link is not on " + settings.ThunderstoreBaseUrl, entry, null);
             }
 
-            return await catalog.DownloadAndInspectAsync(key, ct).ConfigureAwait(false);
+            return await catalog.DownloadUpdateAndInspectAsync(key, ct).ConfigureAwait(false);
         },
         Plan = async (key, ct) =>
         {

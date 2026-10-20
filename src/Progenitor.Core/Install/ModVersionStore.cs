@@ -42,6 +42,9 @@ internal sealed class ParkedLedgerRow
     public string WrittenUtc { get; set; } = "";
     public string PluginId { get; set; } = "";
     public string Route { get; set; } = "";
+
+    /// <summary>INDEX1: the row's <c>origin</c> (<c>index</c> for a Progenitor Index install), kept while the copy is parked.</summary>
+    public string Origin { get; set; } = "";
 }
 
 /// <summary>JOINFLOW4: one parked (kept, not loaded) copy of a mod.</summary>
@@ -411,6 +414,7 @@ internal sealed class ModVersionManifest
                         WrittenUtc = Str(l, "writtenUtc"),
                         PluginId = Str(l, "pluginId"),
                         Route = Str(l, "route"),
+                        Origin = Str(l, "origin"),
                     };
                 if (p.TryGetProperty("record", out var r) && r.ValueKind == JsonValueKind.Object)
                     v.Record = new ParkedRecordRow
@@ -497,6 +501,7 @@ internal sealed class ModVersionManifest
                         w.WriteString("writtenUtc", p.Ledger.WrittenUtc);
                         w.WriteString("pluginId", p.Ledger.PluginId);
                         w.WriteString("route", p.Ledger.Route);
+                        if (p.Ledger.Origin.Length > 0) w.WriteString("origin", p.Ledger.Origin);
                         w.WriteEndObject();
                     }
 

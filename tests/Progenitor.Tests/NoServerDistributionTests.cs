@@ -106,7 +106,7 @@ public sealed class NoServerDistributionTests : IDisposable
 #pragma warning restore CS0618
 
         Assert.Equal(2, ModManifest.TestRetiredLog.Count);
-        Assert.Contains(ModManifest.TestRetiredLog, l => l.Contains(Sample, StringComparison.Ordinal) && l.Contains("Thunderstore", StringComparison.Ordinal));
+        Assert.Contains(ModManifest.TestRetiredLog, l => l.Contains(Sample, StringComparison.Ordinal) && l.Contains("Progenitor Index", StringComparison.Ordinal));
         Assert.Contains(ModManifest.TestRetiredLog, l => l.Contains("other.mod", StringComparison.Ordinal));
 
         // The catalog carries no hash or size for the mod: nothing is offered.

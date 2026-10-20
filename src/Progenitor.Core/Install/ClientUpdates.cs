@@ -163,6 +163,9 @@ internal static class ClientUpdates
     /// <summary>AUTOUPDATE2: <c>[AutoUpdate] MajorVersions</c> is Automatic.</summary>
     internal static Func<bool> MajorProbe { get; set; } = () => UpdateSettings.MajorAutomatic(UpdateSettings.DefaultMajor);
     internal static Func<bool> NsfwProbe { get; set; } = () => false;
+
+    /// <summary>INDEX1 (L4): [Mods] UseThunderstore is off (a Thunderstore install's update says so).</summary>
+    internal static Func<bool> ThunderstoreOffProbe { get; set; } = () => false;
     internal static Func<string, bool>? DependencyInstalledProbe { get; set; }
     internal static Action<Action> PostMain { get; set; } = a => a();
     internal static Func<Func<UpdateReport>, Task<UpdateReport>> RunOff { get; set; } = work => Task.Run(work);
@@ -435,7 +438,13 @@ internal static class ClientUpdates
         var listings = ClientUpdateInputs.ListingsOf(entries, isLocal);
         var managedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var m in managed) managedKeys.Add(m.Key);
-        return UpdateDetection.Detect(managed, listings, pins, mode, majorsAutomatic, managedKeys.Contains, nsfw, DateTime.UtcNow, stamp);
+        return UpdateDetection.Detect(managed, listings, pins, mode, majorsAutomatic, managedKeys.Contains, nsfw, DateTime.UtcNow, stamp, ThunderstoreOff());
+    }
+
+    private static bool ThunderstoreOff()
+    {
+        try { return ThunderstoreOffProbe(); }
+        catch { return false; }
     }
 
     private static void Adopt(UpdateReport report, string? error)
@@ -1059,6 +1068,7 @@ internal static class ClientUpdates
         PromptProbe = () => UpdateSettings.DefaultPrompt;
         MajorProbe = () => UpdateSettings.MajorAutomatic(UpdateSettings.DefaultMajor);
         NsfwProbe = () => false;
+        ThunderstoreOffProbe = () => false;
     }
 
     private static bool SafeMajor()

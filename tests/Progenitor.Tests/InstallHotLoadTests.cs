@@ -138,6 +138,8 @@ public sealed class InstallHotLoadTests : IClassFixture<AdmissionFixtures>, IDis
             serverRoot,
             localIndexPath,
             thisProcessIsServer);
+        // INDEX1: only an Index install hot loads; these listings are listed there too.
+        catalog.IndexSource = IndexKit.Mirror(indexJson ?? Listing());
         Assert.True(catalog.LoadIndexFromJson(indexJson ?? Listing(), "stamp").Ok);
         return (catalog, snapshots);
     }

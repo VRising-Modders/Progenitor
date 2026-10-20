@@ -385,13 +385,18 @@ public sealed class RemoteInstallServiceTests : IClassFixture<AdmissionFixtures>
         return ts;
     }
 
+    /// <summary>INDEX1: the hot package listed in the Progenitor Index (Thunderstore's download, pinned by its sha256).</summary>
+    private ProgenitorIndexSource HotIndex() => IndexKit.Source(IndexKit.Package("team", "Sample", "1.0.0",
+        source: IndexPackage.SourceThunderstore, url: HotUrl, sha256: Progenitor.SelfUpdate.SelfFiles.Sha256(_hotZip), size: _hotZip.Length));
+
     private (RemoteInstallService Service, ImmediateClock Clock) Service(
         ICatalogTransport transport,
         RemoteInstallSettings? settings = null,
         TimeSpan? stall = null,
         string? localIndexPath = null,
         Func<RemoteInstallSettings>? settingsSource = null,
-        List<string>? catalogsBuilt = null)
+        List<string>? catalogsBuilt = null,
+        ProgenitorIndexSource? index = null)
     {
         var clock = new ImmediateClock();
         var s = settings ?? RemoteInstallSettings.Default;
@@ -414,7 +419,11 @@ public sealed class RemoteInstallServiceTests : IClassFixture<AdmissionFixtures>
                     admission: pipeline,
                     serverBepInExRoot: _root,
                     localIndexPath: localIndexPath,
-                    thisProcessIsServer: true);
+                    thisProcessIsServer: true)
+                {
+                    // INDEX1: only an Index install hot loads; the hot tests list their package there.
+                    IndexSource = index,
+                };
             },
             clock)
         {
@@ -494,7 +503,7 @@ public sealed class RemoteInstallServiceTests : IClassFixture<AdmissionFixtures>
     [Fact]
     public async Task A_qualified_progenitor_plugin_hot_loads_into_the_servers_reload_folder()
     {
-        var (service, _) = Service(Healthy());
+        var (service, _) = Service(Healthy(), index: HotIndex());
         service.PluginLoaded = id => id == "example.sample";
         var replies = await Run(service, RemoteInstallOp.Install, HotKey, "1.0.0");
 
@@ -513,7 +522,7 @@ public sealed class RemoteInstallServiceTests : IClassFixture<AdmissionFixtures>
     [Fact]
     public async Task A_hot_write_the_reloader_does_not_report_is_said_so()
     {
-        var (service, _) = Service(Healthy());
+        var (service, _) = Service(Healthy(), index: HotIndex());
         service.PluginLoaded = _ => false;
         var last = Last(await Run(service, RemoteInstallOp.Install, HotKey, "1.0.0"));
         Assert.Equal(RemoteInstallStage.HotLoaded, last.Stage);
@@ -589,7 +598,7 @@ public sealed class RemoteInstallServiceTests : IClassFixture<AdmissionFixtures>
     public async Task Uninstall_of_a_promoted_trusted_hotloadable_copy_unloads_it_now()
     {
         _snapshots.Snapshot = RuntimeGenerationSnapshot.Unavailable();
-        var (service, _) = Service(Healthy());
+        var (service, _) = Service(Healthy(), index: HotIndex());
         await Run(service, RemoteInstallOp.Install, HotKey, "1.0.0");
         string gameRoot = Path.GetDirectoryName(_root)!;
         string pending = ServerInstallLedger.Absolute(gameRoot, Ledger()[0].Path);

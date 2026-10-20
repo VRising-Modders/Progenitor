@@ -95,6 +95,29 @@ internal static class InstallReasons
         "missing, contradictory or unsupported metadata; hot load is not offered";
     public const string ProgenitorDepDoesNotGrantHotLoad =
         "a Progenitor dependency alone never enables hot loading";
+    /// <summary>INDEX1: a hotLoadable package from Thunderstore installs for the next start; only Index installs load now.</summary>
+    public const string HotLoadIndexOnly =
+        "installed from Thunderstore, so it loads at the next start; only mods installed from the Progenitor Index load without a restart";
+
+    /// <summary>INDEX1 (M3): a member of an Index mod's dependencies that the Index pins nowhere.</summary>
+    public static string UnpinnedDependency(string package) =>
+        package + " is not pinned by the Progenitor Index, so this mod cannot be installed from it";
+
+    /// <summary>INDEX1 (L4): a Thunderstore install's update while [Mods] UseThunderstore is off.</summary>
+    public const string UpdateThunderstoreOff = "it was installed from Thunderstore, and Thunderstore is turned off";
+
+    /// <summary>INDEX1: updates stay with their source.</summary>
+    public const string UpdateIndexGone =
+        "it was installed from the Progenitor Index, which no longer lists it; it is not updated from Thunderstore";
+
+    /// <inheritdoc cref="UpdateIndexGone"/>
+    public const string UpdateThunderstoreGone =
+        "it was installed from Thunderstore, which no longer lists it; reinstall it from the Progenitor Index to move it there";
+
+    /// <summary>INDEX1: a copy installed from Thunderstore is removed at the next start.</summary>
+    public const string HotUnloadIndexOnly =
+        "it was not installed from the Progenitor Index, so it is removed at the next start";
+
     public const string HotLoadableIsAuthorClaim =
         "hotLoadable is the author's claim, not proof of cleanup; the installer still decides";
     public const string EligibilityNotWired =

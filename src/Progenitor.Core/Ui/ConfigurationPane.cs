@@ -775,7 +775,7 @@ internal sealed class ConfigurationPane
                 ModsConfigKeys.Section,
                 ModsConfigKeys.UseThunderstore,
                 true,
-                "Browse Thunderstore listings on the Install mods tab. Personal to this BepInEx profile."),
+                "Browse Thunderstore listings on the Install mods tab (Progenitor Index listings are shown either way). Personal to this BepInEx profile."),
             ConfigHelper.Bind(
                 file,
                 ModsConfigKeys.Section,
@@ -1283,7 +1283,7 @@ internal sealed class ConfigurationPane
     internal const string ColumnIntro = "Point at a setting to read what it does.";
 
     /// <summary>What each labeled row explains in the description column.</summary>
-    internal const string ThunderstoreHelp = "List and install mods from Thunderstore. Nexus Mods is not supported yet (it needs an API key).";
+    internal const string ThunderstoreHelp = "List and install mods from Thunderstore. Mods from the Progenitor Index are listed either way. Nexus Mods is not supported yet (it needs an API key).";
     internal const string StopServerHelp = "Stop the dedicated server running from the configured folder, so mods can be installed to it or removed. Stop asks it to save and quit; force stop ends the process.";
     internal const string StartServerHelp = "Start the dedicated server from the configured folder with the settings it last ran with.";
     internal const string UninstallHelp = "Progenitor removes itself the next time V Rising starts; nothing is deleted while the game runs.";

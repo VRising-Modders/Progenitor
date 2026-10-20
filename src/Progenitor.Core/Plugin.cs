@@ -53,6 +53,10 @@ public sealed class Plugin
         try { Progenitor.Plugins.ModEnableState.PruneOtherSessions(); }
         catch (Exception e) { logger.LogWarning("Mods: on/off state could not be pruned: " + e.Message); }
 
+        // INDEX1: a Progenitor Index takedown (Disable) keeps the installed copy from loading, from this start on and
+        // at any hot load; the verified Index cache answers before any request.
+        Progenitor.Plugins.ModEnableState.TakedownReason = Progenitor.Install.IndexRevocationSource.DisableReason;
+
         // Decided 2026-09-29: likes and ratings are removed; the old local likes file goes once.
         try { Progenitor.Install.LegacyLikesCache.DeleteIfPresent(BepInEx.Paths.BepInExRootPath, line => logger.LogInfo(line)); }
         catch (Exception e) { logger.LogWarning("Mods: likes cache cleanup threw: " + e.Message); }
@@ -370,6 +374,8 @@ public sealed class Plugin
         // Ui before Effects: Unwire EventTrigger/Button UnityEvents, then
         // DestroyByPrefix, before any leftover effects GO is torn down. The
         // cascade yields a FrameTicker tick after this Uninstall before ALC.Unload.
+        try { Progenitor.Install.ProgenitorIndexSource.ReleaseShared(); } // INDEX1 (L6)
+        catch (System.Exception e) { Logger?.LogWarning($"ProgenitorIndexSource.ReleaseShared: {e.Message}"); }
         try { Progenitor.Install.SelfUpdatesLive.Uninstall(); }
         catch (System.Exception e) { Logger?.LogWarning($"SelfUpdates.Uninstall: {e.Message}"); }
         try { Progenitor.Install.StopServerEvents.Uninstall(); }

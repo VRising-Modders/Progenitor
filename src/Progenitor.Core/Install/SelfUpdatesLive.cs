@@ -49,6 +49,8 @@ internal static class SelfUpdatesLive
         _bindTried = false;
         _shaBytes = null;
         _check = null;
+        try { _checkHttp?.Dispose(); } catch { /* tearing down */ }
+        _checkHttp = null;
         _checkUrl = "";
         SelfUpdates.Reset();
     }
@@ -313,6 +315,7 @@ internal static class SelfUpdatesLive
     }
 
     private static SelfFeedFetch? _check;
+    private static SharedCatalogHttp.Lease? _checkHttp;
     private static string _checkUrl = "";
 
     /// <summary>One conditional request for the release list (owner <c>self-update</c>, its backoff), the fallback only on failure.</summary>
@@ -321,7 +324,9 @@ internal static class SelfUpdatesLive
         string url = FeedUrl();
         if (_check == null || !string.Equals(_checkUrl, url, StringComparison.Ordinal))
         {
-            var http = SharedCatalogHttp.Acquire();
+            // L6: one lease per check, released when the check is replaced and on Core unload.
+            try { _checkHttp?.Dispose(); } catch { /* replaced */ }
+            var http = _checkHttp = SharedCatalogHttp.Acquire();
             var fetcher = new CatalogFetcher(http, CatalogFetchOptions.Default);
             _check = new SelfFeedFetch((u, validators, max, token) => fetcher.FetchIndexTextAsync(u, max, validators, token),
                 new IndexDiskCache(Paths.BepInExRootPath, url), Keys, DevOrigin() != null ? null : SelfFeed.FallbackUrl);

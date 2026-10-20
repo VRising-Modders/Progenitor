@@ -89,6 +89,183 @@ internal sealed class InstallCatalogService : IInstallCatalog
     private string? _localIndexError;
     private int _localShadowed;
 
+    // INDEX1: the Progenitor Index rows merged between the local test source and Thunderstore (an Index row shadows the
+    // Thunderstore row of the same key), the source's list version they were built from, and how many they shadowed.
+    private IReadOnlyList<CatalogEntry> _indexEntries = Array.Empty<CatalogEntry>();
+    private int _indexEntriesVersion = -1;
+    private int _indexShadowed;
+    private ProgenitorIndexSource? _indexSource;
+
+    /// <summary>
+    /// INDEX1: the Progenitor Index this catalog lists and installs from beside Thunderstore (null: Thunderstore only, the
+    /// tests' default). Set by the Install tab, the join screens and the server's catalog.
+    /// </summary>
+    internal ProgenitorIndexSource? IndexSource
+    {
+        get { lock (_gate) return _indexSource; }
+        set
+        {
+            lock (_gate)
+            {
+                bool had = _indexEntries.Count > 0;
+                _indexSource = value;
+                _indexEntriesVersion = -1;
+                _indexEntries = Array.Empty<CatalogEntry>();
+                // A catalog that already merged rows takes the change now (the source's list, or none).
+                if (had || _fetchedEntries.Count > 0)
+                {
+                    FollowIndexLocked();
+                    MergeLocked();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// INDEX1: <c>[Mods] UseThunderstore</c> (null: on). Off, the merge leaves Thunderstore's rows out and lists the local
+    /// test source and the Progenitor Index alone.
+    /// </summary>
+    internal Func<bool>? ThunderstoreEnabled { get; set; }
+
+    private bool ThunderstoreOn()
+    {
+        try { return ThunderstoreEnabled?.Invoke() ?? true; }
+        catch { return true; }
+    }
+
+    /// <summary>
+    /// INDEX1: merge without reading Thunderstore (it is off): the local test source and the Index list the source holds now.
+    /// Always succeeds; the count may be zero.
+    /// </summary>
+    internal CatalogLoadResult LoadIndexOnly()
+    {
+        string stamp = CatalogFetcher.FormatStamp(_clock.UtcNow);
+        lock (_gate)
+        {
+            _indexStamp = stamp;
+            FollowConfiguredLocalIndexLocked();
+            FollowIndexLocked();
+            int count = MergeLocked();
+            _status = InstallProgress.Idle;
+            return new CatalogLoadResult(true, null, count, stamp);
+        }
+    }
+
+    /// <summary>INDEX1: how old the Index may be before an index load checks it again (Install tab 30 min, join 10).</summary>
+    internal TimeSpan IndexRefreshAge { get; set; } = ProgenitorIndexSource.InstallTabAge;
+
+    /// <summary>INDEX1: Thunderstore rows an Index row replaced on the last merge.</summary>
+    internal int IndexShadowed
+    {
+        get { lock (_gate) return _indexShadowed; }
+    }
+
+    /// <summary>INDEX1: the Index rows on the last merge (newest version of each listed mod).</summary>
+    internal IReadOnlyList<CatalogEntry> IndexEntries
+    {
+        get { lock (_gate) return _indexEntries; }
+    }
+
+    /// <summary>
+    /// INDEX1: check the Progenitor Index on this catalog's cadence (<see cref="IndexRefreshAge"/>; <paramref name="force"/>
+    /// checks now) and merge the list it holds afterwards: a failed check keeps the last good list. Never throws but on
+    /// cancellation.
+    /// </summary>
+    internal async Task RefreshIndexAsync(CancellationToken cancellationToken, bool force = false)
+    {
+        var source = IndexSource;
+        if (source == null) return;
+        try { await source.RefreshAsync(IndexRefreshAge, cancellationToken, force).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e) { InstallLog.Warn("Install: Progenitor Index check threw: " + e.Message); }
+        lock (_gate)
+        {
+            if (FollowIndexLocked()) MergeLocked();
+        }
+    }
+
+    /// <summary>INDEX1: take the Index source's current rows when its list changed since the last merge. True when they did.</summary>
+    private bool FollowIndexLocked()
+    {
+        var source = _indexSource;
+        if (source == null)
+        {
+            if (_indexEntries.Count == 0) return false;
+            _indexEntries = Array.Empty<CatalogEntry>();
+            _indexEntriesVersion = -1;
+            return true;
+        }
+
+        IReadOnlyList<CatalogEntry> rows;
+        int version;
+        bool enabled = source.Enabled;
+        try
+        {
+            source.EnsureCache();
+            version = enabled ? source.Version : -2;
+            if (version == _indexEntriesVersion) return false;
+            rows = enabled ? source.Entries() : Array.Empty<CatalogEntry>();
+        }
+        catch (Exception e)
+        {
+            InstallLog.Warn("Install: the Progenitor Index list could not be read: " + e.Message);
+            return false;
+        }
+
+        _indexEntries = rows;
+        _indexEntriesVersion = version;
+        return true;
+    }
+
+    /// <summary>
+    /// INDEX1: why a pinned listing may not be downloaded, or null (an unpinned listing, or a pin whose URL is the one the
+    /// signed list names on that source's own host).
+    /// </summary>
+    internal static string? PinRefusal(CatalogEntry entry)
+    {
+        var pin = entry?.Pin;
+        if (pin == null) return null;
+        if (IndexCatalog.ProgenitorRangeUnreadable(entry)) return IndexCatalog.RangeUnreadable;
+        if (IndexCatalog.ProgenitorTooOld(entry, out string needs)) return IndexCatalog.TooOldRefusal(needs);
+        if (!string.Equals((entry!.DownloadUrl ?? "").Trim(), pin.Url.Trim(), StringComparison.Ordinal))
+            return "the download is not the file the Progenitor Index names";
+        if (!SelfFeed.IsSha256(pin.Sha256)) return "the Progenitor Index lists no sha256 for this file";
+        if (!ProgenitorIndex.IsAllowedPackageUrl(pin.Source, pin.Repo, pin.Url, DevIndexOrigin()))
+            return pin.Source == IndexPackage.SourceThunderstore
+                ? "the Progenitor Index names a download that is not a Thunderstore link (" + pin.Url + ")"
+                : "the Progenitor Index names a download that is not a GitHub release of " + (pin.Repo.Length > 0 ? pin.Repo : "the mod's repository") + " (" + pin.Url + ")";
+        return null;
+    }
+
+    /// <summary>INDEX1: the route's options for a pinned download: redirects only to that source's hosts, cut at the signed size.</summary>
+    private static CatalogFetchOptions PinnedOptions(CatalogFetchOptions o, IndexPin pin)
+    {
+        string? dev = DevIndexOrigin();
+        string source = pin.Source;
+        return new CatalogFetchOptions
+        {
+            IndexUrl = o.IndexUrl,
+            MaxRedirects = o.MaxRedirects,
+            MaxRetries = o.MaxRetries,
+            // One byte over the signed size is a mismatch; the check after the download names it.
+            MaxBytes = pin.Size > 0 && pin.Size < o.MaxBytes ? pin.Size + 1 : o.MaxBytes,
+            Timeout = o.Timeout,
+            Backoff = o.Backoff,
+            UserAgent = o.UserAgent,
+            AllowFileUrls = false,
+            RedirectAllowed = u => ProgenitorIndex.IsAllowedRedirect(source, u, dev),
+        };
+    }
+
+    private static string? DevIndexOrigin()
+    {
+        try { return ProgenitorIndexConfig.DevOrigin; }
+        catch { return null; }
+    }
+
+    /// <summary>INDEX1: may an install of this listing hot load (an Index listing, or the developer's local test source)?</summary>
+    internal bool HotSourceAllowed(CatalogEntry? entry) => IndexCatalog.MayHotLoad(entry, entry != null && IsLocalKey(entry.Key));
+
     /// <summary>INSTORD1 test seam: the <c>[BepInPlugin]</c> GUIDs the target has loaded. Production fills it from the inventory.</summary>
     internal Func<InstallTarget, IReadOnlyList<string>>? LoadedPluginGuids { get; set; }
     private readonly object _gate = new();
@@ -872,7 +1049,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
         lock (_gate) _closures.TryGetValue(entry.Key ?? "", out closure);
         return InstallPlanner.Plan(
             entry, inspection, target, _eligibility, _localServerConfigured || ServerRootOverrideNow() != null, admission, DependencyView(target, closure),
-            _thisProcessIsServer, serverAdmission, LocalServerHot(target));
+            _thisProcessIsServer, serverAdmission, LocalServerHot(target), HotSourceAllowed(entry));
     }
 
     /// <summary>
@@ -936,8 +1113,103 @@ internal sealed class InstallCatalogService : IInstallCatalog
     }
 
     /// <summary>HOTDEMO1: may this installed copy be unloaded by deleting it (the trusted hotLoadable flag)?</summary>
-    internal bool TrustsHotUnload(CatalogEntry entry, string? filePath, out string reason) =>
-        HotLoadTrust.CanUnloadHot(VerifiedFor(entry), filePath, out reason);
+    internal bool TrustsHotUnload(CatalogEntry entry, string? filePath, out string reason)
+    {
+        // INDEX1: only a copy installed from the Progenitor Index (its ledger row says so) or the local test source is
+        // unloaded by deleting it; a Thunderstore install is removed at the next start, as it was installed.
+        if (!(entry != null && IsLocalKey(entry.Key)) && !LedgerSaysIndex(filePath))
+        {
+            reason = InstallReasons.HotUnloadIndexOnly;
+            return false;
+        }
+
+        return HotLoadTrust.CanUnloadHot(VerifiedFor(entry), filePath, out reason);
+    }
+
+    /// <summary>
+    /// INDEX1: where this root's installed copy of listing <paramref name="key"/> came from: true for the Progenitor Index,
+    /// false for anything else (Thunderstore, an earlier build), null when this root's ledger has no copy of it.
+    /// </summary>
+    internal bool? InstalledFromIndex(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return null;
+        string? game = ServerInstall.GameRootOf(_bepInExRoot);
+        var ledger = string.IsNullOrEmpty(game) ? null : ServerInstallLedger.TryRead(game!);
+        if (ledger == null) return null;
+        bool? found = null;
+        foreach (var row in ledger.Files)
+        {
+            if (row.Category == ServerInstallLedger.CategoryFramework) continue;
+            if (!InstalledState.TrySplitPackageSource(row.Source, out string package, out _)) continue;
+            if (!string.Equals(package, key!.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+            if (row.FromIndex) return true;
+            found = false;
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// INDEX1: updates stay with their source. Before an update of <paramref name="key"/> downloads, the catalog's row is
+    /// the one of the source the installed copy came from: an Index install keeps the Index row, a Thunderstore install takes
+    /// the Thunderstore row an Index row shadows. Null when that is in place; the refusal when that source does not list it.
+    /// </summary>
+    internal string? UseInstalledSource(string key)
+    {
+        bool? fromIndex = InstalledFromIndex(key);
+        if (fromIndex == null || IsLocalKey(key)) return null;
+        if (!fromIndex.Value && !ThunderstoreOn()) return InstallReasons.UpdateThunderstoreOff;
+        if (!TryGetEntry(key, out var row) || row == null) return InstallReasons.UnknownEntry;
+        if (fromIndex.Value)
+            return row.FromIndex ? null : InstallReasons.UpdateIndexGone;
+        if (!row.FromIndex) return null;
+        if (row.ThunderstoreRow == null) return InstallReasons.UpdateThunderstoreGone;
+        UseVersionEntry(row.ThunderstoreRow);
+        return null;
+    }
+
+    /// <summary>INDEX1: an update's download: the row of the installed copy's own source (<see cref="UseInstalledSource"/>), then the usual download and inspection.</summary>
+    internal async Task<InspectCallResult> DownloadUpdateAndInspectAsync(string key, CancellationToken cancellationToken)
+    {
+        string? refusal = UseInstalledSource(key);
+        if (refusal != null)
+        {
+            TryGetEntry(key, out var entry);
+            InstallLog.Warn("Install: update of " + key + " refused: " + refusal + ".");
+            return new InspectCallResult(false, refusal, entry, null);
+        }
+
+        return await DownloadAndInspectAsync(key, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>INDEX1: the install ledger row of this file (on the client or the local server root) names the Progenitor Index.</summary>
+    internal bool LedgerSaysIndex(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return false;
+        string full;
+        try { full = Path.GetFullPath(filePath!); }
+        catch { return false; }
+        foreach (string? root in new[] { _bepInExRoot, _serverBepInExRoot })
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            string bep = Path.GetFullPath(root!).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!full.StartsWith(bep, StringComparison.OrdinalIgnoreCase)) continue;
+            string? game = ServerInstall.GameRootOf(root!);
+            var ledger = string.IsNullOrEmpty(game) ? null : ServerInstallLedger.TryRead(game!);
+            if (ledger == null) return false;
+            foreach (var row in ledger.Files)
+            {
+                string abs;
+                try { abs = ServerInstallLedger.Absolute(game!, row.Path); }
+                catch { continue; }
+                if (string.Equals(abs, full, StringComparison.OrdinalIgnoreCase)) return row.FromIndex;
+            }
+
+            return false;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// HOTDEMO1: does the local server's loaded copy of this listing go now? Its reload folder must be
@@ -1140,6 +1412,15 @@ internal sealed class InstallCatalogService : IInstallCatalog
         for (int i = 0; i < missing.Count; i++)
         {
             var member = missing[i];
+            // INDEX1: a dependency of an Index listing installs the exact file the signed list pins for it (the Index's own
+            // entry first, else Thunderstore's download of that version), checked by its sha256.
+            string? pinRefusal = PinDependencyOf(root, member.Package, member.Version);
+            if (pinRefusal != null)
+            {
+                ForgetClosureOf(members, root.Key);
+                return InstallPlanSet.Refuse(InstallReasons.ClosureMemberRefused(member.Package, pinRefusal));
+            }
+
             InspectCallResult inspected;
             try
             {
@@ -1202,6 +1483,68 @@ internal sealed class InstallCatalogService : IInstallCatalog
         SetStatus(new InstallProgress(
             InstallStatusKind.AwaitingApproval, rootPlan.Reason, entryKey: root.Key));
         return InstallPlanSet.Planned(rootPlan, members, closure.Members, target);
+    }
+
+    /// <summary>
+    /// INDEX1: put the pinned listing of <paramref name="package"/> in place when <paramref name="root"/> is an Index listing
+    /// that pins it. Null when done (or nothing is pinned); the refusal otherwise.
+    /// </summary>
+    internal string? PinDependencyOf(CatalogEntry root, string package, string? version = null)
+    {
+        // M3: every member of an Index root's closure is pinned: the root's own row, another native entry's row, or the
+        // Index's own entry of that package; an unpinned member refuses the install (never Thunderstore's newest).
+        if (!root.FromIndex) return null;
+        CatalogEntry? thunderstore = null;
+        IndexDocument? doc;
+        string? stamp;
+        lock (_gate)
+        {
+            for (int i = 0; i < _fetchedEntries.Count; i++)
+                if (string.Equals(_fetchedEntries[i].Key, package, StringComparison.OrdinalIgnoreCase)) { thunderstore = _fetchedEntries[i]; break; }
+            doc = _indexSource?.Current;
+            stamp = _indexStamp;
+        }
+
+        string pages = _indexSource?.PagesRoot ?? ProgenitorIndex.PagesRoot;
+        var dep = IndexCatalog.PinAnywhere(root, doc, package, version);
+        CatalogEntry? pinned;
+        string refusal = "";
+        if (dep != null) pinned = IndexCatalog.PinDependency(dep, doc, thunderstore, stamp, out refusal, pages);
+        else
+        {
+            // The Index's own entry of that package (the version the closure asks for, else its newest).
+            var native = doc?.NativeForKey(package);
+            IndexPackage? pick = null;
+            if (native != null && doc != null)
+                foreach (var row in IndexCatalog.ToEntries(doc, stamp, allVersions: true, pages))
+                {
+                    if (!string.Equals(row.Key, package, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.IsNullOrWhiteSpace(version) || string.Equals(row.Manifest.Version, version!.Trim(), StringComparison.Ordinal))
+                    {
+                        if (pick == null || UpdateVersions.IsNewer(row.Manifest.Version, pick.Version)) pick = row.Pin!.Package;
+                    }
+                }
+
+            pinned = pick != null ? IndexCatalog.EntryOf(pick, doc, stamp, pages) : null;
+            if (pinned == null) refusal = InstallReasons.UnpinnedDependency(package + (string.IsNullOrWhiteSpace(version) ? "" : " " + version));
+        }
+
+        if (pinned == null) return refusal.Length > 0 ? refusal : InstallReasons.PlanBlocked;
+        UseVersionEntry(pinned);
+        return null;
+    }
+
+    /// <summary>M1: Thunderstore rows minus the versions a takedown hides or disables for Thunderstore.</summary>
+    private IReadOnlyList<CatalogEntry> WithoutTakedownsLocked(IReadOnlyList<CatalogEntry> thunderstore)
+    {
+        IndexDocument? doc;
+        try { doc = _indexSource?.Current; }
+        catch { doc = null; }
+        if (doc == null || doc.Revoked.Count == 0 || thunderstore.Count == 0) return thunderstore;
+        var kept = new List<CatalogEntry>(thunderstore.Count);
+        foreach (var e in thunderstore)
+            if (!IndexCatalog.TakesDownThunderstore(doc, e)) kept.Add(e);
+        return kept;
     }
 
     /// <summary>A refused set leaves no closure behind, on the root or on any member it had planned.</summary>
@@ -1345,6 +1688,9 @@ internal sealed class InstallCatalogService : IInstallCatalog
         CatalogTextFetchResult fetched;
         try
         {
+            // INDEX1: the Progenitor Index first (its own conditional check on this catalog's cadence), so the merge below
+            // has it; a failed check keeps the last good list.
+            await RefreshIndexAsync(cancellationToken, force).ConfigureAwait(false);
             fetched = await IndexCheck.FetchAsync(cancellationToken, force).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -1399,6 +1745,8 @@ internal sealed class InstallCatalogService : IInstallCatalog
             _indexStamp = indexStamp;
             // LOCALRELOAD1: every index load (the Install tab's reload too) follows a changed [Install] LocalIndexPath.
             FollowConfiguredLocalIndexLocked();
+            // INDEX1: and takes the Progenitor Index list the source holds now (its verified cache on the first load).
+            FollowIndexLocked();
             return MergeLocked();
         }
     }
@@ -1543,7 +1891,9 @@ internal sealed class InstallCatalogService : IInstallCatalog
                 if (!string.IsNullOrEmpty(local[i].Key)) _localKeys.Add(local[i].Key);
         }
 
-        var merged = LocalIndexSource.Merge(local, _fetchedEntries, out _localShadowed);
+        // INDEX1: local test listings, then the Progenitor Index, then Thunderstore; a mod in the Index and on Thunderstore
+        // is its Index row.
+        var merged = IndexCatalog.Merge(local, _indexEntries, ThunderstoreOn() ? WithoutTakedownsLocked(_fetchedEntries) : Array.Empty<CatalogEntry>(), out _localShadowed, out _indexShadowed);
         _entries = merged;
         _byKey.Clear();
         for (int i = 0; i < merged.Count; i++)
@@ -1580,7 +1930,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
         {
             if (!_byKey.TryGetValue(kv.Key, out var known)) continue;
             if (_inspectedListing.TryGetValue(kv.Key, out var listed)
-                && !string.Equals(listed, known.Manifest.Version ?? "", StringComparison.Ordinal))
+                && !string.Equals(listed, ListingTag(known), StringComparison.Ordinal))
             {
                 (stale ??= new List<string>()).Add(kv.Key);
                 continue;
@@ -1676,7 +2026,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
         lock (_gate)
         {
             if (_byKey.TryGetValue(entry.Key, out var current)
-                && string.Equals(current.Manifest.Version, entry.Manifest.Version, StringComparison.Ordinal)
+                && string.Equals(ListingTag(current), ListingTag(entry), StringComparison.Ordinal)
                 && _inspections.ContainsKey(entry.Key)) return true;
             _byKey[entry.Key] = entry;
             ReplaceEntry(entry);
@@ -1722,9 +2072,20 @@ internal sealed class InstallCatalogService : IInstallCatalog
             return new InspectCallResult(false, NonModPackages.ModManagerText, entry, null);
         }
 
+        // INDEX1: a pinned listing (an Index entry, or a dependency it pins) downloads only the URL the signed list names,
+        // from that source's own host, with redirects only to that source's download hosts.
+        var pin = entry.Pin;
+        string? pinRefusal = PinRefusal(entry);
+        if (pinRefusal != null)
+        {
+            InstallLog.Warn("Install: " + entry.Key + " refused before download: " + pinRefusal);
+            SetStatus(new InstallProgress(InstallStatusKind.Failed, pinRefusal, entryKey: entry.Key));
+            return new InspectCallResult(false, pinRefusal, entry, null);
+        }
+
         SetStatus(new InstallProgress(InstallStatusKind.Fetching, "downloading " + entry.Key, entryKey: entry.Key));
         var route = _route;
-        var fetcher = new CatalogFetcher(route.Transport, route.Options, _clock);
+        var fetcher = new CatalogFetcher(route.Transport, pin == null ? route.Options : PinnedOptions(route.Options, pin), _clock);
         string fileName = (entry.PackageName ?? "package") + "-" + (entry.Manifest.Version ?? "0") + ".zip";
         CatalogFetchResult fetched;
         try
@@ -1743,6 +2104,20 @@ internal sealed class InstallCatalogService : IInstallCatalog
             InstallLog.Warn("Install: download of " + entry.Key + " failed: " + (fetched.Error ?? InstallReasons.FetchTransport));
             SetStatus(new InstallProgress(InstallStatusKind.Failed, fetched.Error ?? InstallReasons.FetchTransport, entryKey: entry.Key));
             return new InspectCallResult(false, fetched.Error, entry, null);
+        }
+
+        // INDEX1: the size and sha256 the signed list names, checked before the bytes are opened or anything is written
+        // outside the download buffer. A mismatch is never used again: the buffer goes.
+        if (pin != null)
+        {
+            string mismatch = ProgenitorIndex.CheckDownload(pin.Size, pin.Sha256, fetched.ByteCount, fetched.Sha256);
+            if (mismatch.Length > 0)
+            {
+                DeletePart(fetched.Path);
+                InstallLog.Warn("Install: download of " + entry.Key + " refused: " + mismatch + ".");
+                SetStatus(new InstallProgress(InstallStatusKind.Failed, mismatch, entryKey: entry.Key));
+                return new InspectCallResult(false, mismatch, entry, null);
+            }
         }
 
         SetStatus(new InstallProgress(InstallStatusKind.Inspecting, "inspecting " + entry.Key, entryKey: entry.Key));
@@ -1766,7 +2141,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
             _byKey[updated.Key] = updated;
             ReplaceEntry(updated);
             _inspections[updated.Key] = inspection;
-            _inspectedListing[updated.Key] = entry.Manifest.Version ?? "";
+            _inspectedListing[updated.Key] = ListingTag(entry);
             // INSTALLFAIL1: one download per listing is kept; the one this replaces is spent.
             if (_zipPaths.TryGetValue(updated.Key, out var previous)
                 && !string.Equals(previous, fetched.Path, StringComparison.OrdinalIgnoreCase))
@@ -1855,7 +2230,7 @@ internal sealed class InstallCatalogService : IInstallCatalog
             _byKey[updated.Key] = updated;
             ReplaceEntry(updated);
             _inspections[updated.Key] = inspection;
-            _inspectedListing[updated.Key] = entry.Manifest.Version ?? "";
+            _inspectedListing[updated.Key] = ListingTag(entry);
             _zipPaths[updated.Key] = zipPath;
             _status = new InstallProgress(InstallStatusKind.Idle, "inspected " + updated.Key, entryKey: updated.Key);
         }
@@ -2108,6 +2483,10 @@ internal sealed class InstallCatalogService : IInstallCatalog
         if (IsLocalKey(entry.Key))
             return _localIndex.Documents(entry);
 
+        // INDEX1: an Index listing's README and changelog are in the signed list; nothing is fetched for them.
+        if (IndexDocuments(entry) is { } fromIndex)
+            return fromIndex;
+
         if (_documents.TryGet(cacheKey, out var cached))
             return cached;
 
@@ -2165,6 +2544,13 @@ internal sealed class InstallCatalogService : IInstallCatalog
             return true;
         }
 
+        // INDEX1: an Index listing carries its README and changelog in the signed list itself.
+        if (IndexDocuments(entry) is { } fromIndex)
+        {
+            documents = fromIndex;
+            return true;
+        }
+
         string cacheKey = ThunderstoreListingDocuments.CacheKey(
             entry.Owner ?? "",
             entry.PackageName ?? "",
@@ -2173,6 +2559,22 @@ internal sealed class InstallCatalogService : IInstallCatalog
         documents = cached;
         return true;
     }
+
+    /// <summary>INDEX1: an Index listing's README and changelog from the signed list, or null for any other listing.</summary>
+    internal static ListingDocumentSet? IndexDocuments(CatalogEntry entry)
+    {
+        var p = entry?.FromIndex == true ? entry.Pin?.Package : null;
+        if (p == null) return null;
+        return new ListingDocumentSet(entry!.Key, p.Version, true, null, p.Readme, p.Changelog != null,
+            p.Changelog != null ? null : "the package has no changelog", p.Changelog ?? "");
+    }
+
+    /// <summary>
+    /// INDEX1: what an inspection was made of: the version, and for a pinned listing its source and file. An inspection of
+    /// a Thunderstore download is never reused for the Index row (or another pin) that replaced it, even at the same version.
+    /// </summary>
+    internal static string ListingTag(CatalogEntry entry) =>
+        (entry.Manifest.Version ?? "") + (entry.Pin != null ? "|" + entry.SourceId + "|" + entry.Pin.Sha256 : "");
 
     internal static CatalogEntry ApplyInspection(CatalogEntry entry, PackageInspection inspection)
     {

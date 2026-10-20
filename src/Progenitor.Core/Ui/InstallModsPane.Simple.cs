@@ -477,6 +477,8 @@ internal sealed partial class InstallModsPane
             : snippet.Length > 0 ? snippet
             : owner.Length > 0 ? InstallModsCopy.ByPrefix + owner
             : "";
+        // INDEX1: the source label of a Progenitor Index listing.
+        second = WithSourceLabel(entry, second);
         return second.Length == 0 ? name : name + "\n" + second;
     }
 

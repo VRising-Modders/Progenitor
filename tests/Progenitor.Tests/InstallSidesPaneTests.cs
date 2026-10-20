@@ -369,7 +369,7 @@ public sealed class InstallSidesPaneTests : IDisposable
         Assert.Equal(new[]
         {
             InstallModsCopy.FactLatest, InstallModsCopy.FactReleased, InstallModsCopy.FactDownloads, InstallModsCopy.FactSide,
-            InstallModsCopy.FactInstalledHere, InstallModsCopy.FactRequires, InstallModsCopy.FactNsfw, InstallModsCopy.FactPackage,
+            InstallModsCopy.FactInstalledHere, InstallModsCopy.FactRequires, InstallModsCopy.FactNsfw, InstallModsCopy.FactPackage, InstallModsCopy.FactSource,
             InstallModsCopy.FactUpdateTag,
         }, labels);
         Assert.Contains(lines, l => (l.Label == InstallModsCopy.FactNsfw && l.Text == InstallModsCopy.NsfwFlagged)

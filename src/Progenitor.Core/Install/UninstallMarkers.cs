@@ -240,7 +240,7 @@ internal static class UninstallMarkers
             if (entry.UninstallPending != mark) changed = true;
             keep.Add(new ServerInstallLedgerEntry(
                 entry.Path, entry.Sha256, entry.Size, entry.Category, entry.Source, entry.WrittenUtc, mark,
-                hot: entry.Hot, pluginId: entry.PluginId, route: entry.Route));
+                hot: entry.Hot, pluginId: entry.PluginId, route: entry.Route, origin: entry.Origin));
         }
 
         if (!matched)

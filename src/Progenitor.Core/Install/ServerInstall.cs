@@ -446,7 +446,7 @@ internal static class ServerInstall
     /// is left alone.
     /// </summary>
     public static bool TryAppendPending(
-        string bepInExRoot, string pendingFile, string sha256, long size, string source, string? pluginId = null)
+        string bepInExRoot, string pendingFile, string sha256, long size, string source, string? pluginId = null, string? origin = null)
     {
         try
         {
@@ -459,7 +459,7 @@ internal static class ServerInstall
             if (rel.StartsWith("..", StringComparison.Ordinal)) return false;
             ledger.With(new ServerInstallLedgerEntry(
                 rel, sha256, size, ServerInstallLedger.CategoryPending, source, Now(),
-                uninstallPending: false, hot: false, pluginId: pluginId)).Write(serverRoot);
+                uninstallPending: false, hot: false, pluginId: pluginId, origin: origin)).Write(serverRoot);
             return true;
         }
         catch
@@ -502,7 +502,8 @@ internal static class ServerInstall
         string category,
         bool hot = false,
         string? pluginId = null,
-        bool sweepHotFlags = true)
+        bool sweepHotFlags = true,
+        string? origin = null)
     {
         try
         {
@@ -518,7 +519,7 @@ internal static class ServerInstall
             ledger
                 .With(new ServerInstallLedgerEntry(
                     rel, sha256, size, category, source, Now(),
-                    uninstallPending: false, hot: hot, pluginId: pluginId))
+                    uninstallPending: false, hot: hot, pluginId: pluginId, origin: origin))
                 .Write(root);
             return true;
         }
@@ -569,7 +570,7 @@ internal static class ServerInstall
                 changed = true;
                 keep.Add(new ServerInstallLedgerEntry(
                     entry.Path, entry.Sha256, entry.Size, entry.Category, entry.Source, entry.WrittenUtc,
-                    entry.UninstallPending, hot: false, pluginId: entry.PluginId, route: entry.Route));
+                    entry.UninstallPending, hot: false, pluginId: entry.PluginId, route: entry.Route, origin: entry.Origin));
             }
 
             if (!changed) return;
@@ -684,7 +685,7 @@ internal static class ServerInstall
             // would leave a promoted install resolvable only through the identity cache again.
             keep.Add(new ServerInstallLedgerEntry(
                 rel, entry.Sha256, entry.Size, ServerInstallLedger.CategoryMod, entry.Source, Now(),
-                uninstallPending: false, hot: false, pluginId: entry.PluginId, route: entry.Route));
+                uninstallPending: false, hot: false, pluginId: entry.PluginId, route: entry.Route, origin: entry.Origin));
             rewritten.Add(rel);
             changed = true;
         }

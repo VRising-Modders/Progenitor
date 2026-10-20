@@ -173,6 +173,18 @@ internal sealed class JoinPackageIndex
     /// <summary>How long this index reuses a fetched body before it checks again.</summary>
     public TimeSpan Age { get; }
 
+    /// <summary>
+    /// INDEX1: every listed version of the Progenitor Index, checked on this index's cadence (null: Thunderstore only). A
+    /// package the Index lists is resolved from it (after the local test source, before Thunderstore).
+    /// </summary>
+    public Func<CancellationToken, Task<IReadOnlyList<CatalogEntry>>>? IndexRows { get; set; }
+
+    /// <summary>INDEX1 (M1): the Progenitor Index whose takedowns remove Thunderstore versions (null: none).</summary>
+    public Func<IndexDocument?>? Takedowns { get; set; }
+
+    /// <summary>INDEX1: <c>[Mods] UseThunderstore</c>; off, the Thunderstore index is not read (the Index still is).</summary>
+    public Func<bool> ThunderstoreEnabled { get; set; } = () => true;
+
     /// <summary>How many times the Thunderstore index was fetched (tests).</summary>
     public int Fetches { get; private set; }
 
@@ -203,16 +215,31 @@ internal sealed class JoinPackageIndex
             catch { /* a broken local index leaves the fetched one */ }
         }
 
+        // INDEX1: the Progenitor Index next: a package it lists is installed from it, never from Thunderstore.
+        if (IndexRows is { } indexRows)
+        {
+            try { PackageVersions.AddFromIndex(await indexRows(cancellationToken).ConfigureAwait(false), wanted, versions, rules); }
+            catch (OperationCanceledException) { throw; }
+            catch { /* the Index could not be read: Thunderstore answers alone */ }
+        }
+
         string error = "";
         string json = "[]";
         string stamp = "";
         bool allLocal = true;
         foreach (var kv in wanted) if (!versions.ContainsKey(kv.Key)) allLocal = false;
+        bool thunderstore;
+        try { thunderstore = ThunderstoreEnabled(); }
+        catch { thunderstore = true; }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_json != null && _now() - _fetchedUtc < Age)
+            if (!thunderstore)
+            {
+                // INDEX1: Thunderstore is off: the local test source and the Index answer alone.
+            }
+            else if (_json != null && _now() - _fetchedUtc < Age)
             {
                 json = _json;
                 stamp = ModManifestJson.FormatIssued(_fetchedUtc);
@@ -262,6 +289,15 @@ internal sealed class JoinPackageIndex
                 error = parseError;
         }
 
+        // INDEX1 (M1): Thunderstore versions a Progenitor Index takedown hides or disables are never offered.
+        if (Takedowns is { } takedowns)
+        {
+            IndexDocument? doc;
+            try { doc = takedowns(); }
+            catch { doc = null; }
+            PackageVersions.RemoveTakedowns(versions, doc, rules);
+        }
+
         // Every package found in the local index: the fetch's failure does not matter.
         if (allLocal) error = "";
         return new JoinIndexLoad(json, stamp, versions, error);
@@ -283,6 +319,9 @@ internal sealed class JoinInstallRules
 {
     /// <summary><c>[Mods] UseThunderstore</c>.</summary>
     public Func<bool> ThunderstoreEnabled { get; set; } = () => true;
+
+    /// <summary>INDEX1: <c>[Install] UseProgenitorIndex</c> (off in tests unless set).</summary>
+    public Func<bool> IndexEnabled { get; set; } = () => false;
 
     /// <summary><c>[Mods] ShowNsfwContent</c>.</summary>
     public Func<bool> ShowNsfw { get; set; } = () => false;
@@ -382,9 +421,18 @@ internal sealed class JoinCatalogInstaller : IJoinPackageInstaller
             // Every row's exact version is in place before any row runs: a row's dependency closure that
             // names another row's package then resolves to the version the server named, never the newest.
             foreach (var pv in p.Index.Versions.Values)
+            {
+                // INDEX1: a package the Progenitor Index lists is that version's Index row, whatever the batch catalog merged.
+                if (pv.FromIndex && pv.Entry != null && pv.Matched != null)
+                {
+                    p.Catalog.UseVersionEntry(pv.Entry);
+                    continue;
+                }
+
                 if (pv.Entry != null && pv.Matched != null && p.Catalog.TryGetEntry(pv.Package, out var listed) && listed != null
                     && !string.Equals(listed.Manifest.Version, pv.Matched, StringComparison.Ordinal))
                     p.Catalog.UseVersionEntry(pv.Entry);
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception e) { p.Error = e.Message; }
@@ -409,7 +457,8 @@ internal sealed class JoinCatalogInstaller : IJoinPackageInstaller
         progress ??= (_, _) => { };
         if (request == null) return Refused("no request");
         // LOCALJOIN1: [Mods] UseThunderstore is about Thunderstore; a local test package is not one.
-        if (!request.LocalTest && !_rules.ThunderstoreEnabled()) return Refused(JoinInstallText.ThunderstoreOff);
+        // INDEX1: [Mods] UseThunderstore is about Thunderstore; a package the Progenitor Index lists still installs (checked below).
+        if (!request.LocalTest && !_rules.ThunderstoreEnabled() && !_rules.IndexEnabled()) return Refused(JoinInstallText.ThunderstoreOff);
         progress(JoinInstallPhase.Resolving, -1);
         var prepared = await Prepare(ct).ConfigureAwait(false);
         var catalog = prepared.Catalog;
@@ -421,13 +470,15 @@ internal sealed class JoinCatalogInstaller : IJoinPackageInstaller
             return prepared.Index != null && prepared.Index.Error.Length > 0 && prepared.Index.Json == "[]"
                 ? Failed(JoinInstallText.IndexUnavailable(prepared.Index.Error))
                 : Refused(JoinInstallText.NotListed(request.Package));
+        if (!request.LocalTest && !pv.FromIndex && !_rules.ThunderstoreEnabled()) return Refused(JoinInstallText.ThunderstoreOff);
         string ruleNote = "";
         string? exact = request.Version.Length == 0 ? (pv.Latest.Length > 0 ? pv.Latest : null)
             : ThunderstoreVersions.Resolve(pv.Active, request.Version, request.VersionRule, out ruleNote);
         if (exact == null) return Refused(JoinInstallText.VersionGone(request.Package, request.Version, pv.Latest));
         string key = pv.Package;
         if (!catalog.TryGetEntry(key, out var listed) || listed == null) return Refused(JoinInstallText.NotListed(request.Package));
-        if (!string.Equals(listed.Manifest.Version, exact, StringComparison.Ordinal))
+        // H1: the row is the source that answered (an Index row never stands in for a Thunderstore version, or back).
+        if (!string.Equals(listed.Manifest.Version, exact, StringComparison.Ordinal) || listed.FromIndex != pv.FromIndex)
         {
             var entryForVersion = pv.Entry != null && string.Equals(pv.Matched, exact, StringComparison.Ordinal) ? pv.Entry : null;
             if (entryForVersion == null) return Refused(JoinInstallText.VersionGone(request.Package, request.Version, pv.Latest));
@@ -436,7 +487,8 @@ internal sealed class JoinCatalogInstaller : IJoinPackageInstaller
 
         if (!catalog.TryGetEntry(key, out var entry) || entry == null) return Refused(JoinInstallText.NotListed(request.Package));
         // NotThunderstore: a Thunderstore https download, or the configured local test index.
-        if (!catalog.IsLocalKey(key) && !IsThunderstoreUrl(entry.DownloadUrl))
+        // INDEX1: or an Index entry, whose download the catalog checks against its signed pin.
+        if (!catalog.IsLocalKey(key) && !entry.FromIndex && !IsThunderstoreUrl(entry.DownloadUrl))
             return Refused(JoinInstallText.NotThunderstore);
         if (entry.HasNsfwContent && !_rules.ShowNsfw()) return Refused(JoinInstallText.Nsfw);
         if (NonModPackages.IsModManager(entry.Owner, entry.PackageName, entry.Key)) return Refused(NonModPackages.ModManagerText);

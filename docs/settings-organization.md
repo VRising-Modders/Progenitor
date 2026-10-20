@@ -339,7 +339,7 @@ SERVER SETTINGS · Applies to everyone on Night Garden · admins edit, others re
 │                        ( Pause the mod and warn them ) ( Disconnect them ) │
 ├ Server list ───────────────────────────────────────────────────────────┤
 │ Server name                               [ Night Garden ] (restart)   │
-│ Server list description              [ Edit ]   72 of 82 characters left│
+│ Server list description              [ Edit ]   59 of 69 characters left│
 │ Progenitor signature                                           [ on ]  │
 │ Listed as / Status                                                     │
 ├ Players without Progenitor ────────────────────────────────────────────┤
