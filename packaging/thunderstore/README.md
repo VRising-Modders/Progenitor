@@ -37,7 +37,7 @@ Progenitor needs only [BepInExPack V Rising](https://thunderstore.io/c/v-rising/
 - **The same code** on dedicated servers and on games hosted from the client.
 - **AI-friendly.** An [MCP server](https://github.com/VRising-Modders/Progenitor/blob/main/docs/mcp.md) connects a coding assistant to your game client and to your own test server, so it can build and deploy your mod, hot reload it, run commands, read the logs and inspect the running game on both sides. A [starter prompt](https://github.com/VRising-Modders/Progenitor/blob/main/docs/ai-starter-prompt.md), an `llms.txt` index and knowledge notes help it work with the framework. The MCP server and its development bridge come from the repository; they are not in this package and never belong on a public server.
 
-Start with the [Help Guide's mod developer chapters](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html), `PROGENITOR_GUIDE.md` (included in this package), the `dotnet new progenitor-mod` template and the [tutorial](https://github.com/VRising-Modders/Progenitor/blob/main/docs/tutorial.md). Mods built on Progenitor depend on `VRising_Modders-Progenitor`.
+Start with the [Help Guide's mod developer chapters](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html), `PROGENITOR_GUIDE.md` (included in this package), the `dotnet new progenitor-mod` template and the [tutorial](https://github.com/VRising-Modders/Progenitor/blob/main/docs/tutorial.md). Mods built on Progenitor are listed on the [Progenitor Index](https://github.com/VRising-Modders/ProgenitorIndex) and installed from Progenitor's Mods menu.
 
 ![Hot reload](https://raw.githubusercontent.com/VRising-Modders/Progenitor/main/packaging/listing/06-hot-reload.webp)
 

@@ -56,7 +56,7 @@ public class PublishCheckTests
         var failed = report.Results.Where(r => r.Status == CheckStatus.Fail).Select(r => r.Id).OrderBy(x => x).ToArray();
         Assert.Equal(new[]
         {
-            "deps.bepinex", "files.dev", "icon", "manifest.bom", "manifest.side", "pj.sha256", "pj.side", "readme.requirement",
+            "deps.bepinex", "deps.progenitor", "files.dev", "icon", "manifest.bom", "manifest.side", "pj.sha256", "pj.side", "readme.requirement",
         }, failed);
     }
 
@@ -212,15 +212,13 @@ public class PublishCheckTests
         Assert.Equal(CheckStatus.Fail, StatusOf(report, "pj.peers"));
     }
 
-    [Fact]
-    public void A_missing_dependency_on_Progenitor_fails() =>
-        Assert.Equal(CheckStatus.Fail, StatusOf(Mutated(f => EditManifest(f, "dependencies", new[] { "BepInEx-BepInExPack_V_Rising-1.733.2" })),
-            "deps.progenitor"));
-
-    [Fact]
-    public void A_Progenitor_dependency_under_another_team_warns() =>
-        Assert.Equal(CheckStatus.Warn, StatusOf(Mutated(f => EditManifest(f, "dependencies",
-            new[] { "BepInEx-BepInExPack_V_Rising-1.733.2", "SomeoneElse-Progenitor-2026.10.1" })), "deps.progenitor"));
+    /// <summary>Progenitor is not a package on Thunderstore or the Progenitor Index, so a dependency on it can never resolve.</summary>
+    [Theory]
+    [InlineData("VRising_Modders-Progenitor-2026.10.1")]
+    [InlineData("SomeoneElse-Progenitor-2026.10.1")]
+    public void A_dependency_on_a_Progenitor_package_fails(string dependency) =>
+        Assert.Equal(CheckStatus.Fail, StatusOf(Mutated(f => EditManifest(f, "dependencies",
+            new[] { "BepInEx-BepInExPack_V_Rising-1.733.2", dependency })), "deps.progenitor"));
 
     [Fact]
     public void A_bundled_library_that_reads_keys_and_binds_config_directly_warns()
@@ -321,12 +319,12 @@ namespace Example {
     }
 
     [Fact]
-    public void A_hard_dependency_without_Progenitor_in_the_manifest_still_fails()
+    public void A_hard_dependency_needs_progenitor_json_but_no_Progenitor_package_in_the_manifest()
     {
         byte[] dll = Compile("Hard", PluginSource("example.hard", dependency: "[BepInEx.BepInDependency(\"progenitor\")]"));
         var report = new PublishReport();
         PublishChecker.Check(PlainPackage(dll, "Hard.dll", "> **Requires Progenitor.**"), report);
-        Assert.Equal(CheckStatus.Fail, StatusOf(report, "deps.progenitor"));
+        Assert.Equal(CheckStatus.Pass, StatusOf(report, "deps.progenitor"));
         Assert.Equal(CheckStatus.Fail, StatusOf(report, "pj.present"));
     }
 

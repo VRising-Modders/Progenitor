@@ -99,6 +99,6 @@ A release is the clean build of a main merge commit. The **repository version** 
 
 These rules apply to projects built in this repository. A project that uses `MyPluginInfo.PLUGIN_VERSION` (Bootstrap, Core, Dev, Sample, spikes) gets its component version; samples with a literal `[BepInPlugin]` version string keep that string.
 
-A mod built outside this repository chooses its own version. Use three-part `major.minor.patch` in `[BepInPlugin]` so BepInEx, the handshake and Thunderstore all see the same string, and choose `NetworkVersionRule` by what your wire format needs: `Exact` when client and server must be the same build, `Minor` when patch releases stay wire-compatible.
+A mod built outside this repository chooses its own version. Use three-part `major.minor.patch` in `[BepInPlugin]` so BepInEx, the handshake and the package manifest all see the same string, and choose `NetworkVersionRule` by what your wire format needs: `Exact` when client and server must be the same build, `Minor` when patch releases stay wire-compatible.
 
 A mod made from `dotnet new progenitor-mod` reads the repository version of its `ProgenitorRepo` checkout with that checkout's own `ProgenitorVersion.targets` and refuses to compile against a checkout older than its `ProgenitorMinimumVersion` ([PROGENITOR_GUIDE.md, Start a mod](../PROGENITOR_GUIDE.md#start-a-mod)). A checkout whose version reads `0.0.0.0` gives a warning instead.

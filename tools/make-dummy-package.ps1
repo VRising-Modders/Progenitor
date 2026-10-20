@@ -50,10 +50,10 @@
 
   -Publishable (Progenitor kind) shapes the package the way docs/publishing.md asks a mod author to:
   <Out>/<Owner>-<Package>-<Version>.zip with a side-prefixed description that says "Requires
-  Progenitor.", a website_url, the BepInExPack and VRising_Modders-Progenitor-<ProgenitorVersion>
-  dependencies, the README requirement block, CHANGELOG.md and LICENSE. -PublishFlaws builds the same
-  package with deliberate faults for tools/publish-check.ps1's tests: a BOM in manifest.json, no side
-  prefix, no BepInExPack dependency, a 128x128 icon, no README requirement block, a progenitor.json
+  Progenitor.", a website_url, the BepInExPack dependency only (Progenitor is not a package), the
+  README requirement block, CHANGELOG.md and LICENSE. -PublishFlaws builds the same package with
+  deliberate faults for tools/publish-check.ps1's tests: a BOM in manifest.json, no side prefix, no
+  BepInExPack dependency but a forbidden VRising_Modders-Progenitor-<ProgenitorVersion> one, a 128x128 icon, no README requirement block, a progenitor.json
   whose sha256 and side are wrong, and a stray dev bridge token.
 
   Both write <Out>/index.json listing every package built (with -Append, merged into an existing
@@ -147,7 +147,7 @@ param(
     # Progenitor kind: a -Publishable package with deliberate faults, for the publish checker's tests.
     [switch] $PublishFlaws,
 
-    # -Publishable: the Progenitor release the manifest depends on.
+    # -PublishFlaws: the version in the Progenitor package dependency it plants as a fault.
     [string] $ProgenitorVersion = '2026.10.1'
 )
 
@@ -572,11 +572,11 @@ try {
     $readmeExtra = ''
     if ($Publishable) {
         $description = "$sideLabel $([char]0x00B7) Requires Progenitor. The $Sample sample, packaged the way docs/publishing.md asks."
-        $dependencies = @('BepInEx-BepInExPack_V_Rising-1.733.2', "VRising_Modders-Progenitor-$ProgenitorVersion")
+        $dependencies = @('BepInEx-BepInExPack_V_Rising-1.733.2')
         $website = 'https://example.com/progenitor-sample'
         $readmeExtra = @"
 
-> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
+> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first, then install this mod from Progenitor's Mods menu.
 "@
         if ($PublishFlaws) {
             $description = "The $Sample sample with deliberate packaging faults."

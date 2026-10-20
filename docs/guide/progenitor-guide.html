@@ -403,7 +403,7 @@ window.HELP = {
 <li><a href="#keybinds/tab">Remappable keys</a> for every mod and the game.</li></ul>
 <p>The next chapters cover each one and its settings.</p>` },
         { id: "install-mods", title: "Install mods",
-          html: `<p>Open [[install-tab|Install Mods]], find a mod and click <strong>Install</strong>. Some load at once; others ask for a restart.</p>
+          html: `<p>Open [[install-tab|Install Mods]], find a mod and click <strong>Install</strong>. Some load at once; others ask for a restart. Mods built on Progenitor come from the [[progenitor-index|Progenitor Index]]; other mods come from Thunderstore.</p>
 <ul><li><strong>Simple</strong> (default): one button per mod. <strong>Advanced</strong>: separate Client and Server columns, a server picker and more filters. Switch at the left of the search box.</li>
 <li>Click a row to see its <strong>Side</strong>: Client (this game), Server, or Client and server.</li>
 <li>Players need only client mods. Server-only mods are listed only for an [[admin|admin]] of the server you are on.</li>
@@ -595,7 +595,7 @@ window.HELP = {
 <li>Mods it needs install with it.</li><li><strong>Share</strong> on hover, or <strong>Copy link</strong>, makes a [[mod-link|mod link]] for chat.</li>
 <li><strong>Updates</strong> band: <strong>Update all</strong>, or <strong>Keep 1.2.0</strong> on a row (<strong>Unpin</strong> undoes it).</li></ul>` },
         { id: "source", title: "Where mods come from",
-          html: `<p>Install Mods lists [[thunderstore|Thunderstore]]'s V Rising mods. Turn it off with <strong>Use Thunderstore</strong> in Preferences.</p>
+          html: `<p>Install Mods lists mods from two places: the [[progenitor-index|Progenitor Index]], the home of mods built on Progenitor, and [[thunderstore|Thunderstore]], for other V Rising mods. Turn Thunderstore off with <strong>Use Thunderstore</strong> in Preferences.</p>
 <ul><li>Packages over the download limit read <em>Too large to install</em>; tools that aren't mods read <em>Tool, not a plugin</em>.</li>
 <li>Uninstall removes only files Progenitor installed.</li></ul>` }
       ]
@@ -1105,10 +1105,18 @@ window.Show();` },
       { id: "overview", title: "Testing", soon: true,
         html: `<ol class="outline"><li>[[game-free-test|Game-free tests]] with <code>dotnet test</code></li><li>A test server or a private game</li><li>The [[dev-bridge|dev bridge]] and MCP tools</li><li>Pressing keys and reading UI from a test</li><li>Cleaning up after a run</li></ol>
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/test-rig.md">test-rig.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/bridge.md">bridge.md</a>.</p>` } ] },
-    { id: "developers/publishing", role: "developers", title: "Publishing to Thunderstore", pages: [
-      { id: "overview", title: "Publishing to Thunderstore", soon: true,
-        html: `<ol class="outline"><li>The package: <code>manifest.json</code>, README, icon, <code>progenitor.json</code></li><li>Required and recommended mods</li><li>The "Requires Progenitor" message</li><li>The optional [[stamp|Progenitor stamp]]</li><li><code>website_url</code> and an <code>llms.txt</code>, so AI assistants find your docs</li><li><code>tools/publish-check.ps1</code></li></ol>
-<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md">publishing.md</a>.</p>` } ] },
+    { id: "developers/publishing", role: "developers", title: "Publishing your mod", pages: [
+      { id: "overview", title: "Publishing your mod",
+        html: `<p>Mods built on Progenitor are listed on the [[progenitor-index|Progenitor Index]], and players install them from Install Mods. Don't upload them to Thunderstore.</p>
+<ol><li>Build the package: <code>manifest.json</code>, <code>README.md</code> with the "Requires Progenitor" block, a 256&times;256 <code>icon.png</code>, your DLL and its <code>progenitor.json</code>. Don't list Progenitor in <code>dependencies</code>.</li>
+<li>Run <code>tools/publish-check.ps1</code> until nothing fails.</li>
+<li>Create a GitHub release of your mod with the zip attached.</li>
+<li>Open a pull request on the <a href="https://github.com/VRising-Modders/ProgenitorIndex">Progenitor Index</a> that adds the version's entry; its CONTRIBUTING.md has the steps.</li></ol>
+<p>Details: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md">publishing.md</a>.</p>` },
+      { id: "thunderstore", title: "I want my mod on Thunderstore",
+        html: `<p>Progenitor is licensed under the <a href="https://github.com/VRising-Modders/Progenitor/blob/main/LICENSE">LGPL 2.1</a>, so you can use or adapt the parts you need in your own mod and publish it on Thunderstore without Progenitor as a dependency.</p>
+<ul><li>Code you take from Progenitor stays under the LGPL: keep its notices and share your changes to it.</li>
+<li>Your mod won't get Progenitor's features, such as hot load and the Mods menu.</li></ul>` } ] },
 
     { id: "developers/reference", role: "developers", title: "Reference Map", pages: [
       { id: "docs", title: "Where the details are",
@@ -1153,6 +1161,9 @@ My question:` } },
 <li>One zip lands on your Desktop and its folder opens; the path is on the clipboard.</li>
 <li>Inside: BepInEx's log (this session and the two before it), the game's log, a list of your mods with their links, a few settings, and the logs of a private game or server running on this PC.</li>
 <li>Removed: SteamIDs, IP addresses, your Windows user name, passwords and tokens. Character and server names stay.</li></ul>` },
+        { id: "why-not-thunderstore", title: "Why aren't Progenitor mods on Thunderstore?",
+          html: `<p>Thunderstore doesn't list mod managers, and managing mods is a core part of Progenitor: installing, updating, hot loading, and joining servers with the right mods.</p>
+<p>So Progenitor comes from its GitHub releases, and the mods built on it are listed in the [[progenitor-index|Progenitor Index]]. Install them from <strong>Mods</strong> &rsaquo; <strong>Install Mods</strong>. Thunderstore is still the place for BepInEx and for mods that don't use Progenitor.</p>` },
         { id: "logs-settings", title: "Get help settings",
           html: `<table><thead><tr><th class="label">Row</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Last bundle</td><td></td><td>The newest zip, or how the last collect went.</td></tr>
@@ -1170,7 +1181,7 @@ My question:` } },
     { id: "game-folder", term: "Game folder", def: "The V Rising install folder that holds <code>VRising.exe</code>; BepInEx and Progenitor go inside it." },
     { id: "server-setting", term: "Server setting", def: "A mod setting the server decides for everyone on it; while you are joined it shows the server's value, which only admins change." },
     { id: "photo-mode", term: "Photo mode", def: "Progenitor's free-flying camera with the HUD hidden, off by default; a server can disallow it." },
-    { id: "install-tab", term: "Install Mods tab", def: "The Mods menu tab that lists Thunderstore mods and installs, updates or removes them in game." },
+    { id: "install-tab", term: "Install Mods tab", def: "The Mods menu tab that lists mods from the Progenitor Index and Thunderstore and installs, updates or removes them in game." },
     { id: "server-tab", term: "Server tab", def: "The Mods menu tab for how the joined server is set up: rules, join settings, updates and backups; admins edit, everyone else reads." },
     { id: "required-mod", term: "Required client mod", def: "A client mod a server needs every player to have before they can join." },
     { id: "recommended-mod", term: "Recommended client mod", def: "A client mod a server suggests with a reason; players may skip it." },
@@ -1229,7 +1240,8 @@ My question:` } },
     { id: "castle-heart", term: "Castle heart", def: "The structure that claims a territory and keeps a castle running." },
     { id: "world-epoch", term: "World epoch", def: "A stamp of the current world load; keep it beside any held entity and check <code>ctx.WorldState.IsStale</code>." },
     { id: "mod-link", term: "Mod link", def: "A chat token such as <code>[mod:Namespace-Name]</code> that opens a mod's page or Install Mods listing when clicked, and never installs anything." },
-    { id: "thunderstore", term: "Thunderstore", def: "The mod site the Install Mods tab installs mods from. Progenitor itself comes from its GitHub releases." },
+    { id: "thunderstore", term: "Thunderstore", def: "The V Rising mod site the Install Mods tab installs ordinary mods from; Progenitor and the mods built on it are not there." },
+    { id: "progenitor-index", term: "Progenitor Index", def: "The reviewed list of mods built on Progenitor; Install Mods shows them and installs each one from its author's GitHub release." },
     { id: "stamp", term: "Progenitor stamp", def: "An optional corner mark on a mod's icon showing it runs on Progenitor; it is not an endorsement." },
     { id: "dev-bridge", term: "Dev bridge", def: "<code>Progenitor.Dev</code>: a local-only bridge and MCP server for building, reloading and testing in a test game; never on a public server." },
     { id: "game-free-test", term: "Game-free test", def: "A test that runs with <code>dotnet test</code> and no game install, as CI does." }

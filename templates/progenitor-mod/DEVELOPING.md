@@ -34,12 +34,14 @@ Copy `ProgenitorMod/bin/Debug/net6.0/ProgenitorMod.dll` to `BepInEx/progenitor-r
 | `ProgenitorMod/Plugin.cs` | Attributes, `OnLoad`, settings, keybind, server request handler. |
 | `ProgenitorMod/ModWindow.cs` | The client window (a Basic window preset, text in named styles) and the notice. |
 | `ProgenitorMod/ModRules.cs` | Game-free messages and rules, linked into the tests. |
-| `README.md` | The Thunderstore listing and the Mods page's About text (embedded). |
+| `README.md` | The mod's page in Install Mods (read from the package) and the Mods page's About text (embedded). |
 | `help/index.html` | The page the Help button on the mod's page opens. Edit only the block between `HELP-CONTENT START` and `HELP-CONTENT END`; keep a page to about 60 words. Everything under `help/` is embedded, so images and stylesheets can sit beside it. |
-| `thunderstore/manifest.json`, `CHANGELOG.md` | Package files. Add a 256x256 `icon.png` and a `LICENSE`. |
+| `package/manifest.json`, `CHANGELOG.md` | Package files. Add a 256x256 `icon.png` and a `LICENSE`. |
 
 ## Publish
 
-Bump the version in `<Version>` in `ProgenitorMod.csproj`, `thunderstore/manifest.json` and the help page (`version:` in `help/index.html`) together; a test fails when the help page and `<Version>` differ. Change `Peers` only when wire compatibility changes (a removed or retyped field: a new major range). Add a `CHANGELOG.md` section, then follow the Progenitor repository's [publishing guide](https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md) and run its `tools/publish-check.ps1`.
+Mods built on Progenitor are published on the [Progenitor Index](https://github.com/VRising-Modders/ProgenitorIndex), not on Thunderstore: a GitHub release of your repository with the package zip attached, and a pull request that adds the version's entry to the Index. Players then install the mod from **Install Mods** in Progenitor's Mods menu.
 
-Set `website_url` in `thunderstore/manifest.json` to your repository; a player's log zip (`mods.md`) lists it, and AI assistants read it from there. Add an `llms.txt` at the repository root (or a README section): what the mod does, its settings, keys and commands, and where to report bugs.
+Bump the version in `<Version>` in `ProgenitorMod.csproj`, `package/manifest.json` and the help page (`version:` in `help/index.html`) together; a test fails when the help page and `<Version>` differ. Change `Peers` only when wire compatibility changes (a removed or retyped field: a new major range). Add a `CHANGELOG.md` section, then follow the Progenitor repository's [publishing guide](https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md): run its `tools/publish-check.ps1`, create the GitHub release, and add the Index entry as its [CONTRIBUTING.md](https://github.com/VRising-Modders/ProgenitorIndex/blob/main/CONTRIBUTING.md) describes.
+
+Set `website_url` in `package/manifest.json` to your repository; a player's log zip (`mods.md`) lists it, and AI assistants read it from there. Add an `llms.txt` at the repository root (or a README section): what the mod does, its settings, keys and commands, and where to report bugs.

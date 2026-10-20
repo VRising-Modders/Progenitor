@@ -35,7 +35,7 @@ internal sealed class PublishReport
 }
 
 /// <summary>
-/// Checks a built mod package (a Thunderstore zip or the folder it is zipped from) against the publishing playbook
+/// Checks a built mod package (a zip in Thunderstore's package format, or the folder it is zipped from) against the publishing playbook
 /// (docs/publishing.md). Reads files and metadata only; contacts nothing and loads no assembly.
 /// </summary>
 internal static class PublishChecker
@@ -43,8 +43,6 @@ internal static class PublishChecker
     public const int MaxDescriptionChars = 250;
     public const string BepInExPackPrefix = "BepInEx-BepInExPack_V_Rising-";
 
-    /// <summary>The Thunderstore team that publishes Progenitor (decided 2026-10-10).</summary>
-    public const string ProgenitorNamespace = "VRising_Modders";
     public const string ProgenitorPackageName = "Progenitor";
     public const string ProgenitorPluginGuid = "progenitor";
 
@@ -99,7 +97,7 @@ internal static class PublishChecker
         // ---- root files -------------------------------------------------------------------------
         foreach (var required in new[] { "manifest.json", "README.md", "icon.png" })
         {
-            if (Root(files, required) == null) report.Fail("files." + required, required + " is missing at the package root; Thunderstore rejects the upload without it.");
+            if (Root(files, required) == null) report.Fail("files." + required, required + " is missing at the package root; the Progenitor Index refuses a package without it.");
         }
         foreach (var wanted in new[] { "CHANGELOG.md", "LICENSE" })
         {
@@ -164,7 +162,7 @@ internal static class PublishChecker
         if (manifestBytes != null)
         {
             if (HasBom(manifestBytes))
-                report.Fail("manifest.bom", "manifest.json starts with a UTF-8 byte-order mark; Thunderstore rejects it. Save it as UTF-8 without a BOM.");
+                report.Fail("manifest.bom", "manifest.json starts with a UTF-8 byte-order mark. Save it as UTF-8 without a BOM.");
             else
                 report.Pass("manifest.bom", "manifest.json has no byte-order mark.");
 
@@ -205,7 +203,7 @@ internal static class PublishChecker
 
             string name = Str(m, "name");
             if (!NameRule.IsMatch(name)) report.Fail("manifest.name", "name '" + name + "' may use only letters, digits and underscores.");
-            else if (!PascalRule.IsMatch(name)) report.Warn("manifest.name", "name '" + name + "' is not PascalCase (MyMod); Thunderstore shows underscores as spaces.");
+            else if (!PascalRule.IsMatch(name)) report.Warn("manifest.name", "name '" + name + "' is not PascalCase (MyMod).");
             else report.Pass("manifest.name", "name '" + name + "' is PascalCase.");
 
             manifestVersion = Str(m, "version_number");
@@ -221,7 +219,7 @@ internal static class PublishChecker
             description = Str(m, "description");
             CheckDescription(description, side, requiresProgenitor, report);
 
-            CheckDependencies(m, main?.Facts, requiresProgenitor, report);
+            CheckDependencies(m, requiresProgenitor, report);
         }
 
         // ---- icon -------------------------------------------------------------------------------
@@ -229,7 +227,7 @@ internal static class PublishChecker
         if (icon != null)
         {
             if (!TryPngSize(icon, out int w, out int h)) report.Fail("icon", "icon.png is not a PNG.");
-            else if (w != 256 || h != 256) report.Fail("icon", "icon.png is " + w + "x" + h + "; Thunderstore requires exactly 256x256.");
+            else if (w != 256 || h != 256) report.Fail("icon", "icon.png is " + w + "x" + h + "; the Progenitor Index requires exactly 256x256.");
             else report.Pass("icon", "icon.png is a 256x256 PNG.");
         }
 
@@ -462,7 +460,7 @@ internal static class PublishChecker
     private static void CheckDescription(string description, string? side, bool requiresProgenitor, PublishReport report)
     {
         if (description.Length > MaxDescriptionChars)
-            report.Fail("manifest.description", "description is " + description.Length + " characters; Thunderstore allows " + MaxDescriptionChars + ".");
+            report.Fail("manifest.description", "description is " + description.Length + " characters; the Progenitor Index allows " + MaxDescriptionChars + ".");
         else report.Pass("manifest.description", "description is " + description.Length + " characters.");
 
         string? label = SideLabels.Values.FirstOrDefault(l =>
@@ -481,44 +479,28 @@ internal static class PublishChecker
             report.Warn("manifest.wording", "description says \"" + avoid.Value + "\". Progenitor does not endorse mods; avoid official, verified and approved.");
     }
 
-    private static void CheckDependencies(JsonElement manifest, ImageFacts? facts, bool requiresProgenitor, PublishReport report)
+    private static void CheckDependencies(JsonElement manifest, bool requiresProgenitor, PublishReport report)
     {
         var deps = new List<string>();
         if (manifest.TryGetProperty("dependencies", out var d) && d.ValueKind == JsonValueKind.Array)
             foreach (var x in d.EnumerateArray()) if (x.ValueKind == JsonValueKind.String) deps.Add(x.GetString() ?? "");
 
         var bad = deps.Where(x => !DependencyRule.IsMatch(x)).ToList();
-        if (bad.Count > 0) report.Fail("deps.format", "Dependencies must read Team-Package-1.2.3: " + string.Join(", ", bad) + ".");
+        if (bad.Count > 0) report.Fail("deps.format", "Dependencies must read Owner-Package-1.2.3: " + string.Join(", ", bad) + ".");
 
         if (deps.Any(x => x.StartsWith(BepInExPackPrefix, StringComparison.Ordinal)))
             report.Pass("deps.bepinex", "Depends on BepInExPack_V_Rising.");
         else
             report.Fail("deps.bepinex", "dependencies has no " + BepInExPackPrefix + "<version>.");
 
-        var prog = deps.Select(x => DependencyRule.Match(x)).FirstOrDefault(x => x.Success && x.Groups[2].Value == ProgenitorPackageName);
-        if (prog == null)
-        {
-            if (requiresProgenitor)
-                report.Fail("deps.progenitor", "The DLL needs Progenitor but dependencies has no " + ProgenitorNamespace + "-" + ProgenitorPackageName + "-<version>.");
-            return;
-        }
-
-        if (!string.Equals(prog.Groups[1].Value, ProgenitorNamespace, StringComparison.Ordinal))
-            report.Warn("deps.progenitor", "Depends on " + prog.Value + "; Progenitor is published as " + ProgenitorNamespace + "-" + ProgenitorPackageName + ".");
-        else
-            report.Pass("deps.progenitor", "Depends on " + prog.Value + ".");
-
-        var compiled = facts?.ProgenitorReference;
-        if (compiled == null || !Version.TryParse(prog.Groups[3].Value, out var declared)) return;
-        var core = new Version(compiled.Major, compiled.Minor, Math.Max(compiled.Build, 0));
-        if (declared > core)
-            report.Warn("deps.progenitor-version", "Depends on Progenitor " + declared + " but was compiled against Progenitor Core " + core
-                + ". Depend on the oldest release that provides the APIs you use; a release whose Core did not change keeps the older Core version.");
-        else if (declared < core)
-            report.Warn("deps.progenitor-version", "Depends on Progenitor " + declared + " but was compiled against Progenitor Core " + core
-                + ". Make sure every Progenitor API you call exists in " + declared + ", or raise the dependency.");
-        else
-            report.Pass("deps.progenitor-version", "The Progenitor dependency matches the Core it was compiled against (" + core + ").");
+        // Progenitor is not a package on Thunderstore or the Progenitor Index: players install it from its GitHub releases,
+        // and the README's requirement block says how. A dependency on any *-Progenitor-* package can never resolve.
+        var prog = deps.Where(x => DependencyRule.Match(x) is { Success: true } m && m.Groups[2].Value == ProgenitorPackageName).ToList();
+        if (prog.Count > 0)
+            report.Fail("deps.progenitor", "Remove " + string.Join(", ", prog) + " from dependencies: Progenitor is not a package on Thunderstore "
+                + "or the Progenitor Index. Players install it from its GitHub releases; the README's requirement block tells them how.");
+        else if (requiresProgenitor)
+            report.Pass("deps.progenitor", "No Progenitor package dependency; the README tells players to install Progenitor from GitHub.");
     }
 
     private static void CheckForbiddenFiles(IReadOnlyDictionary<string, byte[]> files, PublishReport report)
