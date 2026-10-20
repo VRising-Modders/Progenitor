@@ -335,6 +335,39 @@ public sealed class InstallScriptTests
     }
 
     [Fact]
+    public void Install_clears_a_waiting_removal_request_and_keeps_the_record_the_zip_carries()
+    {
+        string shell = Shells().FirstOrDefault()!;
+        if (shell == null) return;
+        using var fx = new Fixture();
+        string game = fx.Game("VRising.exe");
+        string bep = Path.Combine(game, "BepInEx");
+        var first = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", fx.Package(PackageVersion), "-OfflineBepInEx", fx.BepInExPack());
+        Assert.True(first.Exit == 0, first.Output);
+
+        // "Remove Progenitor" was requested in the Mods menu: left in place, the next start would remove the new install.
+        File.WriteAllText(Path.Combine(bep, "progenitor-uninstall.json"), "{\"schema\":1,\"files\":[\"plugins/Progenitor.Bootstrap.dll\"]}");
+        File.WriteAllText(Path.Combine(bep, "progenitor-uninstall.done"), "done");
+        var dry = Run(shell, "install.ps1", null, "-GamePath", game, "-WhatIf", "-OfflinePackage", fx.Package(NewerVersion));
+        Assert.True(dry.Exit == 0, dry.Output);
+        Assert.Contains("BepInEx/progenitor-uninstall.json", dry.Output, StringComparison.Ordinal);
+        Assert.True(File.Exists(Path.Combine(bep, "progenitor-uninstall.json")));
+
+        var r = Run(shell, "install.ps1", null, "-GamePath", game, "-OfflinePackage", fx.Package(NewerVersion, record: true));
+        Assert.True(r.Exit == 0, r.Output);
+        Assert.Contains("Cleared:     the Mods menu removal request (progenitor-uninstall.json)", r.Output, StringComparison.Ordinal);
+        Assert.Contains("Cleared:     the Mods menu removal request (progenitor-uninstall.done)", r.Output, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(bep, "progenitor-uninstall.json")));
+        Assert.False(File.Exists(Path.Combine(bep, "progenitor-uninstall.done")));
+        string backup = Assert.Single(Directory.GetDirectories(Path.Combine(bep, "progenitor-backups"), "install-*"));
+        Assert.True(File.Exists(Path.Combine(backup, "BepInEx", "progenitor-uninstall.json")));
+        Assert.True(File.Exists(Path.Combine(backup, "BepInEx", "progenitor-uninstall.done")));
+
+        // The zip's own record is installed as it is.
+        Assert.Equal(Fixture.ZipRecord(NewerVersion), File.ReadAllText(Path.Combine(bep, "progenitor-self-install.json")));
+    }
+
+    [Fact]
     public void Install_refuses_while_a_process_runs_from_the_target_folder()
     {
         string shell = Shells().FirstOrDefault()!;
@@ -609,7 +642,11 @@ public sealed class InstallScriptTests
 
         /// <summary>A release zip with the manual-install layout, and a SHA256SUMS beside it.</summary>
         /// <param name="coreVersion">The version Core reports (default: <paramref name="version"/>); null for a Core with no version.</param>
-        public string Package(string version, string table = "client-1.json", bool dev = false, string? extra = null, string? coreVersion = "")
+        /// <summary>The self-install record a release zip carries (as tools/package.ps1 writes it), for a test package.</summary>
+        public static string ZipRecord(string version) =>
+            "{\"schema\":1,\"package\":\"VRising_Modders-Progenitor\",\"version\":\"" + version + "\",\"source\":\"package\"}";
+
+        public string Package(string version, string table = "client-1.json", bool dev = false, string? extra = null, string? coreVersion = "", bool record = false)
         {
             string dir = Path.Combine(Root, "pkg" + (_n++));
             Directory.CreateDirectory(dir);
@@ -626,6 +663,7 @@ public sealed class InstallScriptTests
                 }
                 Add(z, "BepInEx/progenitor-core/addresslib/" + table, "{}");
                 Add(z, "BepInEx/progenitor-core/docs/guide/progenitor-guide.html", "<html></html>");
+                if (record) Add(z, "BepInEx/progenitor-self-install.json", ZipRecord(version));
                 if (dev) Add(z, "BepInEx/progenitor-reload/Progenitor.Dev.dll", "dev");
                 if (extra != null) Add(z, extra, "extra");
             }

@@ -691,7 +691,10 @@ function Invoke-PgInstall {
       foreach ($u in @('plugins/Progenitor.Bootstrap.dll', 'patchers/Progenitor.Preloader.dll', 'progenitor-core/Progenitor.dll', 'progenitor-core/addresslib', 'progenitor-core/docs', 'progenitor-self-install.json')) { $units.Add($u) }
     }
     foreach ($u in @('plugins/Progenitor.Bootstrap.dll.next', 'plugins/Progenitor.Bootstrap.dll.prev', 'progenitor-core/Progenitor.dll.next')) { $units.Add($u) }
-    $replace = @($units | Where-Object { Test-Path -LiteralPath (Join-Path $bep ($_ -replace '/', '\')) })
+    # A waiting "Remove Progenitor" request from the Mods menu would remove this install at the next start.
+    foreach ($u in @('progenitor-uninstall.json', 'progenitor-uninstall.done')) { $units.Add($u) }
+    $cleared = @(@('progenitor-uninstall.json', 'progenitor-uninstall.done') | Where-Object { Test-Path -LiteralPath (Join-Path $bep $_) })
+    $replace =@($units | Where-Object { Test-Path -LiteralPath (Join-Path $bep ($_ -replace '/', '\')) })
     $bepOverwrite = @()
     if ($bepFiles) {
       $bepOverwrite = @($bepFiles | Where-Object { ($_.Rel -notlike 'BepInEx/config/*') -and (Test-Path -LiteralPath (Join-Path $game ($_.Rel -replace '/', '\')) -PathType Leaf) } | ForEach-Object { $_.Rel })
@@ -829,6 +832,7 @@ function Invoke-PgInstall {
     else { Write-PgLine '  Backup:      none needed (nothing was replaced)' }
     if ($pruned -gt 0) { Write-PgLine ('               removed ' + $pruned + ' older install backups; the last ' + $PgKeepInstallBackups + ' are kept') }
     if ($recordNote) { Write-PgLine ('  Note:        ' + $recordNote) 'Yellow' }
+    foreach ($c in $cleared) { Write-PgLine ('  Cleared:     the Mods menu removal request (' + $c + '), moved to the backup') }
     if ($keptConfig -gt 0) { Write-PgLine ('  Settings:    kept your ' + $keptConfig + ' existing BepInEx settings files') }
     foreach ($o in $others) { Write-PgLine ("  Note:        another copy of Progenitor's files is at $o. Remove it with uninstall.ps1 or by hand if Progenitor loads twice.") 'Yellow' }
     if ($target.Side -eq 'server') { Write-PgLine 'Next: start the server. The first start with BepInEx is slow while it prepares its files.' 'Cyan' }
