@@ -10,7 +10,7 @@ namespace Progenitor.Install;
 /// <summary>
 /// Mod compatibility C4 (docs/mod-compatibility.md, Exact applies to Progenitor itself): a server under <b>Exact version for
 /// all</b> holds players to its own Progenitor build. The join screens' <b>Use Progenitor X</b> places that build for the
-/// server: from a kept copy with its sha256 (no download), else the release from the Thunderstore index (downloaded, and
+/// server: from a kept copy with its sha256 (no download), else the release from the signed release list (downloaded, and
 /// refused unless its Core is the server's sha256). It is put in place at the title screen through the self-update path:
 /// <list type="bullet">
 /// <item>a Core whose protocol the running Bootstrap accepts is swapped in place (the running Bootstrap stays: only Core is
@@ -288,6 +288,11 @@ internal static partial class SelfUpdates
             {
                 Prepared(request, new SelfImage { Error = ProgenitorExact.NoteNotListed(req.Version) }, "");
             }
+            else if (release.CoreSha.Length > 0 && !string.Equals(release.CoreSha, req.Sha, StringComparison.OrdinalIgnoreCase))
+            {
+                // The release list names the release's Core: another build is known not to be the server's, with no download.
+                Prepared(request, new SelfImage { Error = "Progenitor " + req.Version + " from the release list is not this server's build (its Core differs); tell the server's admin" }, "");
+            }
             else
             {
                 request.Package = release.Package;
@@ -303,9 +308,10 @@ internal static partial class SelfUpdates
                     SelfImage image;
                     if (t.Status != TaskStatus.RanToCompletion) image = new SelfImage { Error = "download: " + (t.Exception?.GetBaseException().Message ?? "failed") };
                     else if (t.Result.Bytes == null) image = new SelfImage { Error = "download: " + (t.Result.Error.Length > 0 ? t.Result.Error : "failed") };
+                    else if (SelfFeed.CheckDownload(release, t.Result.Bytes) is { Length: > 0 } bad) image = new SelfImage { Error = "download: " + bad };
                     else image = SelfImageReader.Read(t.Result.Bytes);
                     if (token.IsCancellationRequested) return;
-                    PostMain(() => Prepared(request, image, "thunderstore"));
+                    PostMain(() => Prepared(request, image, "release"));
                 }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             }
         }
@@ -333,7 +339,7 @@ internal static partial class SelfUpdates
         string error = "";
         if (image == null || !image.Ok) error = image?.Error is { Length: > 0 } e ? e : "the build could not be read";
         else if (!string.Equals(image.CoreSha, request.Requirement.Sha, StringComparison.OrdinalIgnoreCase))
-            error = "Progenitor " + request.Requirement.Version + " " + (from == "thunderstore" ? "on Thunderstore" : "kept here") + " is not this server's build (its Core differs); tell the server's admin";
+            error = "Progenitor " + request.Requirement.Version + " " + (from == "release" ? "from the release list" : "kept here") + " is not this server's build (its Core differs); tell the server's admin";
         lock (Gate)
         {
             if (!ReferenceEquals(_place, request)) return;
@@ -562,7 +568,7 @@ internal static partial class SelfUpdates
             CoreSha = image.CoreSha,
             BootstrapSha = image.BootstrapSha,
             Protocol = image.CoreProtocol,
-            Source = "thunderstore",
+            Source = SelfFeed.KeptSource,
         }, image.Core, image.Bootstrap, image.Tables, out string newError);
         if (newDir.Length == 0) return "failed: the build could not be kept (" + newError + "); nothing was changed";
 

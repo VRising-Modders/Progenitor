@@ -1,0 +1,1 @@
+{"schema":1,"algorithm":"ECDSA P-256 + SHA-256","signatures":[{"key":"273b9c0cc0421cac","signature":"b8e10f5a55ed70230a505a5da0a0858daeddff977415e2963496bbcd96f4b0533a42bd1cbeb1a0829b711d66ad00f32c5ba72c1b93d358f43402da781d96480a"}]}

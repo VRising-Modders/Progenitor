@@ -106,14 +106,12 @@ public sealed class ProgenitorPlacementTests : IDisposable
     }
 
     private static SelfRelease Listing(string version) =>
-        new() { Package = "Progenitor-Progenitor", Version = version, DownloadUrl = "https://thunderstore.io/package/download/Progenitor/Progenitor/" + version + "/" };
+        new() { Package = SelfFeed.Package, Version = version, DownloadUrl = SelfFeedKit.AssetUrl(version) };
 
+    /// <summary>The signed release list names these releases, with the size and sha256 of the package the test serves now.</summary>
     private void Index(params SelfRelease[] releases)
     {
-        string index = Path.Combine(_root, "index.json");
-        var rows = string.Join(",", releases.Select(r => "{\"version_number\":\"" + r.Version + "\",\"download_url\":\"" + r.DownloadUrl + "\",\"file_size\":0}"));
-        File.WriteAllText(index, "[{\"name\":\"Progenitor\",\"full_name\":\"Progenitor-Progenitor\",\"owner\":\"Progenitor\",\"versions\":[" + rows + "]}]");
-        SelfUpdates.IndexPathProbe = () => index;
+        SelfFeedKit.Write(_root, releases, _download);
         SelfUpdates.Detect("test");
     }
 
@@ -220,12 +218,14 @@ public sealed class ProgenitorPlacementTests : IDisposable
 
         // Another build under the same release number: refused before anything is written.
         _download = SelfUpdateTests.Zip(SelfUpdateTests.CoreImage(5, Server + ".0", "someone else"), SelfUpdateTests.BootImage(5, Server + ".0"), Server);
+        Index(Listing(Server));
         Assert.False(SelfUpdates.Place(req, ServerName, out string refused));
         Assert.Contains("is not this server's build (its Core differs)", refused);
         Assert.Null(SelfPlacedStore.Read(_root));
         Assert.Equal("", SelfUpdates.PlacementHold());
 
         _download = SelfUpdateTests.Zip(core, SelfUpdateTests.BootImage(5, Server + ".0", "server"), Server);
+        Index(Listing(Server));
         Assert.True(SelfUpdates.Place(req, ServerName, out string ok), ok);
         Assert.StartsWith("placement: swap scheduled", SelfUpdates.Tick());
         Assert.True(File.Exists(SelfPaths.CoreNext(_root)));
@@ -239,8 +239,8 @@ public sealed class ProgenitorPlacementTests : IDisposable
     {
         RunningMine();
         var (core, req) = ServerBuild(protocol: 6);
-        Index(Listing(Server));
         _download = SelfUpdateTests.Zip(core, SelfUpdateTests.BootImage(6, Server + ".0", "server"), Server);
+        Index(Listing(Server));
         Assert.True(SelfUpdates.Place(req, ServerName, out _));
         Assert.StartsWith("placement: staged", SelfUpdates.Tick());
         Assert.True(File.Exists(Path.Combine(_root, "plugins", SelfPaths.BootstrapFile) + SelfPaths.NextSuffix));
@@ -279,6 +279,7 @@ public sealed class ProgenitorPlacementTests : IDisposable
         // In a world: queued until the title screen.
         RunningMine();
         _download = SelfUpdateTests.Zip(serverCore, SelfUpdateTests.BootImage(5, Server + ".0"), Server);
+        Index(Listing(Server));
         _window = "in a world";
         Assert.True(SelfUpdates.Place(req, ServerName, out string queued));
         Assert.Equal(ProgenitorExact.Queued(Server, atTitle: false), queued);

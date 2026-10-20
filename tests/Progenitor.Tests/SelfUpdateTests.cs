@@ -174,7 +174,7 @@ public sealed class SelfUpdateTests : IDisposable
     }
 
     private static SelfRelease Release(string version, long size = 0) =>
-        new() { Package = "Progenitor-Progenitor", Version = version, DownloadUrl = "https://thunderstore.io/package/download/Progenitor/Progenitor/" + version + "/", Size = size };
+        new() { Package = SelfFeed.Package, Version = version, DownloadUrl = SelfFeedKit.AssetUrl(version), Size = size };
 
     /// <summary>Put a running copy in place: its Core and Bootstrap files, and the facts naming them.</summary>
     private (byte[] Core, byte[] Boot) Running(string version, bool record = true)
@@ -312,18 +312,18 @@ public sealed class SelfUpdateTests : IDisposable
     }
 
     [Fact]
-    public void The_index_lists_only_Progenitor_s_own_package()
+    public void The_release_list_names_each_release_and_an_inactive_one_is_read_as_such()
     {
-        string json = "[{\"name\":\"Progenitor\",\"full_name\":\"Progenitor-Progenitor\",\"owner\":\"Progenitor\",\"is_deprecated\":false,"
-            + "\"versions\":[{\"version_number\":\"2026.10.14\",\"download_url\":\"https://x/1\",\"file_size\":123,\"is_active\":true},"
-            + "{\"version_number\":\"2026.10.13\",\"download_url\":\"https://x/0\",\"file_size\":100,\"is_active\":false}]},"
-            + "{\"name\":\"ProgenitorExtras\",\"full_name\":\"Someone-ProgenitorExtras\",\"owner\":\"Someone\",\"versions\":[{\"version_number\":\"9.9.9\"}]}]";
-        var list = SelfIndex.Parse(json);
+        string json = "{\"schema\":1,\"package\":\"" + SelfFeed.Package + "\",\"releases\":["
+            + "{\"version\":\"2026.10.14\",\"url\":\"" + SelfFeedKit.AssetUrl("2026.10.14") + "\",\"size\":123,\"sha256\":\"" + new string('a', 64) + "\"},"
+            + "{\"version\":\"2026.10.13\",\"url\":\"" + SelfFeedKit.AssetUrl("2026.10.13") + "\",\"size\":100,\"sha256\":\"" + new string('b', 64) + "\",\"active\":false}]}";
+        var list = SelfFeed.Parse(json, out string error);
+        Assert.Equal("", error);
         Assert.Equal(2, list.Count);
-        Assert.All(list, r => Assert.Equal("Progenitor-Progenitor", r.Package));
+        Assert.All(list, r => Assert.Equal(SelfFeed.Package, r.Package));
         Assert.Equal(123, list[0].Size);
         Assert.False(list[1].Active);
-        Assert.Empty(SelfIndex.Parse("not json"));
+        Assert.Empty(SelfFeed.Parse("not json", out _));
     }
 
     [Fact]
@@ -452,12 +452,10 @@ public sealed class SelfUpdateTests : IDisposable
 
     // ---- applying -------------------------------------------------------------------------------------
 
+    /// <summary>The signed release list names these releases (each with the size and sha256 of the package the test serves).</summary>
     private void Offer(params SelfRelease[] releases)
     {
-        string index = Path.Combine(_root, "index.json");
-        var rows = string.Join(",", releases.Select(r => "{\"version_number\":\"" + r.Version + "\",\"download_url\":\"" + r.DownloadUrl + "\",\"file_size\":" + r.Size + "}"));
-        File.WriteAllText(index, "[{\"name\":\"Progenitor\",\"full_name\":\"Progenitor-Progenitor\",\"owner\":\"Progenitor\",\"versions\":[" + rows + "]}]");
-        SelfUpdates.IndexPathProbe = () => index;
+        SelfFeedKit.Write(_root, releases, _download);
         SelfUpdates.Detect("test");
     }
 

@@ -18,6 +18,11 @@ packaging/out/
 *.token
 progenitor-dev.enable
 progenitor-operator.key
+# Progenitor's release-list signing keys (tools/release-feed/release-feed.mjs keygen; docs/releasing.md). Only the public
+# halves are tracked, in src/Progenitor.Core/Install/SelfFeedKeys.cs.
+progenitor-release*.key
+*.pem
+*.p8
 
 # Dev-loop artifacts that belong to a game tree, never to the repo or a release zip
 # (docs/dev-loop.md, "Deploy audit 2026-09-06"):

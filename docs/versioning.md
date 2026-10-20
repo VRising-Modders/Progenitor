@@ -56,6 +56,7 @@ A direct commit on main therefore produces a second build under an existing vers
 | Progenitor handshake and mod manifest rows (`ctx.Version`, `[NetworkCompatibility]`) | `2026.9.12` | `2026.9.12` |
 | Thunderstore `version_number` (repository version) | `2026.9.12` | `2026.9.12` (never upload) |
 | Package zip name (repository version) | `Progenitor-2026.9.12.zip` | `Progenitor-2026.9.12.3.zip` |
+| Self-install record in the manual zip (`BepInEx/progenitor-self-install.json`, repository version) and the release list's `version` | `2026.9.12` | `2026.9.12.3` in the record; never added to the release list |
 | Catalog HTTP user agent (Core's version) | `Progenitor/2026.9.12` | `Progenitor/2026.9.12.3` |
 
 `<sha>` is the component's last change: the newest branch commit touching its inputs, otherwise the main-line commit that set its release. `.dirty` means an input had uncommitted changes.

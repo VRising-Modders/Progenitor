@@ -30,7 +30,7 @@ internal sealed class ProgenitorRequirement
 /// C4, server side: whether this server holds clients to its own Progenitor build now, and why not when it does not.
 /// Exact applies to Progenitor only while the server's own Core is obtainable by a client (design: "no client is ever
 /// stuck"): a release (no sub-release), named by the self-install record Progenitor wrote when it installed itself, and
-/// listed active on the Thunderstore index this server reads.
+/// listed active in Progenitor's signed release list (<see cref="Progenitor.Install.SelfFeed"/>) this server reads.
 /// </summary>
 internal sealed class ProgenitorExactStatus
 {
@@ -181,7 +181,7 @@ internal static class ProgenitorExact
 
         if (release.Length == 0)
         {
-            s.Why = running + " was not installed from Thunderstore by Progenitor, so players could not get the same build";
+            s.Why = running + " has no install record from a published release, so players could not get the same build";
             return s;
         }
 
@@ -194,7 +194,7 @@ internal static class ProgenitorExact
 
         if (releases == null || releases.Count == 0)
         {
-            s.Why = "this server has not read the Thunderstore index yet, so it cannot tell whether " + release + " is published";
+            s.Why = "this server has not read Progenitor's release list yet, so it cannot tell whether " + release + " is published";
             return s;
         }
 
@@ -202,12 +202,13 @@ internal static class ProgenitorExact
         {
             if (r == null || !r.Active) continue;
             if (!string.Equals(r.Version, release, StringComparison.OrdinalIgnoreCase)) continue;
-            if (package.Length > 0 && r.Package.Length > 0 && !string.Equals(r.Package, package, StringComparison.OrdinalIgnoreCase)) continue;
+            // A record from an older package id (a Thunderstore listing) still names the same Progenitor.
+            if (!Progenitor.Install.SelfFeed.SamePackage(r.Package, package)) continue;
             s.Obtainable = true;
             return s;
         }
 
-        s.Why = release + " is not published on Thunderstore";
+        s.Why = release + " is not in Progenitor's release list";
         return s;
     }
 
@@ -312,7 +313,7 @@ internal static class ProgenitorExact
         /// <summary>The version store keeps a copy with the server's sha256: no download.</summary>
         Kept = 1,
 
-        /// <summary>The index lists the server's release: downloaded, then checked against the server's sha256.</summary>
+        /// <summary>The release list names the server's release: downloaded from GitHub, then checked against the server's sha256.</summary>
         Thunderstore = 2,
     }
 
@@ -333,7 +334,7 @@ internal static class ProgenitorExact
 
     public const string NoteDevelopment = "this is a development build of Progenitor; it is never swapped for a server";
     public const string NoteKept = "kept, no download";
-    public const string NoteThunderstore = "from Thunderstore";
+    public const string NoteThunderstore = "from GitHub";
     public const string NotePlacing = "being put in place for this server";
 
     public static string NoteModManager(string version) =>
@@ -341,7 +342,7 @@ internal static class ProgenitorExact
 
     public const string NoteChanged = "Progenitor's files changed since Progenitor installed them; it cannot swap them";
 
-    public static string NoteNotListed(string version) => "Progenitor " + version + " is not on Thunderstore here";
+    public static string NoteNotListed(string version) => "Progenitor " + version + " is not in the release list here";
 
     /// <summary>The row for <paramref name="req"/> against this client's own Core (pure).</summary>
     public static RowFacts Decide(ProgenitorRequirement req, ClientFacts? own)

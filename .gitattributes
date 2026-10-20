@@ -5,3 +5,6 @@
 *.dll binary
 # Message fixtures (mod compatibility C5): payload bytes, never line-ending normalized.
 *.bin binary
+# Progenitor's release list: its signature covers the exact bytes, so they are never line-ending normalized.
+docs/updates/** -text
+tests/Progenitor.Tests/Fixtures/self-feed/** -text

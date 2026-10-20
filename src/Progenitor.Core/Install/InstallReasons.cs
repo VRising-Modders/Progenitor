@@ -30,6 +30,7 @@ internal static class InstallReasons
     public const string FetchCancelled = "the download was canceled";
     public const string FetchRedirectBound = "the redirect chain exceeded the bound";
     public const string FetchRedirectInsecure = "a redirect to a non-HTTPS URL was refused";
+    public const string FetchRedirectHost = "a redirect to a host this download may not use was refused";
     public const string FetchTooManyRetries = "the server kept returning an error; stopped retrying to avoid a flood";
     public const string FetchRateLimited = "the server returned 429 Too Many Requests";
     public const string FetchServerError = "the server returned a 5xx error";
