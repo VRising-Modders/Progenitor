@@ -161,63 +161,70 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     /// <summary>
     /// The game's own shared storage at the standing plot: every container on that castle that carries
     /// <c>CastleSharedInventory</c> (discovery only; the game's own aggregate on the heart is never read
-    /// or written), listed by <see cref="ListShared"/> and kept per plot for <see cref="SharedListRefreshMs"/>;
-    /// the caller reads the contents fresh.
+    /// or written), from the server-wide shared-storage index (<see cref="StepSharedIndex"/>), which is
+    /// rebuilt a few containers per frame every <see cref="SharedIndexRefreshMs"/>; the caller reads the
+    /// contents fresh. Nothing while no index of this world load is built yet (see <see cref="SharedIndexReady"/>).
     /// </summary>
     public void VanillaSharedInventories(in MaterialContext context, ICollection<InventoryRef> into)
     {
         int territory = context.StandingTerritory;
         if (territory < 0) return;
-        long now = Environment.TickCount64;
-        int epoch = Epoch;
-        if (!_shared.TryGetValue(territory, out var cached) || cached.Epoch != epoch || now - cached.Stamp >= SharedListRefreshMs)
-        {
-            var list = new List<InventoryRef>();
-            var castle = CastleAt(territory);
-            if (castle != null) ListShared(castle.Heart.ToEntity(), list);
-            cached = (epoch, now, list);
-            _shared[territory] = cached;
-        }
-        foreach (var inv in cached.List) into.Add(inv);
+        var castle = CastleAt(territory);
+        if (castle == null) return;
+        if (!_sharedIndex.TryGet(Epoch, castle.Heart.ToEntity(), out var list)) return;
+        foreach (var inv in list) into.Add(inv);
     }
 
     /// <summary>
-    /// How long a plot's shared-storage list is kept (the contents are always read fresh): one refresh,
-    /// so the operations and players of one refresh share one listing.
+    /// How old the shared-storage index may get before a rebuild starts (a newly placed or removed
+    /// shared container reaches a view's discovery within about this long; contents are always read fresh).
+    /// Listing every shared container server-wide for each refresh cost 14 to 100 ms on a 147-castle world.
     /// </summary>
-    internal const long SharedListRefreshMs = 1_000;
+    internal const long SharedIndexRefreshMs = 10_000;
+
+    /// <summary>An index of this world load exists, so views may be computed.</summary>
+    internal bool SharedIndexReady => _sharedIndex.Ready(Epoch);
+
+    /// <summary>Containers the rebuild in progress has not looked at yet.</summary>
+    internal int SharedIndexRemaining => _sharedIndex.Remaining;
 
     /// <summary>
-    /// The placed shared-storage containers of one castle: a query of only the tile models that carry
-    /// <c>CastleSharedInventory</c> and a heart connection (a few hundred server-wide, not every castle
-    /// building), kept when connected to <paramref name="heart"/> (the connection read through the
-    /// existing guarded raw reader) and holding an inventory. Hearts are left out, as the castle's
-    /// container rows leave them out. Sorted by entity, so an unchanged castle lists the same order.
+    /// Advance the shared-storage index under <paramref name="budget"/>: start a rebuild when due (one query
+    /// of only the tile models that carry <c>CastleSharedInventory</c> and a heart connection), then look at
+    /// containers until the budget is used up. Each kept container is connected to a heart (read through the
+    /// existing guarded raw reader) and holds an inventory; hearts are left out, as the castle's container
+    /// rows leave them out. Each castle's list is sorted by entity, so an unchanged castle lists the same order.
     /// </summary>
-    private static void ListShared(Entity heart, List<InventoryRef> into)
+    internal void StepSharedIndex(Progenitor.Perf.FrameBudget budget)
     {
-        if (heart == Entity.Null) return;
-        var em = Em;
-        var rows = Query.Entities(em, includeDisabled: true, includeSystems: false,
-            ComponentIndex.Of<TileModel>(ComponentType.AccessMode.ReadOnly),
-            ComponentIndex.Of<CastleSharedInventory>(ComponentType.AccessMode.ReadOnly),
-            ComponentIndex.Of<CastleHeartConnection>(ComponentType.AccessMode.ReadOnly));
-        var found = new List<Entity>();
-        foreach (var e in rows)
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return;
+        int epoch = Epoch;
+        long now = Environment.TickCount64;
+        if (_sharedIndex.Due(epoch, now, SharedIndexRefreshMs))
         {
-            try
-            {
-                if (e.Has<CastleHeart>(em) || !UnityInventoryBackend.HasInventory(em, e)) continue;
-                if (Servants.ServantRuntime.HeartOf(em, e) != heart) continue;
-                found.Add(e);
-            }
-            catch { /* unreadable entity: not listed */ }
+            var rows = Query.Entities(world.EntityManager, includeDisabled: true, includeSystems: false,
+                ComponentIndex.Of<TileModel>(ComponentType.AccessMode.ReadOnly),
+                ComponentIndex.Of<CastleSharedInventory>(ComponentType.AccessMode.ReadOnly),
+                ComponentIndex.Of<CastleHeartConnection>(ComponentType.AccessMode.ReadOnly));
+            _sharedIndex.Begin(rows, epoch, now);
+            if (budget.Exhausted) return;
         }
-        found.Sort((a, b) => a.Index != b.Index ? a.Index.CompareTo(b.Index) : a.Version.CompareTo(b.Version));
-        foreach (var e in found) into.Add(InventoryRef.For(e, 0));
+        if (_sharedIndex.Building) _sharedIndex.Step(budget);
     }
 
-    private readonly Dictionary<int, (int Epoch, long Stamp, List<InventoryRef> List)> _shared = new();
+    private static (bool, Entity, InventoryRef) ClassifyShared(Entity e)
+    {
+        var em = Em;
+        if (!e.Exists(em) || e.Has<CastleHeart>(em) || !UnityInventoryBackend.HasInventory(em, e)) return (false, Entity.Null, InventoryRef.None);
+        var heart = Servants.ServantRuntime.HeartOf(em, e);
+        return heart == Entity.Null ? (false, Entity.Null, InventoryRef.None) : (true, heart, InventoryRef.For(e, 0));
+    }
+
+    private static int CompareByEntity(InventoryRef a, InventoryRef b) =>
+        a.OwnerIndex != b.OwnerIndex ? a.OwnerIndex.CompareTo(b.OwnerIndex) : a.OwnerVersion.CompareTo(b.OwnerVersion);
+
+    private readonly Progenitor.Perf.IncrementalGrouping<Entity, Entity, InventoryRef> _sharedIndex = new(ClassifyShared, CompareByEntity);
 
     private InventorySlot[] _slots = new InventorySlot[64];
 
@@ -283,13 +290,8 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
             var em = Em;
             var heart = HeartTargetOf(em, new Entity { Index = character.Index, Version = character.Version });
             if (heart == Entity.Null || MaterialNet.Of(em, heart) != heartNet) return CastleRelation.None;
-            var key = CastleId.From(heart);
-            ICastleHandle? castle = null;
-            RefreshCastles();
-            for (int i = 0; i < _castles.Count; i++)
-                if (_castles[i].Heart.Equals(key)) { castle = _castles[i]; break; }
-            if (castle == null) return CastleRelation.None;
-            castle = castle.Refresh();
+            // One plot read of this heart, fresh (ownership can change): not a listing of every castle.
+            var castle = Castles.Castles.ForHeart(CastleId.From(heart));
             if (!castle.Enabled) return CastleRelation.None;
             var userEntity = new Entity { Index = user.Index, Version = user.Version };
             if (!userEntity.Exists(em) || !userEntity.Has<User>(em)) return CastleRelation.None;

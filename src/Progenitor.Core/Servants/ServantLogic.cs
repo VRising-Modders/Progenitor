@@ -223,6 +223,26 @@ internal static class ServantLogic
     internal static bool IsDue(MissionRow row, long nowTicks, long slackTicks, bool timersDisabled) =>
         timersDisabled || CompletionTicks(row.StartTicks, row.LengthSeconds) <= nowTicks + slackTicks;
 
+    /// <summary>The earliest completion (UTC ticks) among <paramref name="rows"/>; <see cref="long.MaxValue"/> when there are none.</summary>
+    internal static long EarliestCompletion(IEnumerable<MissionRow> rows)
+    {
+        long earliest = long.MaxValue;
+        foreach (var r in rows) earliest = Math.Min(earliest, CompletionTicks(r.StartTicks, r.LengthSeconds));
+        return earliest;
+    }
+
+    /// <summary>
+    /// Whether any hunt may finish on the next update, given the earliest completion read with the heart
+    /// list: <see cref="IsDue"/> for that row (<see cref="long.MinValue"/>, unknown, always may).
+    /// </summary>
+    internal static bool AnyDueBy(long earliestCompletionTicks, long nowTicks, long slackTicks, bool timersDisabled) =>
+        timersDisabled || earliestCompletionTicks == long.MinValue
+        || (earliestCompletionTicks != long.MaxValue && earliestCompletionTicks <= nowTicks + slackTicks);
+
+    /// <summary>A cached heart territory still answers: a known territory always, "no castle" only for <paramref name="retryTicks"/>.</summary>
+    internal static bool TerritoryCacheHit(int territory, long cachedTicks, long nowTicks, long retryTicks) =>
+        territory >= 0 || nowTicks - cachedTicks < retryTicks;
+
     /// <summary>
     /// The start ticks that make a hunt of <paramref name="lengthSeconds"/> due one second before
     /// <paramref name="nowTicks"/>: written into a row's <c>MissionStartTimeTicks</c>, the game finishes

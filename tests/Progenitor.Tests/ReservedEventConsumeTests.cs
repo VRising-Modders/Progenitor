@@ -188,10 +188,10 @@ public class ReservedEventConsumeTests
     [Fact]
     public void The_server_send_loop_uses_the_capability_decision()
     {
-        string body = SourcePin.MethodBody(MaterialSeamSource(), "private static bool PushPlayers(");
+        string body = SourcePin.MethodBody(MaterialSeamSource(), "private static bool CollectItems(");
         SourcePin.AssertStatement(body, "var caps = Handshake.CapsOf(userIndex);");
         SourcePin.AssertStatementExactly(body, "if (!MaterialClientPolicy.ReadsViews(caps)) continue;");
-        SourcePin.AssertStatementExactly(body, "if (MaterialClientPolicy.ReadByPeer(op, caps))");
+        SourcePin.AssertStatementExactly(body, "if (!MaterialClientPolicy.ReadByPeer(op, caps)) continue;");
     }
 
     [Fact]

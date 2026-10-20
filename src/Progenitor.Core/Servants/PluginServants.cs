@@ -29,7 +29,9 @@ public sealed class PluginServants
     /// <summary>
     /// The servants a throne of this castle lists, in the game's order and with the state the
     /// throne shows. <paramref name="throneOrHeart"/> is the heart, the throne or anything else
-    /// connected to the heart. Empty when it is none of those.
+    /// connected to the heart. Empty when it is none of those. The server's coffin list behind it is
+    /// taken at most once a second, so a coffin placed or removed within the last second may be missing
+    /// or still listed; each listed coffin and its servant are read when you call.
     /// </summary>
     public IReadOnlyList<ServantInfo> List(Entity throneOrHeart) => ServantRuntime.List(World(nameof(List)), throneOrHeart);
 

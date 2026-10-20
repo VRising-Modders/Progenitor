@@ -474,8 +474,9 @@ internal static class UiFrameCost
             counts.Add(_otherCount);
         }
 
+        // Budgeted, deferrable work per subsystem (Progenitor.Perf.FrameWork): per-frame cost and work carried over.
         return FormatSummary(windowMs, _frames, _hitches, Median(Intervals, _samples, Scratch), _maxIntervalMs, _outsideOnly,
-            _maxWorstName, _maxWorstMs, totals, counts);
+            _maxWorstName, _maxWorstMs, totals, counts) + Progenitor.Perf.FrameWork.Format();
     }
 
     private static void ResetWindow(long nowMs)
@@ -492,6 +493,7 @@ internal static class UiFrameCost
         _otherTotalMs = 0;
         _otherCount = 0;
         _outsideOnly = 0;
+        Progenitor.Perf.FrameWork.ResetWindow();
     }
 
     private static void Write(string line, bool console)

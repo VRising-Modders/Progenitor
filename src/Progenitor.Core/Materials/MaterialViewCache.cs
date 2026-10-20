@@ -101,6 +101,12 @@ internal sealed class MaterialStockReads : IMaterialLedger<InventoryRef>
         _trackIds = null;
     }
 
+    /// <summary>Forget one inventory's read: the next <see cref="Stock"/> reads it from the world again.</summary>
+    internal void Forget(InventoryRef inventory) => _stock.Remove(inventory);
+
+    /// <summary>Forget one container id's resolution: the next <see cref="TryResolve"/> resolves it again.</summary>
+    internal void Forget(ContainerId id) => _resolved.Remove(id);
+
     /// <summary>Record every inventory read and id resolved from now until <see cref="EndTrack"/>.</summary>
     internal void BeginTrack(HashSet<InventoryRef> stock, Dictionary<ContainerId, InventoryRef> ids)
     {

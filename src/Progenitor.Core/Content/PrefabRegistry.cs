@@ -2130,17 +2130,46 @@ public static unsafe class PrefabRegistry
 
     private static void StopRefreshSettle()
     {
+        _settleHashes = null;
         if (RefreshSettle.Stop())
             Plugin.Frame -= OnRefreshSettleFrame;
     }
+
+    /// <summary>
+    /// The most the live-refresh settle spends in one frame; the prefabs left wait for the next frame
+    /// (a hot load settling every prefab at once took 85 ms in one frame).
+    /// </summary>
+    internal const double SettleBudgetMs = 4;
+
+    private const string SettleWork = "prefabSettle";
+
+    // The settle in progress: the noted prefabs read when the window closed, and how far it got.
+    private static int[]? _settleHashes;
+    private static int _settleCursor;
 
     private static void OnRefreshSettleFrame()
     {
         try
         {
-            if (!RefreshSettle.Tick()) return;
+            if (_settleHashes == null)
+            {
+                if (!RefreshSettle.Tick()) return;
+                _settleHashes = RefreshDecisions.PendingGuids();
+                _settleCursor = 0;
+            }
+            else if (RefreshSettle.Remaining > 0)
+            {
+                // A new apply re-armed the window mid-settle: settle after its last phase, with everything
+                // still noted (the prefabs not reached yet stay noted).
+                _settleHashes = null;
+                return;
+            }
+            if (!SettleLiveRefresh()) return;
+            _settleHashes = null;
+            // A note taken while settling re-armed the window: that settle runs the apply pass instead.
+            if (RefreshSettle.Remaining > 0) return;
             StopRefreshSettle();
-            SettleLiveRefresh();
+            SettleApplyPassAndDropUnclaimed();
         }
         catch (Exception e)
         {
@@ -2153,58 +2182,66 @@ public static unsafe class PrefabRegistry
     /// One decision per noted prefab, taken once this generation's editors are registered:
     /// compute the fingerprint, compare it with the last recorded one, record it, and let
     /// <c>AfterCloneChanged</c> log exactly one <c>refreshed</c> or
-    /// <c>refresh skipped: definition unchanged</c> line.
+    /// <c>refresh skipped: definition unchanged</c> line. Runs under <see cref="SettleBudgetMs"/> per
+    /// frame (at least one prefab); false when prefabs are left for the next frame.
     /// </summary>
-    private static void SettleLiveRefresh()
+    private static bool SettleLiveRefresh()
     {
-        var hashes = RefreshDecisions.PendingGuids();
-        if (hashes.Length == 0)
-        {
-            SettleApplyPassAndDropUnclaimed();
-            return;
-        }
+        var hashes = _settleHashes ?? Array.Empty<int>();
+        if (_settleCursor >= hashes.Length) return true;
         var world = TargetWorld();
-        for (int i = 0; i < hashes.Length; i++)
+        var budget = new Progenitor.Perf.FrameBudget(SettleBudgetMs);
+        int first = _settleCursor;
+        while (_settleCursor < hashes.Length)
         {
-            int guidHash = hashes[i];
-            try
+            if (_settleCursor > first && budget.Exhausted)
             {
-                PrefabDefinition? def = null;
-                lock (Gate)
-                {
-                    for (int e = 0; e < Entries.Count; e++)
-                    {
-                        if (Entries[e].Definition.Guid.GuidHash != guidHash) continue;
-                        def = Entries[e].Definition;
-                        break;
-                    }
-                }
-                if (def == null)
-                {
-                    // Unregistered between the note and the settle: drop it, keep no stale row.
-                    RefreshDecisions.TrySettle(guidHash, null, out _);
-                    continue;
-                }
-                string currentFp = DefinitionFingerprint(def);
-                if (!RefreshDecisions.TrySettle(guidHash, currentFp, out var decision)) continue;
-                PrefabLiveRefresh.RememberFingerprint(guidHash, currentFp);
-                if (world == null || !world.IsCreated) continue;
-                PrefabLiveRefreshApply.AfterCloneChanged(
-                    world, def,
-                    decision.AlreadyClonedThisProcess,
-                    decision.DefinitionChanged,
-                    decision.Retargeted,
-                    decision.EditPassChangedClone,
-                    decision.PreviousFingerprintMissing);
+                Progenitor.Perf.FrameWork.Note(SettleWork, budget.ElapsedTicks, hashes.Length - _settleCursor);
+                return false;
             }
-            catch (Exception e)
-            {
-                RefreshDecisions.TrySettle(guidHash, null, out _);
-                Plugin.Logger?.LogError($"PrefabRegistry: live-refresh settle of guid {guidHash} threw: {e}");
-            }
+            SettleOne(hashes[_settleCursor++], world);
         }
+        Progenitor.Perf.FrameWork.Note(SettleWork, budget.ElapsedTicks, 0);
+        return true;
+    }
 
-        SettleApplyPassAndDropUnclaimed();
+    private static void SettleOne(int guidHash, World? world)
+    {
+        try
+        {
+            PrefabDefinition? def = null;
+            lock (Gate)
+            {
+                for (int e = 0; e < Entries.Count; e++)
+                {
+                    if (Entries[e].Definition.Guid.GuidHash != guidHash) continue;
+                    def = Entries[e].Definition;
+                    break;
+                }
+            }
+            if (def == null)
+            {
+                // Unregistered between the note and the settle: drop it, keep no stale row.
+                RefreshDecisions.TrySettle(guidHash, null, out _);
+                return;
+            }
+            string currentFp = DefinitionFingerprint(def);
+            if (!RefreshDecisions.TrySettle(guidHash, currentFp, out var decision)) return;
+            PrefabLiveRefresh.RememberFingerprint(guidHash, currentFp);
+            if (world == null || !world.IsCreated) return;
+            PrefabLiveRefreshApply.AfterCloneChanged(
+                world, def,
+                decision.AlreadyClonedThisProcess,
+                decision.DefinitionChanged,
+                decision.Retargeted,
+                decision.EditPassChangedClone,
+                decision.PreviousFingerprintMissing);
+        }
+        catch (Exception e)
+        {
+            RefreshDecisions.TrySettle(guidHash, null, out _);
+            Plugin.Logger?.LogError($"PrefabRegistry: live-refresh settle of guid {guidHash} threw: {e}");
+        }
     }
 
     /// <summary>
