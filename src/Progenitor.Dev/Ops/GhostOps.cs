@@ -154,7 +154,7 @@ public static unsafe class GhostOps
             var ghost = em.CreateEntity();
             try
             {
-                WriteUserRaw(em, ghost, template, index, platformId, name, admin);
+                WriteUserRaw(em, ghost, template, index, platformId, name, admin, connected: true);
             }
             catch (Exception e)
             {
@@ -319,7 +319,7 @@ public static unsafe class GhostOps
     /// SetComponentDataRaw at the FieldOffsets above.
     /// Live: TypeSize reads 0 through this interop; Marshal.SizeOf is 168.
     /// </summary>
-    private static void WriteUserRaw(EntityManager em, Entity ghost, Entity template, int index, ulong platformId, string name, bool admin)
+    private static void WriteUserRaw(EntityManager em, Entity ghost, Entity template, int index, ulong platformId, string name, bool admin, bool connected)
     {
         var userType = ComponentIndex.Of<User>(ComponentType.AccessMode.ReadWrite);
         var typeIndex = ComponentIndex.IndexOf<User>();
@@ -355,7 +355,7 @@ public static unsafe class GhostOps
         buf[OffAfkKickWarningSent] = 0;
         buf[OffIsBot] = 1;
         buf[OffIsAdmin] = admin ? (byte)1 : (byte)0;
-        buf[OffIsConnected] = 1;
+        buf[OffIsConnected] = connected ? (byte)1 : (byte)0;
         if (size > OffFirstTimeConnected) buf[OffFirstTimeConnected] = 0;
 
         ghost.Add<User>(em);
@@ -488,7 +488,39 @@ public static unsafe class GhostOps
         return false;
     }
 
-    private static bool TryDestroyGhostEntity(EntityManager em, Entity entity)
+    /// <summary>
+    /// <c>stress_populate</c> owner: the same User write as <c>ghost create</c> (template blob
+    /// from a real user, patched at the offsets above), but <c>IsConnected</c> false, no
+    /// <see cref="ConnectedUser"/>, and not tracked here, so Dev unload and <c>ghost destroy</c>
+    /// leave it (its PlatformId is outside the ghost band). Read back through the typed accessor;
+    /// rolled back on any failure. The User write path is the live-verified ghost one; an
+    /// offline-flagged synthetic user kept across autosave and reload is not live-verified.
+    /// </summary>
+    internal static Entity CreateOfflineUser(EntityManager em, int index, ulong platformId, string name, out User readback)
+    {
+        TryFindTemplate(em, out var template, out _);
+        var entity = em.CreateEntity();
+        try
+        {
+            WriteUserRaw(em, entity, template, index, platformId, name, admin: false, connected: false);
+            readback = em.GetComponentData<User>(entity);
+        }
+        catch
+        {
+            try { if (em.Exists(entity)) em.DestroyEntity(entity); } catch { /* best-effort rollback */ }
+            throw;
+        }
+        if (readback.PlatformId != platformId || readback.Index != index || readback.IsConnected)
+        {
+            try { if (em.Exists(entity)) em.DestroyEntity(entity); } catch { /* best-effort rollback */ }
+            throw new InvalidOperationException(
+                $"read-back mismatch for '{name}': index {readback.Index}, platformId {readback.PlatformId}, connected {readback.IsConnected}");
+        }
+        return entity;
+    }
+
+    /// <summary>Destroy a synthetic user and its character, if it has one (ghost and stress owners).</summary>
+    internal static bool TryDestroyGhostEntity(EntityManager em, Entity entity)
     {
         try
         {
@@ -530,7 +562,7 @@ public static unsafe class GhostOps
             User u;
             try { u = em.GetComponentData<User>(e); }
             catch { continue; }
-            if (IsGhostPlatformId(u.PlatformId)) continue;
+            if (IsGhostPlatformId(u.PlatformId) || StressIdentity.IsStressPlatformId(u.PlatformId)) continue;
             string n = SafeName(u);
             if (u.IsConnected)
             {
