@@ -371,14 +371,22 @@ window.HELP = {
 <li>Download <a href="https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/">BepInExPack_V_Rising</a> (<strong>Download</strong>, not Install with App) and extract it outside the game folder.</li>
 <li>Copy everything inside its <code>BepInExPack_V_Rising</code> folder (<code>BepInEx</code>, <code>dotnet</code>, <code>winhttp.dll</code>, <code>doorstop_config.ini</code> and the rest) into the game folder, next to <code>VRising.exe</code>.</li>
 <li>Start the game once. A [[bepinex|BepInEx]] console opens; the first start is slow while it generates its files.</li></ol>
-<p>Already have BepInEx? Skip to the next page.</p>` },
+<p>Already have BepInEx, or using the installer on the next page? Skip to the next page.</p>` },
         { id: "install", title: "Install Progenitor",
-          html: `<ol><li>Quit the game.</li>
-<li>Download <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases">release page</a>.</li>
-<li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
+          html: `<p>Two ways. Both give you the latest release.</p>
+<p><strong>1. Download the zip</strong></p>
+<ol><li>Install BepInEx (previous page), then quit the game.</li>
+<li>Open the <a href="https://github.com/VRising-Modders/Progenitor/releases/latest">latest release</a> and, under <strong>Assets</strong>, download <code>Progenitor-&lt;version&gt;.zip</code> (not the <code>-thunderstore</code> zip or the source code).</li>
+<li>Right-click the zip &rsaquo; <strong>Extract All</strong>, and pick the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>. Its <code>BepInEx</code> folder joins the one already there; when Windows asks, replace the files.</li>
 <li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
-<p>Progenitor updates itself from GitHub from then on, at the title screen. See <a href="#menu/updates">Updates</a>.</p>
-<p>To update by hand, extract the new zip the same way and let it replace the files. It never changes BepInEx's own files or settings.</p>` },
+<p><strong>2. The installer</strong></p>
+<ol><li>Quit the game.</li>
+<li>Open <strong>PowerShell</strong> from the Start menu, paste this line and press Enter:</li></ol>{{code}}
+<p>It finds V Rising through Steam, installs BepInEx if it's missing or broken, installs Progenitor and tells you what it did. Files it replaces go to <code>BepInEx\\progenitor-backups</code> first. Then start the game.</p>
+<p>The script is public; read it first at <a href="https://vrising-modders.github.io/Progenitor/install.ps1">vrising-modders.github.io/Progenitor/install.ps1</a>. Saved it instead? Run <code>powershell -ExecutionPolicy Bypass -File install.ps1</code> in the folder you saved it to. Game in a folder Steam doesn't know? Add <code>-GamePath "D:\\Games\\VRising"</code> to that line.</p>
+<p>A working BepInEx stays as it is. When the installer repairs a broken one, the files it replaces go to the same backup; your BepInEx settings are always kept.</p>
+<p>Either way, Progenitor updates itself from GitHub from then on, at the title screen. See <a href="#menu/updates">Updates</a>. To update by hand, do either one again.</p>`,
+          code: { lang: "powershell", text: `irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex` } },
         { id: "open", title: "Open the Mods menu", shot: { src: "img/players-open-title.webp", alt: "The V Rising title screen with Mods above Continue", caption: "<strong>Mods</strong> on the title screen." },
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
 <p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
@@ -717,7 +725,10 @@ window.HELP = {
           html: `<ol><li><strong>Mods &rsaquo; Progenitor &rsaquo; Private games &rsaquo; Remove Progenitor from this PC &rsaquo; Uninstall</strong>, and confirm.</li>
 <li>The page shows <strong>Removal requested</strong>.</li>
 <li>The next time you start the game, Progenitor removes itself and every mod it installed. BepInEx stays.</li></ol>
-<p>Changed your mind? <strong>Cancel the removal</strong> (<strong>Keep Progenitor</strong>) before you restart.</p>` }
+<p>Changed your mind? <strong>Cancel the removal</strong> (<strong>Keep Progenitor</strong>) before you restart.</p>
+<p>Game won't start, or no Mods menu? Quit the game, open <strong>PowerShell</strong> and run the remover instead:</p>{{code}}
+<p>It moves Progenitor's files, its settings, the mods it installed and every mod in its <code>progenitor-reload</code> folder (also ones you copied there yourself) to <code>BepInEx\\progenitor-backups</code>. Your saves and BepInEx stay. Read it first at <a href="https://vrising-modders.github.io/Progenitor/uninstall.ps1">vrising-modders.github.io/Progenitor/uninstall.ps1</a>.</p>`,
+          code: { lang: "powershell", text: `irm https://vrising-modders.github.io/Progenitor/uninstall.ps1 | iex` } }
       ]
     },
 
@@ -726,9 +737,12 @@ window.HELP = {
       id: "admins", role: "admins", title: "Getting Started", pages: [
         { id: "install", title: "Install on a server",
           html: `<ol><li>Copy everything inside <code>BepInExPack_V_Rising</code> into the server folder, next to <code>VRisingServer.exe</code>.</li>
-<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server. Progenitor then tells you about its own updates from GitHub (<a href="#admins/mods/updates">Server updates</a>); to update by hand, extract the new zip the same way.</li>
+<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases/latest">latest release</a> into the same folder. It is one package for client and server. Progenitor then tells you about its own updates from GitHub (<a href="#admins/mods/updates">Server updates</a>); to update by hand, extract the new zip the same way.</li>
 <li>Start the server once; the first start is slow while BepInEx generates its files.</li></ol>
+<p>Or stop the server, open <strong>PowerShell</strong>, paste this line and press Enter. It does both steps in the server Steam installed:</p>{{code}}
+<p>Server somewhere else? Add <code>-GamePath "D:\\Servers\\VRising"</code> (your server's folder) to the end of that line.</p>
 <p>A private game hosted from a client loads the client's mods; no separate install.</p>`,
+          code: { lang: "powershell", text: `& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server` },
           callout: { title: "Never on a public server", warn: true, text: "Don't put <code>Progenitor.Dev.dll</code> (the [[dev-bridge|dev bridge]]) on a public server. Release packages don't include it." } },
         { id: "admins", title: "Who is an admin",
           html: `<ul><li>Players on the server's admin list, or authenticated with <code>adminauth</code>.</li>

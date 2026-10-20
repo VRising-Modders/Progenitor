@@ -576,7 +576,7 @@ try {
         $website = 'https://example.com/progenitor-sample'
         $readmeExtra = @"
 
-> **Requires Progenitor.** This mod is built on [Progenitor](https://thunderstore.io/c/v-rising/p/VRising_Modders/Progenitor/), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
+> **Requires Progenitor.** This mod is built on [Progenitor](https://github.com/VRising-Modders/Progenitor), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
 "@
         if ($PublishFlaws) {
             $description = "The $Sample sample with deliberate packaging faults."

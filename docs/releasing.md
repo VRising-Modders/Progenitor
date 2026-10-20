@@ -51,7 +51,7 @@ After the switch, open the Security tab once as an outside reader would and conf
    git push origin v<version>
    ```
 
-5. Create the GitHub release from the tag with the changelog (`packaging/thunderstore/CHANGELOG.md`) and attach `Progenitor-<version>.zip` (the manual install players download), `Progenitor-<version>-thunderstore.zip` and `SHA256SUMS`. The manual zip carries `BepInEx/progenitor-self-install.json` (written by `tools/package.ps1`), so an unmodified extract updates itself from its first start; check it is in the file list.
+5. Create the GitHub release from the tag with the changelog (`packaging/thunderstore/CHANGELOG.md`) and attach `Progenitor-<version>.zip` (the manual install players download), `Progenitor-<version>-thunderstore.zip` and `SHA256SUMS`. The manual zip carries `BepInEx/progenitor-self-install.json` (written by `tools/package.ps1`), so an unmodified extract updates itself from its first start; check it is in the file list. Mark it the latest release: the install scripts fall back to it ([section 5](#5-the-install-scripts)).
 6. Add the release to Progenitor's release list and push it ([section 4](#4-the-release-list)). Installed copies learn about the release only from that list.
 7. Thunderstore does not host Progenitor (it declined in October 2026); Progenitor ships from GitHub Releases. The Thunderstore-layout zip stays attached to the release for players whose mod manager installs from a file.
 8. Publish `Progenitor-<version>.zip` (the manual install) on Nexus Mods with the page fields, description and images in [packaging/nexus](../packaging/nexus/README.md). Open every link in the page first; the Help section points at the online Help Guide and the video guides on YouTube, which must already be up.
@@ -74,7 +74,7 @@ Installed copies of Progenitor update themselves from a signed list of releases,
 3. If the workflow below should sign, give it the key through a GitHub Environment, not a repository secret. Nothing in this repository creates these:
    1. Settings › Environments › **New environment** `release-feed`. Create it, with these rules, before adding the secret: a workflow that names a missing environment creates it unprotected. Under **Deployment branches and tags** allow the branch `main` and the tag pattern `v*` (a published release runs on its tag); under **Required reviewers** add a maintainer, so every signing run waits for an approval.
    2. In that environment add the secret **`PROGENITOR_RELEASE_KEY`** with the private key's text (and `PROGENITOR_RELEASE_KEY_NEXT` only while a key is rolled). The workflow passes it only to its signing step.
-   3. Settings › Actions › General › **Workflow permissions**: turn on **Allow GitHub Actions to create and approve pull requests**, so the workflow can open its pull request.
+   3. The VRising-Modders organization does not allow GitHub Actions to create pull requests (Settings › Actions › General › **Workflow permissions**), so the workflow pushes its branch and a maintainer opens the pull request (below).
 4. Seed the list: `docs/updates/releases.json` already names 2026.10.162, read from its published asset (`Progenitor-2026.10.162.zip`, sha256 `40bb2aaada1e55643c1e1768129be661e24a2fb2d4deaae6dd2be55ec241b183`, 15,304,177 bytes), and was signed when the key was made (key fingerprint `9f4ee3fdde3a75a2`, 2026-10-20). To seed a new list: `node tools/release-feed/release-feed.mjs sign --key <key file>`, then `verify`, and commit both files.
 
 To roll the key: `keygen --slot next` writes the new public key into `Next`; ship a release with it; sign with both keys (`--key old --key new`, or `PROGENITOR_RELEASE_KEY` and `PROGENITOR_RELEASE_KEY_NEXT`); once most installs run a Core that has it, move it to `Current` and empty `Next`.
@@ -97,7 +97,29 @@ To roll the key: `keygen --slot next` writes the new public key into `Next`; shi
 
 `sign` moves the list's `updated` time forward every time it signs, and `add` signs. A copy of Progenitor never takes a list signed earlier than the one it already has, so an old list served again cannot hide a release; it also means the list on main must always be the latest one signed.
 
-The **release-feed** workflow (`.github/workflows/release-feed.yml`) does steps 3 and 4 when a release is published (never for a prerelease; a manual run names its tag), and opens the pull request for step 5. It runs in the `release-feed` environment, one run at a time, with its actions pinned by commit. It fails at its first step until the environment's `PROGENITOR_RELEASE_KEY` secret exists; until then run the steps by hand.
+The **release-feed** workflow (`.github/workflows/release-feed.yml`) does steps 3 and 4 when a release is published (never for a prerelease; a manual run names its tag), and pushes the branch `release-feed/<tag>`. Its last step, opening the pull request, fails because the VRising-Modders organization blocks GitHub Actions from creating pull requests; the maintainer opens the pull request for that branch (`gh pr create --base main --head release-feed/<tag>`), then does step 5. It runs in the `release-feed` environment, one run at a time, with its actions pinned by commit. It fails at its first step until the environment's `PROGENITOR_RELEASE_KEY` secret exists; until then run the steps by hand.
 
 - A pull request opened with `GITHUB_TOKEN` does not start the **tests** workflow. Re-run the checks (or push an empty commit to the branch as the maintainer) before merging.
 - If two release-list pull requests are open and one merges first, the other conflicts. Rebase it on main taking main's `releases.json` and `releases.json.sig`, then run `add` for its release again (which signs), so the list and its signature cover both releases. Never merge the two lists by hand: that breaks the signature.
+
+## 5. The install scripts
+
+`docs/install.ps1` and `docs/uninstall.ps1` are served by GitHub Pages at `https://vrising-modders.github.io/Progenitor/install.ps1` and `.../uninstall.ps1`; the README, the Help Guide and the mod template's README tell players to run them. A change merged to `main` is live for every player at once, so review script changes like code that ships.
+
+The scripts always install the latest release. **Nothing changes per release** as long as the assets keep their names:
+
+- The installer reads the signed release list ([section 4](#4-the-release-list), `https://vrising-modders.github.io/Progenitor/updates/releases.json`) and installs its newest active `release` entry, checking the entry's `size`, `sha256` and `coreSha256`. It does not check the list's signature itself; the list comes over HTTPS from the project's own site, and Progenitor checks the signature before it updates itself. When the list cannot be read, it reads `https://github.com/VRising-Modders/Progenitor/releases/latest/download/SHA256SUMS`, takes the version and sha256 from the `Progenitor-<version>.zip` row, and downloads that zip from the same `latest/download/` address. A release without that zip or that row breaks the fallback.
+- BepInEx is a pinned, reviewed `BepInExPack_V_Rising` version (`$PgBepInExVersion` and `$PgBepInExSha256` near the top of `docs/install.ps1`), downloaded from `https://thunderstore.io/package/download/BepInEx/BepInExPack_V_Rising/<version>/` and checked by sha256. The newest pack is used only with `-LatestBepInEx` (`PROGENITOR_LATEST_BEPINEX=1`), checked for completeness only.
+- The scripts never use the GitHub API or raw.githubusercontent.com; `InstallScriptTests` enforces the allowed hosts.
+
+The manual zip carries `BepInEx/progenitor-self-install.json` (written by `tools/package.ps1`), and the installer extracts it as is. For an older zip without one it writes the record itself from the installed Bootstrap and Core (`"source": "installer"`). The record's `version` is the release version that the release list or `SHA256SUMS` names for that exact zip (checked by sha256). Core's own product version (without `+<revision>`) is the release of Core's last change and can be older (2026.10.162 ships a Core that reports 2026.10.161), so it is used only for a zip nothing checks; with neither, no record is written. When the release list names a `coreSha256`, the installed Core must match it or the install is undone.
+
+**Moving to a newer BepInEx pack.** Only after the new pack has been tried with Progenitor on a client and a server:
+
+1. Download `https://thunderstore.io/package/download/BepInEx/BepInExPack_V_Rising/<version>/` and take its sha256 (`Get-FileHash <zip> -Algorithm SHA256`).
+2. Set `$PgBepInExVersion` and `$PgBepInExSha256` in `docs/install.ps1`, and the matching names in `InstallScriptTests` if a test names the version.
+3. Run `InstallScriptTests` and, once, the opt-in network test (`PROGENITOR_INSTALL_NETWORK_TEST=1`), which downloads the pinned pack and checks its sha256.
+
+After publishing a release, check the installer sees it once the release list on main names it: `powershell -ExecutionPolicy Bypass -File docs/install.ps1 -WhatIf -GamePath <empty folder holding a file named VRising.exe>` names the new version.
+
+**Status.** Game-free tested: `InstallScriptTests` runs both scripts in Windows PowerShell 5.1 and PowerShell 7 (whichever are installed; CI has both) against temporary fake game folders with local fixture zips. The opt-in `Network_install_of_the_latest_release_into_a_fake_folder` (`PROGENITOR_INSTALL_NETWORK_TEST=1`) downloads the real release and BepInEx pack into a fake folder; it passed in Windows PowerShell 5.1 on 2026-10-20 against 2026.10.162. Neither script has been run against a real game install.

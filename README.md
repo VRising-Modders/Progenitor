@@ -24,16 +24,62 @@ For mod authors:
 
 ## Install (players)
 
-You need [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/) first. Progenitor never ships or changes BepInEx's files.
+Progenitor ships from [GitHub releases](https://github.com/VRising-Modders/Progenitor/releases/latest). It needs [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/); the installer adds it when it is missing. The release zip never changes BepInEx's own files. The [Help Guide](https://vrising-modders.github.io/Progenitor/guide/progenitor-guide.html#players/install) walks through both ways.
 
-1. Quit the game (or stop the server).
-2. Download `Progenitor-<version>.zip` from the [release page](https://github.com/VRising-Modders/Progenitor/releases). There is nothing to download until the first release is out.
-3. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the one that holds `VRisingServer.exe`). Let it replace files when you update.
-4. Start the game. **Mods** appears on the title screen: install and update other mods there, change their settings and remap their keys.
+**The installer.** Quit the game, open PowerShell and run:
+
+```powershell
+irm https://vrising-modders.github.io/Progenitor/install.ps1 | iex
+```
+
+It finds V Rising through Steam, refuses while the game runs, installs BepInEx when it is missing or incomplete (a pinned, reviewed BepInExPack_V_Rising checked by sha256; files a repair replaces go to the backup, and BepInEx settings are always kept), checks the Progenitor download against its published sha256 and installs the latest Progenitor. Files it replaces are moved to `BepInEx/progenitor-backups/install-<time>/` first, and a failure part way puts them back. Run it again to update or repair. The script is public; read it first at <https://vrising-modders.github.io/Progenitor/install.ps1>.
+
+For a dedicated server, stop the server and use this line instead:
+
+```powershell
+& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -Server
+```
+
+Options work with that scriptblock form, for example a game folder Steam doesn't know:
+
+```powershell
+& ([scriptblock]::Create((irm https://vrising-modders.github.io/Progenitor/install.ps1))) -GamePath "D:\Games\VRising"
+```
+
+or on a downloaded copy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Server -GamePath "D:\Servers\VRising"
+```
+
+| Option | What it does |
+|---|---|
+| `-GamePath <folder>` | The folder that holds `VRising.exe` or `VRisingServer.exe`, when it is not where Steam installed it. |
+| `-Server` | The dedicated server: Steam's **V Rising Dedicated Server**, or `-GamePath`. |
+| `-WhatIf` | Print the plan and change nothing. |
+| `-OfflinePackage <zip>`, `-OfflineBepInEx <zip>` | Install from zips you already downloaded. A `SHA256SUMS` beside the Progenitor zip is checked. |
+| `-LatestBepInEx` | Install the newest BepInExPack_V_Rising on Thunderstore instead of the pinned, reviewed version (checked for completeness only). |
+| `-Force` | Go on when a V Rising process is running whose folder Windows does not name (only when it runs from another folder). |
+
+`irm … | iex` cannot pass options; set them as environment variables first instead: `$env:PROGENITOR_GAME_PATH = "D:\Games\VRising"`, `PROGENITOR_SERVER=1`, `PROGENITOR_WHATIF=1`, `PROGENITOR_FORCE=1`, `PROGENITOR_OFFLINE_PACKAGE`, `PROGENITOR_OFFLINE_BEPINEX`, `PROGENITOR_LATEST_BEPINEX=1`, `PROGENITOR_STEAM_PATH`, `PROGENITOR_FEED_URL`. The installer keeps the last three install backups.
+
+**By hand.**
+
+1. Install BepInExPack_V_Rising: copy everything inside its `BepInExPack_V_Rising` folder into the folder that holds `VRising.exe`, then start the game once.
+2. Quit the game (or stop the server).
+3. Download `Progenitor-<version>.zip` from the [latest release](https://github.com/VRising-Modders/Progenitor/releases/latest) (not the `-thunderstore` zip).
+4. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the one that holds `VRisingServer.exe`). Let it replace files when you update.
+5. Start the game. **Mods** appears on the title screen: install and update other mods there, change their settings and remap their keys.
 
 The same zip works for the game and for a dedicated server. It adds `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll`, the `BepInEx/progenitor-core/` folder and `BepInEx/progenitor-self-install.json`, the record that lets Progenitor update itself from GitHub releases ([auto-update](docs/auto-update.md#release-list-github)). Each release also carries a mod-manager layout, `Progenitor-<version>-thunderstore.zip`: it packs the `progenitor-core` folder as `BepInEx/patchers/progenitor-files.zip`, which the preloader unpacks at the first start, because mod managers only place files in `plugins` and `patchers`. A copy installed that way tells you about new versions instead of updating itself.
 
-To remove it, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed. The menu removal leaves the small preloader in `BepInEx/patchers`; you can delete it while the game is closed.
+**Removing it.** Use **Remove Progenitor from this PC** in the Mods menu (it leaves the small preloader in `BepInEx/patchers`, which you can delete while the game is closed), or quit the game and run the remover:
+
+```powershell
+irm https://vrising-modders.github.io/Progenitor/uninstall.ps1 | iex
+```
+
+It moves Progenitor, its settings, the mods it installed and every mod in `BepInEx/progenitor-reload` (also ones copied there by hand) to `BepInEx/progenitor-backups/uninstall-<time>/`, and never touches saves. `-KeepSettings` keeps Progenitor's settings; `-RemoveBepInEx` also removes BepInEx, and every other BepInEx mod stops loading with it. It takes the same `-GamePath`, `-Server` and `-WhatIf` options.
 
 **Never put `Progenitor.Dev.dll` on a public server.** It is the development bridge, and release packages don't include it.
 
